@@ -357,3 +357,46 @@
   0%, 100% { transform: translateZ(34px) translateY(0); }
   50% { transform: translateZ(46px) translateY(-6px); }
 }
+
+/* --- Login hero: tasteful CSS 3D ------------------------------------------ */
+.login-scene {
+  perspective: 1100px;
+}
+.login-card3d {
+  transform-style: preserve-3d;
+  animation: card-drift 9s ease-in-out infinite;
+}
+@keyframes card-drift {
+  0%, 100% { transform: rotateX(1.6deg) rotateY(-2.2deg) translateY(0); }
+  50% { transform: rotateX(-1.2deg) rotateY(2.4deg) translateY(-5px); }
+}
+.login-orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(70px);
+  opacity: 0.5;
+  pointer-events: none;
+  animation: orb-float 14s ease-in-out infinite;
+}
+.login-orb--a {
+  width: 340px; height: 340px;
+  inset-inline-start: -90px; top: -70px;
+  background: radial-gradient(circle, rgb(var(--accent) / 0.55), transparent 70%);
+}
+.login-orb--b {
+  width: 300px; height: 300px;
+  inset-inline-end: -70px; bottom: -60px;
+  background: radial-gradient(circle, rgb(var(--accent-2) / 0.45), transparent 70%);
+  animation-delay: -7s;
+}
+@keyframes orb-float {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(14px, -18px, 0) scale(1.06); }
+}
+.login-logo3d {
+  transform: translateZ(34px);
+  animation: float-soft 6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .login-card3d, .login-orb, .login-logo3d { animation: none; }
+}

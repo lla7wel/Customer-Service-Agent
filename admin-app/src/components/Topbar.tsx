@@ -1,4 +1,5 @@
 import { ShieldCheck, Zap } from 'lucide-react';
+import LogoutButton from './LogoutButton';
 import LanguageSwitcher from './LanguageSwitcher';
 import ThemeToggle from './ThemeToggle';
 import SearchBar from './SearchBar';
@@ -63,6 +64,7 @@ export default function Topbar({
           <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-accent-grad text-[11px] font-bold text-black">
             {(userEmail?.[0] || 'A').toUpperCase()}
           </span>
+          <LogoutButton label={locale === 'ar' ? 'تسجيل الخروج' : 'Sign out'} />
         </div>
       </div>
     </header>
