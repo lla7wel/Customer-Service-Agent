@@ -61,10 +61,10 @@ async function headCount(
   table: string,
   build?: (q: any) => any,
 ): Promise<number> {
-  let q: any = db.from(table).select('id', { count: 'exact', head: true });
+  let q: any = db.selectFrom(table as any);
   if (build) q = build(q);
-  const { count } = await q;
-  return count ?? 0;
+  const row = await q.select((eb: any) => eb.fn.countAll().as('n')).executeTakeFirst();
+  return Number(row?.n ?? 0);
 }
 
 /** Diagnostic counts for the catalog (used by dashboard, price-review, sync). */
@@ -89,24 +89,24 @@ export async function getCatalogStats(): Promise<CatalogStats> {
     importRes,
   ] = await Promise.all([
     headCount(db, 'products'),
-    headCount(db, 'products', (q) => q.eq('source', 'csv')),
-    headCount(db, 'products', (q) => q.eq('status', 'active')),
-    headCount(db, 'products', (q) => q.eq('status', 'active').not('primary_image_id', 'is', null)),
-    headCount(db, 'products', (q) => q.eq('status', 'active').is('primary_image_id', null)),
-    headCount(db, 'products', (q) => q.is('base_price', null)),
-    headCount(db, 'catalog_match_suggestions', (q) => q.eq('state', 'possible')),
-    headCount(db, 'catalog_match_suggestions', (q) => q.eq('state', 'approved')),
-    headCount(db, 'catalog_match_suggestions', (q) => q.eq('state', 'rejected')),
-    headCount(db, 'catalog_match_suggestions', (q) => q.eq('state', 'no_match')),
-    headCount(db, 'catalog_match_suggestions', (q) => q.eq('state', 'needs_review')),
+    headCount(db, 'products', (q) => q.where('source', '=', 'csv')),
+    headCount(db, 'products', (q) => q.where('status', '=', 'active')),
+    headCount(db, 'products', (q) => q.where('status', '=', 'active').where('primary_image_id', 'is not', null)),
+    headCount(db, 'products', (q) => q.where('status', '=', 'active').where('primary_image_id', 'is', null)),
+    headCount(db, 'products', (q) => q.where('base_price', 'is', null)),
+    headCount(db, 'catalog_match_suggestions', (q) => q.where('state', '=', 'possible')),
+    headCount(db, 'catalog_match_suggestions', (q) => q.where('state', '=', 'approved')),
+    headCount(db, 'catalog_match_suggestions', (q) => q.where('state', '=', 'rejected')),
+    headCount(db, 'catalog_match_suggestions', (q) => q.where('state', '=', 'no_match')),
+    headCount(db, 'catalog_match_suggestions', (q) => q.where('state', '=', 'needs_review')),
     headCount(db, 'product_images'),
-    headCount(db, 'product_images', (q) => q.not('storage_path', 'is', null)),
+    headCount(db, 'product_images', (q) => q.where('storage_path', 'is not', null)),
     db
-      .from('product_import_runs')
-      .select('status,source,created_count,updated_count,error_count,started_at,finished_at,source_file')
-      .order('started_at', { ascending: false })
+      .selectFrom('product_import_runs')
+      .select(['status', 'source', 'created_count', 'updated_count', 'error_count', 'started_at', 'finished_at', 'source_file'])
+      .orderBy('started_at', 'desc')
       .limit(1)
-      .maybeSingle(),
+      .executeTakeFirst(),
   ]);
 
   return {
@@ -125,6 +125,6 @@ export async function getCatalogStats(): Promise<CatalogStats> {
     productImages,
     uploadedImages,
     missingUploadedImages: Math.max(0, productImages - uploadedImages),
-    latestImport: (importRes.data as CatalogStats['latestImport']) ?? null,
+    latestImport: (importRes as CatalogStats['latestImport']) ?? null,
   };
 }

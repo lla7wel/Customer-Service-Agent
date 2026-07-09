@@ -4,8 +4,8 @@
  * Called by: components/catalog/CatalogMatch.tsx (reject button).
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { adminClient } from '@integrations/supabase/admin-client';
-import { supabaseStatus } from '@integrations/status';
+import { getDb } from '@integrations/db/client';
+import { databaseStatus } from '@integrations/status';
 
 export const runtime = 'nodejs';
 
@@ -36,10 +36,10 @@ function appendRejection(raw: unknown, scraperProductId: string, reason: string 
 }
 
 export async function POST(req: NextRequest) {
-  const db = adminClient();
+  const db = getDb();
   if (!db) {
     return NextResponse.json(
-      { error: 'integration_not_configured', missing: supabaseStatus().missing.concat('SUPABASE_SERVICE_ROLE_KEY') },
+      { error: 'integration_not_configured', missing: databaseStatus().missing },
       { status: 503 },
     );
   }
@@ -52,44 +52,50 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'invalid_ids' }, { status: 400 });
   }
 
-  const { data: csv, error: csvErr } = await db
-    .from('products')
-    .select('id, source, raw')
-    .eq('id', csvId)
-    .maybeSingle();
-  if (csvErr) return NextResponse.json({ error: csvErr.message }, { status: 500 });
+  const csv = await db
+    .selectFrom('products')
+    .select(['id', 'source', 'raw'])
+    .where('id', '=', csvId)
+    .executeTakeFirst();
   if (!csv) return NextResponse.json({ error: 'csv_not_found' }, { status: 404 });
   if (csv.source !== 'csv') return NextResponse.json({ error: 'target_is_not_csv_product' }, { status: 400 });
 
-  const { error: updateErr } = await db
-    .from('products')
-    .update({ raw: appendRejection(csv.raw, scraperId, reason) })
-    .eq('id', csvId);
-  if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 });
+  try {
+    await db
+      .updateTable('products')
+      .set({ raw: JSON.stringify(appendRejection(csv.raw, scraperId, reason)) })
+      .where('id', '=', csvId).execute();
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message ?? 'update_failed' }, { status: 500 });
+  }
 
   // Persist the rejection in the suggestions table (a later refresh re-evaluates
   // this CSV product and may surface a different candidate).
   await db
-    .from('catalog_match_suggestions')
-    .upsert(
-      {
-        csv_product_id: csvId,
-        scraper_product_id: scraperId,
-        state: 'rejected',
-        reviewed_at: new Date().toISOString(),
-        evidence: { reason },
-      },
-      { onConflict: 'csv_product_id' },
-    );
+    .insertInto('catalog_match_suggestions')
+    .values({
+      csv_product_id: csvId,
+      scraper_product_id: scraperId,
+      state: 'rejected',
+      reviewed_at: new Date().toISOString(),
+      evidence: JSON.stringify({ reason }),
+    })
+    .onConflict((oc) => oc.column('csv_product_id').doUpdateSet({
+      scraper_product_id: (eb) => eb.ref('excluded.scraper_product_id'),
+      state: (eb) => eb.ref('excluded.state'),
+      reviewed_at: (eb) => eb.ref('excluded.reviewed_at'),
+      evidence: (eb) => eb.ref('excluded.evidence'),
+    }))
+    .execute();
 
-  await db.from('activity_logs').insert({
+  await db.insertInto('activity_logs').values({
     actor_type: 'human',
     action: 'catalog_image_match_rejected',
     entity_type: 'product',
     entity_id: csvId,
     summary: `Rejected scraped product ${scraperId} as an image source for CSV product ${csvId}`,
-    meta: { csv_product_id: csvId, scraper_product_id: scraperId, reason },
-  });
+    meta: JSON.stringify({ csv_product_id: csvId, scraper_product_id: scraperId, reason }),
+  }).execute();
 
   return NextResponse.json({ ok: true });
 }

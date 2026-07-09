@@ -6,10 +6,11 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { unstable_noStore as noStore } from 'next/cache';
+import { jsonArrayFrom } from 'kysely/helpers/postgres';
 import { getDb } from '@/lib/supabase/db';
-import { supabaseStatus } from '@integrations/status';
+import { databaseStatus } from '@integrations/status';
 import { countByState } from '@/lib/catalog-match-store';
-import type { CatalogMatchState } from '@integrations/supabase/types';
+import type { CatalogMatchState } from '@integrations/db/rows';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,10 +21,10 @@ const STATES: CatalogMatchState[] = ['possible', 'approved', 'rejected', 'no_mat
 type Db = NonNullable<ReturnType<typeof getDb>>;
 
 async function headCount(db: Db, table: string, build?: (q: any) => any): Promise<number> {
-  let q: any = db.from(table).select('id', { count: 'exact', head: true });
+  let q: any = db.selectFrom(table as any);
   if (build) q = build(q);
-  const { count } = await q;
-  return count ?? 0;
+  const row = await q.select((eb: any) => eb.fn.countAll().as('n')).executeTakeFirst();
+  return Number(row?.n ?? 0);
 }
 
 /**
@@ -33,7 +34,7 @@ async function headCount(db: Db, table: string, build?: (q: any) => any): Promis
  */
 export async function GET(req: NextRequest) {
   noStore();
-  if (!supabaseStatus().configured) {
+  if (!databaseStatus().configured) {
     return NextResponse.json({ error: 'integration_not_configured' }, { status: 503 });
   }
   const db = getDb();
@@ -46,41 +47,58 @@ export async function GET(req: NextRequest) {
 
   // 1) Page of suggestion rows for this state.
   let sugQ: any = db
-    .from('catalog_match_suggestions')
-    .select('id, csv_product_id, scraper_product_id, score, confidence, evidence, state, reviewed_at', { count: 'exact' })
-    .eq('state', state);
+    .selectFrom('catalog_match_suggestions')
+    .select(['id', 'csv_product_id', 'scraper_product_id', 'score', 'confidence', 'evidence', 'state', 'reviewed_at'])
+    .where('state', '=', state);
   if (state === 'possible' && confidence && ['high', 'medium', 'low'].includes(confidence)) {
-    sugQ = sugQ.eq('confidence', confidence);
+    sugQ = sugQ.where('confidence', '=', confidence);
   }
-  const { data: sugs, count, error: sugErr } = await sugQ
-    .order('score', { ascending: false, nullsFirst: false })
-    .order('updated_at', { ascending: false })
-    .range(page * PAGE, page * PAGE + PAGE - 1);
-  if (sugErr) return NextResponse.json({ error: sugErr.message }, { status: 500 });
-
-  const suggestions = (sugs ?? []) as any[];
+  let suggestions: any[];
+  let count = 0;
+  try {
+    suggestions = await sugQ
+      .orderBy('score', (ob: any) => ob.desc().nullsLast())
+      .orderBy('updated_at', 'desc')
+      .limit(PAGE)
+      .offset(page * PAGE)
+      .execute();
+    const countRow = await sugQ.clearSelect().clearOrderBy().select((eb: any) => eb.fn.countAll().as('n')).executeTakeFirst();
+    count = Number(countRow?.n ?? 0);
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message ?? 'query_failed' }, { status: 500 });
+  }
   const csvIds = suggestions.map((s) => s.csv_product_id);
   const scraperIds = suggestions.map((s) => s.scraper_product_id).filter(Boolean) as string[];
 
   // 2) Fetch the CSV products for this page.
   const csvById = new Map<string, any>();
   if (csvIds.length) {
-    const { data: csvRows } = await db
-      .from('products')
-      .select('id, english_name, arabic_name, libyan_display_name, product_code, barcode, category, search_keywords, arabic_keywords, base_price')
-      .in('id', csvIds);
-    for (const p of (csvRows ?? []) as any[]) csvById.set(p.id, p);
+    const csvRows = await db
+      .selectFrom('products')
+      .select(['id', 'english_name', 'arabic_name', 'libyan_display_name', 'product_code', 'barcode', 'category', 'search_keywords', 'arabic_keywords', 'base_price'])
+      .where('id', 'in', csvIds)
+      .execute();
+    for (const p of csvRows as any[]) csvById.set(p.id, p);
   }
 
   // 3) Fetch the suggested scraper products + a primary image (fills backfilled
   //    rows whose evidence lacks image/source_name).
   const scraperById = new Map<string, any>();
   if (scraperIds.length) {
-    const { data: scr } = await db
-      .from('products')
-      .select('id, source_name, product_images!product_images_product_id_fkey(public_url,is_primary,position)')
-      .in('id', scraperIds);
-    for (const p of (scr ?? []) as any[]) {
+    const scr = await db
+      .selectFrom('products')
+      .select(['id', 'source_name'])
+      .select((eb) => [
+        jsonArrayFrom(
+          eb.selectFrom('product_images')
+            .select(['public_url', 'is_primary', 'position'])
+            .whereRef('product_images.product_id', '=', 'products.id')
+            .orderBy('position', 'asc'),
+        ).as('product_images'),
+      ])
+      .where('id', 'in', scraperIds)
+      .execute();
+    for (const p of scr as any[]) {
       const imgs = p.product_images ?? [];
       const primary = imgs.find((i: any) => i.is_primary) ?? imgs.find((i: any) => i.public_url) ?? imgs[0];
       scraperById.set(p.id, { source_name: p.source_name, image: primary?.public_url ?? null, image_count: imgs.length });
@@ -125,14 +143,14 @@ export async function GET(req: NextRequest) {
   const [byState, activeCsvMissingImages, scraperOnlyReviewRemaining] = await Promise.all([
     countByState(db),
     headCount(db, 'products', (q) =>
-      q.eq('source', 'csv').eq('status', 'active').not('base_price', 'is', null).is('primary_image_id', null),
+      q.where('source', '=', 'csv').where('status', '=', 'active').where('base_price', 'is not', null).where('primary_image_id', 'is', null),
     ),
-    headCount(db, 'products', (q) => q.eq('source', 'scraper').neq('status', 'archived').is('base_price', null)),
+    headCount(db, 'products', (q) => q.where('source', '=', 'scraper').where('status', '!=', 'archived').where('base_price', 'is', null)),
   ]);
 
   return NextResponse.json({
     rows,
-    total: count ?? 0,
+    total: count,
     page,
     pageSize: PAGE,
     state,

@@ -4,8 +4,8 @@
  * Called by: components/catalog/CatalogMatch.tsx (approve button).
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { adminClient } from '@integrations/supabase/admin-client';
-import { supabaseStatus } from '@integrations/status';
+import { getDb } from '@integrations/db/client';
+import { databaseStatus } from '@integrations/status';
 import { approveOne } from '@/lib/catalog-approve';
 
 export const runtime = 'nodejs';
@@ -17,10 +17,10 @@ export const runtime = 'nodejs';
  * Shared logic lives in lib/catalog-approve.ts (also used by bulk approve).
  */
 export async function POST(req: NextRequest) {
-  const db = adminClient();
+  const db = getDb();
   if (!db) {
     return NextResponse.json(
-      { error: 'integration_not_configured', missing: supabaseStatus().missing.concat('SUPABASE_SERVICE_ROLE_KEY') },
+      { error: 'integration_not_configured', missing: databaseStatus().missing },
       { status: 503 },
     );
   }

@@ -3,10 +3,10 @@ import { ArrowLeft, Barcode, Hash, Tag, Globe, Package, Languages } from 'lucide
 import { Card, EmptyState, Badge } from '@/components/ui';
 import NotConnected from '@/components/NotConnected';
 import { getT } from '@/lib/i18n/server';
-import { supabaseStatus } from '@integrations/status';
+import { databaseStatus } from '@integrations/status';
 import { fetchOne, fetchRows } from '@/lib/data';
 import { formatPrice, humanize, resolveProductName } from '@/lib/format';
-import type { Product, ProductImage } from '@integrations/supabase/types';
+import type { Product, ProductImage } from '@integrations/db/rows';
 import ProductGallery from '@/components/products/ProductGallery';
 import ProductEditor from '@/components/products/ProductEditor';
 
@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic';
 export default async function ProductDetailPage({ params }: { params: { productId: string } }) {
   const { locale } = getT();
   const ar = locale === 'ar';
-  const status = supabaseStatus();
+  const status = databaseStatus();
 
   if (!status.configured) {
     return (
@@ -28,7 +28,7 @@ export default async function ProductDetailPage({ params }: { params: { productI
 
   const [{ row: product }, images] = await Promise.all([
     fetchOne<Product>('products', params.productId),
-    fetchRows<ProductImage>('product_images', (q) => q.eq('product_id', params.productId).order('position', { ascending: true })),
+    fetchRows<ProductImage>('product_images', (q) => q.where('product_id', '=', params.productId).orderBy('position', 'asc')),
   ]);
 
   if (!product) {

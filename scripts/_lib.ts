@@ -165,7 +165,7 @@ export function mapSourceMetadata(p: ScraperProduct, importRunId: string | null)
     source_name: p.product_name ?? null, // Turkish — reference only
     website_url: p.product_url ?? null,
     import_run_id: importRunId,
-    raw: p as unknown as Record<string, unknown>,
+    raw: JSON.stringify(p), // jsonb — node-pg needs explicit JSON encoding
   };
 }
 

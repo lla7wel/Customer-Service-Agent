@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { ArrowLeft, Megaphone } from 'lucide-react';
 import { PageHeader } from '@/components/ui';
 import { getT } from '@/lib/i18n/server';
-import { supabaseStatus } from '@integrations/status';
+import { databaseStatus } from '@integrations/status';
 import NotConnected from '@/components/NotConnected';
 import CampaignBuilder from '@/components/campaigns/CampaignBuilder';
 
@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 export default function NewCampaignPage() {
   const { locale } = getT();
   const ar = locale === 'ar';
-  const status = supabaseStatus();
+  const status = databaseStatus();
 
   return (
     <div>

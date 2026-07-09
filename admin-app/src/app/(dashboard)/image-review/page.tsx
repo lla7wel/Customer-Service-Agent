@@ -2,7 +2,7 @@ import { ImageIcon, Info } from 'lucide-react';
 import { PageHeader, Card, EmptyState, Notice } from '@/components/ui';
 import NotConnected from '@/components/NotConnected';
 import { getT } from '@/lib/i18n/server';
-import { supabaseStatus } from '@integrations/status';
+import { databaseStatus } from '@integrations/status';
 import { fetchRows } from '@/lib/data';
 import ImageReviewClient from '@/components/image-review/ImageReviewClient';
 import CatalogReviewTabs from '@/components/catalog/CatalogReviewTabs';
@@ -23,8 +23,8 @@ interface Correction {
 export default async function ImageReviewPage() {
   const { t, locale } = getT();
   const ar = locale === 'ar';
-  const status = supabaseStatus();
-  const { connected, rows, error } = await fetchRows<Correction>('image_match_corrections', (q) => q.order('created_at', { ascending: false }).limit(60));
+  const status = databaseStatus();
+  const { connected, rows, error } = await fetchRows<Correction>('image_match_corrections', (q) => q.orderBy('created_at', 'desc').limit(60));
 
   return (
     <div>

@@ -5,7 +5,7 @@ import {
   parseMessengerWebhook,
 } from '@integrations/meta';
 import { metaStatus } from '@integrations/status';
-import { adminClient } from '@integrations/supabase/admin-client';
+import { getDb } from '@integrations/db/client';
 import { processMessengerEvents, runMessageBatchDebounce } from '@integrations/pipelines/messenger';
 
 export const runtime = 'nodejs';
@@ -43,10 +43,10 @@ export async function POST(req: NextRequest) {
   const valid = await verifyWebhookSignature(raw, req.headers.get('x-hub-signature-256'));
   if (!valid) return new NextResponse('Invalid signature', { status: 401 });
 
-  const db = adminClient();
+  const db = getDb();
   if (!db) {
     // Acknowledge so Meta does not retry forever, but note we can't persist.
-    return NextResponse.json({ ok: true, stored: false, reason: 'supabase_not_configured' });
+    return NextResponse.json({ ok: true, stored: false, reason: 'database_not_configured' });
   }
 
   const body = JSON.parse(raw || '{}');

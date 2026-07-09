@@ -4,8 +4,8 @@
  * Called by: components/catalog/CatalogMatch.tsx (needs-review / no-match buttons).
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { adminClient } from '@integrations/supabase/admin-client';
-import { supabaseStatus } from '@integrations/status';
+import { getDb } from '@integrations/db/client';
+import { databaseStatus } from '@integrations/status';
 
 export const runtime = 'nodejs';
 
@@ -18,10 +18,10 @@ type MarkState = (typeof ALLOWED)[number];
  * reopen (possible). Admin-confirmed no_match/needs_review survive refresh.
  */
 export async function POST(req: NextRequest) {
-  const db = adminClient();
+  const db = getDb();
   if (!db) {
     return NextResponse.json(
-      { error: 'integration_not_configured', missing: supabaseStatus().missing.concat('SUPABASE_SERVICE_ROLE_KEY') },
+      { error: 'integration_not_configured', missing: databaseStatus().missing },
       { status: 503 },
     );
   }
@@ -33,27 +33,33 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'invalid_request' }, { status: 400 });
   }
 
-  const { error } = await db
-    .from('catalog_match_suggestions')
-    .upsert(
-      {
+  try {
+    await db
+      .insertInto('catalog_match_suggestions')
+      .values({
         csv_product_id: csvId,
         state,
         reviewed_at: new Date().toISOString(),
-        evidence: { admin_confirmed: state !== 'possible' },
-      },
-      { onConflict: 'csv_product_id' },
-    );
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+        evidence: JSON.stringify({ admin_confirmed: state !== 'possible' }),
+      })
+      .onConflict((oc) => oc.column('csv_product_id').doUpdateSet({
+        state: (eb) => eb.ref('excluded.state'),
+        reviewed_at: (eb) => eb.ref('excluded.reviewed_at'),
+        evidence: (eb) => eb.ref('excluded.evidence'),
+      }))
+      .execute();
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message ?? 'update_failed' }, { status: 500 });
+  }
 
-  await db.from('activity_logs').insert({
+  await db.insertInto('activity_logs').values({
     actor_type: 'human',
     action: 'catalog_image_match_marked',
     entity_type: 'product',
     entity_id: csvId,
     summary: `Marked CSV product ${csvId} match state = ${state}`,
-    meta: { csv_product_id: csvId, state },
-  });
+    meta: JSON.stringify({ csv_product_id: csvId, state }),
+  }).execute();
 
   return NextResponse.json({ ok: true });
 }

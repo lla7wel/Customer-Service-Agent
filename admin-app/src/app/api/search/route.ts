@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { jsonObjectFrom } from 'kysely/helpers/postgres';
 import { getDb } from '@/lib/supabase/db';
-import { supabaseStatus } from '@integrations/status';
-import { productSelectColumns, toUiCandidate } from '@/lib/product-candidates';
+import { databaseStatus } from '@integrations/status';
+import { uiProductQuery, toUiCandidate } from '@/lib/product-candidates';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,41 +16,66 @@ type SearchItem = {
 };
 
 export async function GET(req: NextRequest) {
-  if (!supabaseStatus().configured) {
-    return NextResponse.json({ error: 'integration_not_configured', missing: supabaseStatus().missing }, { status: 503 });
+  if (!databaseStatus().configured) {
+    return NextResponse.json({ error: 'integration_not_configured', missing: databaseStatus().missing }, { status: 503 });
   }
   const db = getDb();
   if (!db) return NextResponse.json({ rows: [] });
 
   const q = (req.nextUrl.searchParams.get('q') ?? '').trim();
   if (q.length < 2) return NextResponse.json({ rows: [] });
-  const like = `%${q.replace(/[%,()]/g, ' ')}%`;
+  const like = `%${q}%`;
 
   const [products, conversations, customers, campaigns] = await Promise.all([
-    db.from('products')
-      .select(productSelectColumns())
-      .or(`libyan_display_name.ilike.${like},arabic_name.ilike.${like},english_name.ilike.${like},source_name.ilike.${like},product_code.ilike.${like},barcode.ilike.${like}`)
-      .order('updated_at', { ascending: false })
-      .limit(5),
-    db.from('conversations')
-      .select('id,status,last_message_preview,detected_intent,last_message_at,customers(display_name)')
-      .or(`last_message_preview.ilike.${like},context_summary.ilike.${like},detected_intent.ilike.${like}`)
-      .order('last_message_at', { ascending: false, nullsFirst: false })
-      .limit(5),
-    db.from('customers')
-      .select('id,display_name,phone,external_id')
-      .or(`display_name.ilike.${like},first_name.ilike.${like},last_name.ilike.${like},phone.ilike.${like},external_id.ilike.${like}`)
-      .order('updated_at', { ascending: false })
-      .limit(5),
-    db.from('campaigns')
-      .select('id,name,status,type')
-      .or(`name.ilike.${like},status.ilike.${like},type.ilike.${like}`)
-      .order('updated_at', { ascending: false })
-      .limit(5),
+    uiProductQuery(db)
+      .where((eb) =>
+        eb.or([
+          eb('products.libyan_display_name', 'ilike', like), eb('products.arabic_name', 'ilike', like),
+          eb('products.english_name', 'ilike', like), eb('products.source_name', 'ilike', like),
+          eb('products.product_code', 'ilike', like), eb('products.barcode', 'ilike', like),
+        ]),
+      )
+      .orderBy('products.updated_at', 'desc')
+      .limit(5)
+      .execute(),
+    db.selectFrom('conversations')
+      .select(['id', 'status', 'last_message_preview', 'detected_intent', 'last_message_at'])
+      .select((eb) => [
+        jsonObjectFrom(
+          eb.selectFrom('customers').select('display_name').whereRef('customers.id', '=', 'conversations.customer_id'),
+        ).as('customers'),
+      ])
+      .where((eb) =>
+        eb.or([
+          eb('last_message_preview', 'ilike', like),
+          eb('context_summary', 'ilike', like),
+          eb('detected_intent', 'ilike', like),
+        ]),
+      )
+      .orderBy('last_message_at', (ob) => ob.desc().nullsLast())
+      .limit(5)
+      .execute(),
+    db.selectFrom('customers')
+      .select(['id', 'display_name', 'phone', 'external_id'])
+      .where((eb) =>
+        eb.or([
+          eb('display_name', 'ilike', like), eb('first_name', 'ilike', like),
+          eb('last_name', 'ilike', like), eb('phone', 'ilike', like), eb('external_id', 'ilike', like),
+        ]),
+      )
+      .orderBy('updated_at', 'desc')
+      .limit(5)
+      .execute(),
+    db.selectFrom('campaigns')
+      .select(['id', 'name', 'status', 'type'])
+      .where((eb) => eb.or([eb('name', 'ilike', like), eb(eb.cast('status', 'text'), 'ilike', like), eb(eb.cast('type', 'text'), 'ilike', like)]))
+      .orderBy('updated_at', 'desc')
+      .limit(5)
+      .execute(),
   ]);
 
   const rows: SearchItem[] = [];
-  for (const p of products.data ?? []) {
+  for (const p of products) {
     const c = toUiCandidate(p as any);
     rows.push({
       id: `product:${c.id}`,
@@ -59,7 +85,7 @@ export async function GET(req: NextRequest) {
       href: `/products/${c.id}`,
     });
   }
-  for (const c of (conversations.data ?? []) as any[]) {
+  for (const c of conversations as any[]) {
     rows.push({
       id: `conversation:${c.id}`,
       type: 'conversation',
@@ -69,18 +95,21 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const customerIds = (customers.data ?? []).map((c: any) => c.id);
+  const customerIds = customers.map((c) => c.id);
   const latestByCustomer = new Map<string, string>();
   if (customerIds.length) {
-    const { data: convs } = await db
-      .from('conversations')
-      .select('id,customer_id,last_message_at')
-      .in('customer_id', customerIds)
-      .order('last_message_at', { ascending: false, nullsFirst: false })
-      .limit(20);
-    for (const conv of (convs ?? []) as any[]) if (!latestByCustomer.has(conv.customer_id)) latestByCustomer.set(conv.customer_id, conv.id);
+    const convs = await db
+      .selectFrom('conversations')
+      .select(['id', 'customer_id', 'last_message_at'])
+      .where('customer_id', 'in', customerIds)
+      .orderBy('last_message_at', (ob) => ob.desc().nullsLast())
+      .limit(20)
+      .execute();
+    for (const conv of convs) {
+      if (conv.customer_id && !latestByCustomer.has(conv.customer_id)) latestByCustomer.set(conv.customer_id, conv.id);
+    }
   }
-  for (const c of (customers.data ?? []) as any[]) {
+  for (const c of customers as any[]) {
     rows.push({
       id: `customer:${c.id}`,
       type: 'customer',
@@ -89,7 +118,7 @@ export async function GET(req: NextRequest) {
       href: latestByCustomer.has(c.id) ? `/inbox/${latestByCustomer.get(c.id)}` : '/inbox',
     });
   }
-  for (const c of (campaigns.data ?? []) as any[]) {
+  for (const c of campaigns as any[]) {
     rows.push({
       id: `campaign:${c.id}`,
       type: 'campaign',

@@ -1,12 +1,12 @@
 import { getDb } from './supabase/db';
-import { supabaseStatus } from '@integrations/status';
+import type { DB } from '@integrations/db/client';
 
 /**
  * Result wrapper used by every page so the UI can cleanly distinguish:
- *  - not connected   (Supabase env missing)        → show setup card
- *  - connected, empty (fresh DB / no rows)          → show "no data yet"
- *  - connected, error (e.g. schema not applied yet) → show error note
- *  - connected, rows                                → render the data
+ *  - not connected   (DATABASE_URL missing)          → show setup card
+ *  - connected, empty (fresh DB / no rows)           → show "no data yet"
+ *  - connected, error (e.g. schema not applied yet)  → show error note
+ *  - connected, rows                                 → render the data
  */
 export interface QueryResult<T> {
   connected: boolean;
@@ -23,25 +23,29 @@ const NOT_CONNECTED = <T,>(): QueryResult<T> => ({
 });
 
 /**
- * Run a Supabase select with graceful degradation. `build` receives the
- * `.from(table)` query builder so callers can add filters/order/limit.
+ * Run a select with graceful degradation. `build` receives the Kysely
+ * select-all builder for `table` so callers can add filters/order/limit.
+ * `count` is the total matching rows before any limit (for pagination).
  */
 export async function fetchRows<T>(
-  table: string,
+  table: keyof DB & string,
   build?: (q: any) => any,
 ): Promise<QueryResult<T>> {
-  if (!supabaseStatus().configured) return NOT_CONNECTED<T>();
-  const supabase = getDb();
-  if (!supabase) return NOT_CONNECTED<T>();
+  const db = getDb();
+  if (!db) return NOT_CONNECTED<T>();
 
   try {
-    let query: any = supabase.from(table).select('*', { count: 'exact' });
+    let query: any = db.selectFrom(table).selectAll();
     if (build) query = build(query);
-    const { data, error, count } = await query;
-    if (error) {
-      return { connected: true, error: error.message, rows: [], count: null };
-    }
-    return { connected: true, error: null, rows: (data ?? []) as T[], count: count ?? null };
+    const rows = (await query.execute()) as T[];
+    const countRow = await query
+      .clearSelect()
+      .clearLimit()
+      .clearOffset()
+      .clearOrderBy()
+      .select((eb: any) => eb.fn.countAll().as('n'))
+      .executeTakeFirst();
+    return { connected: true, error: null, rows, count: Number(countRow?.n ?? rows.length) };
   } catch (e: any) {
     return { connected: true, error: e?.message ?? 'Query failed', rows: [], count: null };
   }
@@ -49,18 +53,16 @@ export async function fetchRows<T>(
 
 /** Convenience: count rows in a table (for dashboard KPIs). */
 export async function countRows(
-  table: string,
+  table: keyof DB & string,
   build?: (q: any) => any,
 ): Promise<{ connected: boolean; count: number | null; error: string | null }> {
-  if (!supabaseStatus().configured) return { connected: false, count: null, error: null };
-  const supabase = getDb();
-  if (!supabase) return { connected: false, count: null, error: null };
+  const db = getDb();
+  if (!db) return { connected: false, count: null, error: null };
   try {
-    let query: any = supabase.from(table).select('id', { count: 'exact', head: true });
+    let query: any = db.selectFrom(table);
     if (build) query = build(query);
-    const { count, error } = await query;
-    if (error) return { connected: true, count: null, error: error.message };
-    return { connected: true, count: count ?? 0, error: null };
+    const row = await query.select((eb: any) => eb.fn.countAll().as('n')).executeTakeFirst();
+    return { connected: true, count: Number(row?.n ?? 0), error: null };
   } catch (e: any) {
     return { connected: true, count: null, error: e?.message ?? 'Count failed' };
   }
@@ -68,15 +70,13 @@ export async function countRows(
 
 /** Fetch a single row by id. */
 export async function fetchOne<T>(
-  table: string,
+  table: keyof DB & string,
   id: string,
 ): Promise<{ connected: boolean; error: string | null; row: T | null }> {
-  if (!supabaseStatus().configured) return { connected: false, error: null, row: null };
-  const supabase = getDb();
-  if (!supabase) return { connected: false, error: null, row: null };
+  const db = getDb();
+  if (!db) return { connected: false, error: null, row: null };
   try {
-    const { data, error } = await supabase.from(table).select('*').eq('id', id).maybeSingle();
-    if (error) return { connected: true, error: error.message, row: null };
+    const data = await (db.selectFrom(table) as any).selectAll().where('id', '=', id).executeTakeFirst();
     return { connected: true, error: null, row: (data as T) ?? null };
   } catch (e: any) {
     return { connected: true, error: e?.message ?? 'Query failed', row: null };

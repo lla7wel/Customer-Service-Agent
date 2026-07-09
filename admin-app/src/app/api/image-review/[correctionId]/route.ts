@@ -3,11 +3,11 @@
  * image_match_corrections row so the pipeline learns from the correction.
  * The next near-identical customer image skips Gemini and uses this correction.
  * Called by: components/image-review/ImageReviewClient.tsx.
- * Calls: integrations/util/image-hash (dhashFromUrl), integrations/supabase/admin-client.
+ * Calls: integrations/util/image-hash (dhashFromUrl), integrations/db.
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { adminClient } from '@integrations/supabase/admin-client';
-import { supabaseStatus } from '@integrations/status';
+import { getDb } from '@integrations/db/client';
+import { databaseStatus } from '@integrations/status';
 import { dhashFromUrl } from '@integrations/util/image-hash';
 import { customerProductName } from '@integrations/util/product-display';
 import { saveImageCorrection } from '@integrations/tools';
@@ -15,10 +15,10 @@ import { saveImageCorrection } from '@integrations/tools';
 export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest, { params }: { params: { correctionId: string } }) {
-  const db = adminClient();
+  const db = getDb();
   if (!db) {
     return NextResponse.json(
-      { error: 'integration_not_configured', missing: supabaseStatus().missing.concat('SUPABASE_SERVICE_ROLE_KEY') },
+      { error: 'integration_not_configured', missing: databaseStatus().missing },
       { status: 503 },
     );
   }
@@ -27,24 +27,24 @@ export async function POST(req: NextRequest, { params }: { params: { correctionI
   const productId = typeof body?.productId === 'string' ? body.productId : '';
   if (!productId) return NextResponse.json({ error: 'missing_product' }, { status: 400 });
 
-  const [{ data: correction }, { data: product }] = await Promise.all([
+  const [correction, product] = await Promise.all([
     db
-      .from('image_match_corrections')
-      .select('id, conversation_id, message_id, customer_image_url, customer_image_hash')
-      .eq('id', params.correctionId)
-      .maybeSingle(),
+      .selectFrom('image_match_corrections')
+      .select(['id', 'conversation_id', 'message_id', 'customer_image_url', 'customer_image_hash'])
+      .where('id', '=', params.correctionId)
+      .executeTakeFirst(),
     db
-      .from('products')
-      .select('id, product_code, libyan_display_name, arabic_name, english_name, source_name, arabic_keywords')
-      .eq('id', productId)
-      .maybeSingle(),
+      .selectFrom('products')
+      .select(['id', 'product_code', 'libyan_display_name', 'arabic_name', 'english_name', 'source_name', 'arabic_keywords'])
+      .where('id', '=', productId)
+      .executeTakeFirst(),
   ]);
 
   if (!correction) return NextResponse.json({ error: 'correction_not_found' }, { status: 404 });
   if (!product) return NextResponse.json({ error: 'product_not_found' }, { status: 404 });
 
-  let hash = (correction as any).customer_image_hash ?? null;
-  const imageUrl = (correction as any).customer_image_url ?? null;
+  let hash = correction.customer_image_hash ?? null;
+  const imageUrl = correction.customer_image_url ?? null;
   if (!hash && imageUrl) hash = await dhashFromUrl(imageUrl);
 
   // Save the correction AND feed the fingerprint back into future matching.
@@ -57,14 +57,14 @@ export async function POST(req: NextRequest, { params }: { params: { correctionI
   });
   if (!saved.ok) return NextResponse.json({ error: saved.reason }, { status: 500 });
 
-  await db.from('activity_logs').insert({
+  await db.insertInto('activity_logs').values({
     actor_type: 'human',
     action: 'image_match_corrected',
     entity_type: 'conversation',
-    entity_id: (correction as any).conversation_id ?? null,
+    entity_id: correction.conversation_id ?? null,
     summary: `Image matched to ${customerProductName(product)}`,
-    meta: { correction_id: params.correctionId, product_id: productId, learned: !!hash },
-  });
+    meta: JSON.stringify({ correction_id: params.correctionId, product_id: productId, learned: !!hash }),
+  }).execute();
 
   return NextResponse.json({ ok: true, learned: !!hash, product_name: customerProductName(product) });
 }

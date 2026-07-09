@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminClient, storageBucket } from '@integrations/supabase/admin-client';
-import { supabaseStatus, metaStatus, geminiStatus } from '@integrations/status';
+import { jsonArrayFrom } from 'kysely/helpers/postgres';
+import { getDb } from '@integrations/db/client';
+import { putObject } from '@integrations/storage';
+import { databaseStatus, metaStatus, geminiStatus } from '@integrations/status';
 import { resolveProductsFromText } from '@integrations/pipelines/product-resolve';
 import { resolveProducts } from '@integrations/pipelines/resolver';
 import { composeCustomerReply } from '@integrations/pipelines/compose-reply';
@@ -21,18 +23,19 @@ export const maxDuration = 60;
 
 /** Live thread fetch for polling (no manual refresh needed in the Inbox). */
 export async function GET(_req: NextRequest, { params }: { params: { conversationId: string } }) {
-  const db = adminClient();
+  const db = getDb();
   if (!db) return NextResponse.json({ error: 'integration_not_configured' }, { status: 503 });
   const id = params.conversationId;
-  const [{ data: msgs }, { data: convo }] = await Promise.all([
-    db.from('messages')
-      .select('id, direction, sender_type, body, ai_meta, attachments, is_internal_suggestion, delivered_at, created_at')
-      .eq('conversation_id', id)
-      .order('created_at', { ascending: true })
-      .limit(300),
-    db.from('conversations').select('ai_enabled, status').eq('id', id).maybeSingle(),
+  const [msgs, convo] = await Promise.all([
+    db.selectFrom('messages')
+      .select(['id', 'direction', 'sender_type', 'body', 'ai_meta', 'attachments', 'is_internal_suggestion', 'delivered_at', 'created_at'])
+      .where('conversation_id', '=', id)
+      .orderBy('created_at', 'asc')
+      .limit(300)
+      .execute(),
+    db.selectFrom('conversations').select(['ai_enabled', 'status']).where('id', '=', id).executeTakeFirst(),
   ]);
-  const messages = await hydrateMessagesWithCandidates(db, msgs ?? []);
+  const messages = await hydrateMessagesWithCandidates(db, msgs);
   return NextResponse.json({
     messages,
     ai_enabled: convo?.ai_enabled ?? true,
@@ -49,11 +52,11 @@ export async function POST(req: NextRequest, { params }: { params: { conversatio
   const id = params.conversationId;
   const body = await req.json().catch(() => ({}));
   const action = body?.action as string;
-  const db = adminClient();
+  const db = getDb();
 
   if (!db) {
     return NextResponse.json(
-      { error: 'integration_not_configured', integration: 'supabase', missing: supabaseStatus().missing.concat('SUPABASE_SERVICE_ROLE_KEY') },
+      { error: 'integration_not_configured', integration: 'database', missing: databaseStatus().missing },
       { status: 503 },
     );
   }
@@ -62,10 +65,10 @@ export async function POST(req: NextRequest, { params }: { params: { conversatio
     switch (action) {
       case 'pause_ai':
         {
-          const { data: cur } = await db.from('conversations').select('ai_enabled,status').eq('id', id).maybeSingle();
+          const cur = await db.selectFrom('conversations').select(['ai_enabled', 'status']).where('id', '=', id).executeTakeFirst();
           const changed = cur?.ai_enabled !== false || cur?.status !== 'human_active';
           if (changed) {
-            await db.from('conversations').update({ ai_enabled: false, status: 'human_active' }).eq('id', id);
+            await db.updateTable('conversations').set({ ai_enabled: false, status: 'human_active' }).where('id', '=', id).execute();
             await logActivity(db, 'ai_paused', id);
           }
         }
@@ -73,17 +76,17 @@ export async function POST(req: NextRequest, { params }: { params: { conversatio
 
       case 'resume_ai':
         {
-          const { data: cur } = await db.from('conversations').select('ai_enabled,status').eq('id', id).maybeSingle();
+          const cur = await db.selectFrom('conversations').select(['ai_enabled', 'status']).where('id', '=', id).executeTakeFirst();
           const changed = cur?.ai_enabled !== true || cur?.status !== 'ai_handling';
           if (changed) {
-            await db.from('conversations').update({ ai_enabled: true, status: 'ai_handling' }).eq('id', id);
+            await db.updateTable('conversations').set({ ai_enabled: true, status: 'ai_handling' }).where('id', '=', id).execute();
             await logActivity(db, 'ai_resumed', id);
           }
         }
         return NextResponse.json({ ok: true });
 
       case 'mark_resolved':
-        await db.from('conversations').update({ status: 'resolved' }).eq('id', id);
+        await db.updateTable('conversations').set({ status: 'resolved' }).where('id', '=', id).execute();
         await logActivity(db, 'conversation_resolved', id);
         return NextResponse.json({ ok: true });
 
@@ -97,18 +100,18 @@ export async function POST(req: NextRequest, { params }: { params: { conversatio
         // Find an existing correction row (by message, else latest for the convo).
         let row: any = null;
         if (messageId) {
-          row = (await db.from('image_match_corrections').select('id, customer_image_url, customer_image_hash').eq('message_id', messageId).order('created_at', { ascending: false }).limit(1).maybeSingle()).data;
+          row = await db.selectFrom('image_match_corrections').select(['id', 'customer_image_url', 'customer_image_hash']).where('message_id', '=', messageId).orderBy('created_at', 'desc').limit(1).executeTakeFirst();
         }
         if (!row) {
-          row = (await db.from('image_match_corrections').select('id, customer_image_url, customer_image_hash').eq('conversation_id', id).order('created_at', { ascending: false }).limit(1).maybeSingle()).data;
+          row = await db.selectFrom('image_match_corrections').select(['id', 'customer_image_url', 'customer_image_hash']).where('conversation_id', '=', id).orderBy('created_at', 'desc').limit(1).executeTakeFirst();
         }
 
         // Ensure we have the customer image fingerprint (compute if missing).
         let hash: string | null = row?.customer_image_hash ?? null;
         let imageUrl: string | null = row?.customer_image_url ?? null;
         if (!imageUrl && messageId) {
-          const m = (await db.from('messages').select('attachments').eq('id', messageId).maybeSingle()).data as any;
-          imageUrl = ((m?.attachments ?? []) as any[]).find((a) => a?.type === 'image' && a?.url)?.url ?? null;
+          const m = await db.selectFrom('messages').select('attachments').where('id', '=', messageId).executeTakeFirst();
+          imageUrl = (((m?.attachments ?? []) as any[])).find((a) => a?.type === 'image' && a?.url)?.url ?? null;
         }
         if (!hash && imageUrl) hash = await dhashFromUrl(imageUrl);
 
@@ -121,24 +124,24 @@ export async function POST(req: NextRequest, { params }: { params: { conversatio
           customerImageUrl: imageUrl,
           customerImageHash: hash,
         });
-        const { data: product } = await db
-          .from('products')
-          .select('id, product_code, libyan_display_name, arabic_name, english_name, source_name, arabic_keywords')
-          .eq('id', productId)
-          .maybeSingle();
+        const product = await db
+          .selectFrom('products')
+          .select(['id', 'product_code', 'libyan_display_name', 'arabic_name', 'english_name', 'source_name', 'arabic_keywords'])
+          .where('id', '=', productId)
+          .executeTakeFirst();
         await logActivity(db, 'image_match_corrected', id, `Linked image to ${product ? customerProductName(product) : 'selected product'}`);
         return NextResponse.json({ ok: true, learned: !!hash });
       }
 
       case 'get_memory': {
-        const { data: convo } = await db.from('conversations').select('customer_id').eq('id', id).maybeSingle();
+        const convo = await db.selectFrom('conversations').select('customer_id').where('id', '=', id).executeTakeFirst();
         if (!convo?.customer_id) return NextResponse.json({ memory: null });
         const memory = await getCustomerMemory(db, convo.customer_id);
         return NextResponse.json({ memory });
       }
 
       case 'update_memory': {
-        const { data: convo } = await db.from('conversations').select('customer_id').eq('id', id).maybeSingle();
+        const convo = await db.selectFrom('conversations').select('customer_id').where('id', '=', id).executeTakeFirst();
         if (!convo?.customer_id) return NextResponse.json({ error: 'no_customer' }, { status: 400 });
         const cap = (v: unknown) => (typeof v === 'string' ? v.slice(0, 2000) : undefined);
         const r = await updateCustomerMemory(db, convo.customer_id, {
@@ -155,7 +158,7 @@ export async function POST(req: NextRequest, { params }: { params: { conversatio
       }
 
       case 'clear_memory': {
-        const { data: convo } = await db.from('conversations').select('customer_id').eq('id', id).maybeSingle();
+        const convo = await db.selectFrom('conversations').select('customer_id').where('id', '=', id).executeTakeFirst();
         if (!convo?.customer_id) return NextResponse.json({ error: 'no_customer' }, { status: 400 });
         const r = await clearCustomerMemory(db, convo.customer_id);
         if (!r.ok) return NextResponse.json({ error: r.reason }, { status: 500 });
@@ -170,11 +173,17 @@ export async function POST(req: NextRequest, { params }: { params: { conversatio
       case 'attach_product': {
         const productId = String(body.productId ?? body.product_id ?? '');
         if (!productId) return NextResponse.json({ error: 'no_product' }, { status: 400 });
-        const { data: convo } = await db.from('conversations').select('customer_id').eq('id', id).maybeSingle();
-        const { data: p } = await db
-          .from('products')
-          .select('id, product_code, barcode, libyan_display_name, arabic_name, english_name, source_name, active_price, status, website_url, product_images!product_images_product_id_fkey(public_url,is_primary,position)')
-          .eq('id', productId).maybeSingle();
+        const convo = await db.selectFrom('conversations').select('customer_id').where('id', '=', id).executeTakeFirst();
+        const p = await db
+          .selectFrom('products')
+          .select(['id', 'product_code', 'barcode', 'libyan_display_name', 'arabic_name', 'english_name', 'source_name', 'active_price', 'status', 'website_url'])
+          .select((eb) => [
+            jsonArrayFrom(
+              eb.selectFrom('product_images').select(['public_url', 'is_primary', 'position'])
+                .whereRef('product_images.product_id', '=', 'products.id').orderBy('position', 'asc'),
+            ).as('product_images'),
+          ])
+          .where('id', '=', productId).executeTakeFirst();
         if (!p) return NextResponse.json({ error: 'product_not_found' }, { status: 404 });
         const imgs = ((p as any).product_images ?? []) as any[];
         const image = (imgs.find((i) => i.is_primary) ?? imgs[0])?.public_url ?? null;
@@ -196,11 +205,11 @@ export async function POST(req: NextRequest, { params }: { params: { conversatio
             },
           });
         }
-        // Best-effort dedicated row (table may not exist yet → ignore error).
-        await db.from('conversation_attachments').insert({
+        // Best-effort dedicated row.
+        await db.insertInto('conversation_attachments').values({
           conversation_id: id, customer_id: convo?.customer_id ?? null, type: 'product',
-          product_id: card.id, metadata: { name: card.name, price: card.price }, created_by: 'admin',
-        }).then(() => {}, () => {});
+          product_id: card.id, metadata: JSON.stringify({ name: card.name, price: card.price }), created_by: 'admin',
+        }).execute().then(() => {}, () => {});
         await logActivity(db, 'inbox_attach_product', id, `Attached ${card.name}`);
         return NextResponse.json({ ok: true, product: card });
       }
@@ -209,15 +218,15 @@ export async function POST(req: NextRequest, { params }: { params: { conversatio
       case 'remove_product': {
         const productId = String(body.productId ?? body.product_id ?? '');
         if (!productId) return NextResponse.json({ error: 'no_product' }, { status: 400 });
-        const { data: convo } = await db.from('conversations').select('customer_id').eq('id', id).maybeSingle();
+        const convo = await db.selectFrom('conversations').select('customer_id').where('id', '=', id).executeTakeFirst();
         if (convo?.customer_id) {
           const mem = await getCustomerMemory(db, convo.customer_id);
           const recent = (mem?.recent_products ?? []).filter((r) => r.product_id !== productId);
           await updateCustomerMemory(db, convo.customer_id, { recent_products: recent });
         }
-        await db.from('conversation_attachments').delete()
-          .eq('conversation_id', id).eq('type', 'product').eq('product_id', productId)
-          .then(() => {}, () => {});
+        await db.deleteFrom('conversation_attachments')
+          .where('conversation_id', '=', id).where('type', '=', 'product').where('product_id', '=', productId)
+          .execute().then(() => {}, () => {});
         await logActivity(db, 'inbox_remove_product', id);
         return NextResponse.json({ ok: true });
       }
@@ -232,15 +241,14 @@ export async function POST(req: NextRequest, { params }: { params: { conversatio
         const mime = String(body.image?.mime ?? body.mime ?? 'image/jpeg');
         const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
         if (!base64) return NextResponse.json({ error: 'no_image' }, { status: 400 });
-        const { data: convo } = await db.from('conversations').select('customer_id').eq('id', id).maybeSingle();
+        const convo = await db.selectFrom('conversations').select('customer_id').where('id', '=', id).executeTakeFirst();
         // Persist the uploaded image to storage (timeline + reference context).
         let imageUrl: string | null = null;
         try {
           const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg';
           const path = `inbox/${id}/admin-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-          const bytes = Buffer.from(base64, 'base64');
-          const up = await db.storage.from(storageBucket()).upload(path, bytes, { contentType: mime, upsert: true });
-          if (!up.error) imageUrl = db.storage.from(storageBucket()).getPublicUrl(path).data.publicUrl;
+          const up = await putObject(path, Buffer.from(base64, 'base64'));
+          if (up.ok) imageUrl = up.data.publicUrl;
         } catch { /* storage optional — matching still runs on bytes */ }
         const memory = convo?.customer_id ? await getCustomerMemory(db, convo.customer_id) : null;
         const result = await resolveProducts(db, {
@@ -249,11 +257,11 @@ export async function POST(req: NextRequest, { params }: { params: { conversatio
         });
         // Record the uploaded image in the timeline (internal note).
         if (imageUrl) {
-          await db.from('messages').insert({
+          await db.insertInto('messages').values({
             conversation_id: id, direction: 'outbound', sender_type: 'system',
             body: null, is_internal_suggestion: true,
-            attachments: [{ type: 'image', url: imageUrl, source: 'admin_upload' }],
-          }).then(() => {}, () => {});
+            attachments: JSON.stringify([{ type: 'image', url: imageUrl, source: 'admin_upload' }]),
+          }).execute().then(() => {}, () => {});
         }
         await logActivity(db, 'inbox_image_search', id, `Found ${result.candidates.length} candidate(s)`);
         return NextResponse.json({
@@ -271,36 +279,36 @@ export async function POST(req: NextRequest, { params }: { params: { conversatio
 
         // Resolve the Messenger recipient up front so we know if delivery is even
         // possible before claiming the reply was sent.
-        const { data: convo } = await db
-          .from('conversations').select('customer_id, channel').eq('id', id).maybeSingle();
+        const convo = await db
+          .selectFrom('conversations').select(['customer_id', 'channel']).where('id', '=', id).executeTakeFirst();
         let recipientPsid: string | null = null;
         if (isMetaConfigured() && convo?.customer_id) {
-          const { data: cust } = await db
-            .from('customers').select('external_id, channel').eq('id', convo.customer_id).maybeSingle();
+          const cust = await db
+            .selectFrom('customers').select(['external_id', 'channel']).where('id', '=', convo.customer_id).executeTakeFirst();
           if (cust?.external_id && cust.channel === 'messenger') recipientPsid = cust.external_id;
         }
 
         // Store the outbound human message (delivered_at stays null until Meta
         // confirms) and pause the AI.
-        const { data: inserted } = await db.from('messages').insert({
+        const inserted = await db.insertInto('messages').values({
           conversation_id: id,
           direction: 'outbound',
           sender_type: 'human',
           body: text,
-          ai_meta: { meta_connected: isMetaConfigured() },
-        }).select('id').single();
+          ai_meta: JSON.stringify({ meta_connected: isMetaConfigured() }),
+        }).returning('id').executeTakeFirst();
         const sentMessageId = inserted?.id ?? null;
 
         await db
-          .from('conversations')
-          .update({
+          .updateTable('conversations')
+          .set({
             ai_enabled: false,
             status: 'human_active',
             last_human_reply_at: new Date().toISOString(),
             last_message_at: new Date().toISOString(),
             last_message_preview: text.slice(0, 120),
           })
-          .eq('id', id);
+          .where('id', '=', id).execute();
         await logActivity(db, 'human_message', id, text.slice(0, 120));
 
         // Attempt delivery, THEN record the real result on the stored message so
@@ -318,11 +326,11 @@ export async function POST(req: NextRequest, { params }: { params: { conversatio
         }
         if (sentMessageId) {
           if (delivered) {
-            await db.from('messages').update({ delivered_at: new Date().toISOString() }).eq('id', sentMessageId);
+            await db.updateTable('messages').set({ delivered_at: new Date().toISOString() }).where('id', '=', sentMessageId).execute();
           } else if (deliveryError) {
-            await db.from('messages')
-              .update({ ai_meta: { meta_connected: isMetaConfigured(), delivery_error: deliveryError } })
-              .eq('id', sentMessageId);
+            await db.updateTable('messages')
+              .set({ ai_meta: JSON.stringify({ meta_connected: isMetaConfigured(), delivery_error: deliveryError }) })
+              .where('id', '=', sentMessageId).execute();
           }
         }
         return NextResponse.json({ ok: true, delivered, meta_connected: isMetaConfigured(), delivery_error: deliveryError });
@@ -335,10 +343,16 @@ export async function POST(req: NextRequest, { params }: { params: { conversatio
       case 'send_product_image': {
         const productId = String(body.productId ?? body.product_id ?? '');
         if (!productId) return NextResponse.json({ error: 'no_product' }, { status: 400 });
-        const { data: p } = await db
-          .from('products')
-          .select('id, product_code, libyan_display_name, arabic_name, english_name, source_name, category, arabic_keywords, active_price, status, website_url, product_images!product_images_product_id_fkey(public_url,storage_path,is_primary,position)')
-          .eq('id', productId).maybeSingle();
+        const p = await db
+          .selectFrom('products')
+          .select(['id', 'product_code', 'libyan_display_name', 'arabic_name', 'english_name', 'source_name', 'category', 'arabic_keywords', 'active_price', 'status', 'website_url'])
+          .select((eb) => [
+            jsonArrayFrom(
+              eb.selectFrom('product_images').select(['public_url', 'storage_path', 'is_primary', 'position'])
+                .whereRef('product_images.product_id', '=', 'products.id').orderBy('position', 'asc'),
+            ).as('product_images'),
+          ])
+          .where('id', '=', productId).executeTakeFirst();
         if (!p) return NextResponse.json({ error: 'product_not_found' }, { status: 404 });
         const imageUrl = primaryProductImageUrl(p as any);
         if (!imageUrl || !isMetaSafeImageUrl(imageUrl)) {
@@ -351,18 +365,18 @@ export async function POST(req: NextRequest, { params }: { params: { conversatio
           || `${name}${price != null ? ` — ${price} د.ل` : ''}`;
 
         // Resolve the Messenger recipient.
-        const { data: convo } = await db.from('conversations').select('customer_id, channel').eq('id', id).maybeSingle();
+        const convo = await db.selectFrom('conversations').select(['customer_id', 'channel']).where('id', '=', id).executeTakeFirst();
         let recipientPsid: string | null = null;
         if (isMetaConfigured() && convo?.customer_id) {
-          const { data: cust } = await db.from('customers').select('external_id, channel').eq('id', convo.customer_id).maybeSingle();
+          const cust = await db.selectFrom('customers').select(['external_id', 'channel']).where('id', '=', convo.customer_id).executeTakeFirst();
           if (cust?.external_id && cust.channel === 'messenger') recipientPsid = cust.external_id;
         }
 
         // Store first (attachments/delivered_at filled in after a confirmed send).
-        const { data: inserted } = await db.from('messages').insert({
+        const inserted = await db.insertInto('messages').values({
           conversation_id: id, direction: 'outbound', sender_type: 'human', body: caption,
-          ai_meta: { meta_connected: isMetaConfigured(), workflow: 'manual_product_image_send', product_id: productId, image_url: imageUrl },
-        }).select('id').single();
+          ai_meta: JSON.stringify({ meta_connected: isMetaConfigured(), workflow: 'manual_product_image_send', product_id: productId, image_url: imageUrl }),
+        }).returning('id').executeTakeFirst();
         const sentMessageId = inserted?.id ?? null;
 
         let delivered = false;
@@ -379,20 +393,20 @@ export async function POST(req: NextRequest, { params }: { params: { conversatio
         }
         if (sentMessageId) {
           if (delivered) {
-            await db.from('messages').update({
-              attachments: [{ type: 'image', url: imageUrl, product_id: productId }],
+            await db.updateTable('messages').set({
+              attachments: JSON.stringify([{ type: 'image', url: imageUrl, product_id: productId }]),
               delivered_at: new Date().toISOString(),
-            }).eq('id', sentMessageId);
+            }).where('id', '=', sentMessageId).execute();
           } else if (deliveryError) {
-            await db.from('messages').update({
-              ai_meta: { meta_connected: isMetaConfigured(), workflow: 'manual_product_image_send', product_id: productId, image_url: imageUrl, delivery_error: deliveryError },
-            }).eq('id', sentMessageId);
+            await db.updateTable('messages').set({
+              ai_meta: JSON.stringify({ meta_connected: isMetaConfigured(), workflow: 'manual_product_image_send', product_id: productId, image_url: imageUrl, delivery_error: deliveryError }),
+            }).where('id', '=', sentMessageId).execute();
           }
         }
-        await db.from('conversations').update({
+        await db.updateTable('conversations').set({
           last_message_at: new Date().toISOString(),
           last_message_preview: `🖼️ ${name}`.slice(0, 120),
-        }).eq('id', id);
+        }).where('id', '=', id).execute();
         await logActivity(db, 'product_image_sent', id, name);
         return NextResponse.json({ ok: true, delivered, meta_connected: isMetaConfigured(), delivery_error: deliveryError });
       }
@@ -405,14 +419,14 @@ export async function POST(req: NextRequest, { params }: { params: { conversatio
           );
         }
         // Build minimal history + the admin-configured customer-service behavior.
-        const [{ data: msgs }, behaviors] = await Promise.all([
-          db.from('messages').select('direction,sender_type,body').eq('conversation_id', id).order('created_at', { ascending: true }).limit(20),
+        const [msgs, behaviors] = await Promise.all([
+          db.selectFrom('messages').select(['direction', 'sender_type', 'body']).where('conversation_id', '=', id).orderBy('created_at', 'asc').limit(20).execute(),
           loadBehaviors(),
         ]);
         // Use the SAME behavior + composition path as the live Messenger
         // auto-reply, so the suggested draft matches what the AI would send.
         const behavior = composeBehaviorContext(behaviors, 'messenger');
-        const history = (msgs ?? [])
+        const history = msgs
           .filter((m: any) => m.body)
           .map((m: any) => ({ role: (m.direction === 'inbound' ? 'customer' : 'assistant') as 'customer' | 'assistant', text: m.body as string }));
         const last = [...history].reverse().find((h) => h.role === 'customer');
@@ -430,20 +444,20 @@ export async function POST(req: NextRequest, { params }: { params: { conversatio
           candidates,
         });
         // Store as an INTERNAL suggestion (not sent to the customer).
-        await db.from('messages').insert({
+        await db.insertInto('messages').values({
           conversation_id: id,
           direction: 'outbound',
           sender_type: 'ai',
           body: composed.text,
-          ai_meta: behaviorMetadata(behavior, {
+          ai_meta: JSON.stringify(behaviorMetadata(behavior, {
             model: composed.model,
             workflow: 'inbox_suggest_reply',
             live_surface: 'inbox',
             gemini_tool_calls: composed.toolCalls,
             candidates,
-          }),
+          })),
           is_internal_suggestion: true,
-        });
+        }).execute();
         return NextResponse.json({ ok: true, text: composed.text });
       }
 
@@ -456,15 +470,15 @@ export async function POST(req: NextRequest, { params }: { params: { conversatio
 }
 
 async function logActivity(db: any, action: string, conversationId: string, summary?: string) {
-  await db.from('activity_logs').insert({
+  await db.insertInto('activity_logs').values({
     actor_type: 'human',
     action,
     entity_type: 'conversation',
     entity_id: conversationId,
-    summary,
-  });
+    summary: summary ?? null,
+  }).execute();
 }
 
 async function logIntegration(db: any, integration: string, direction: string, error?: string) {
-  await db.from('integration_logs').insert({ integration, direction, ok: false, error });
+  await db.insertInto('integration_logs').values({ integration, direction, ok: false, error: error ?? null }).execute();
 }

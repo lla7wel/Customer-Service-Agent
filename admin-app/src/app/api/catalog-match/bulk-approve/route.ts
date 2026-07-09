@@ -10,8 +10,8 @@
  *  - limit: cap how many to process this call (default 200, max 500)
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { adminClient } from '@integrations/supabase/admin-client';
-import { supabaseStatus } from '@integrations/status';
+import { getDb } from '@integrations/db/client';
+import { databaseStatus } from '@integrations/status';
 import { approveOne } from '@/lib/catalog-approve';
 
 export const runtime = 'nodejs';
@@ -19,10 +19,10 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
 export async function POST(req: NextRequest) {
-  const db = adminClient();
+  const db = getDb();
   if (!db) {
     return NextResponse.json(
-      { error: 'integration_not_configured', missing: supabaseStatus().missing.concat('SUPABASE_SERVICE_ROLE_KEY') },
+      { error: 'integration_not_configured', missing: databaseStatus().missing },
       { status: 503 },
     );
   }
@@ -42,16 +42,18 @@ export async function POST(req: NextRequest) {
   }
 
   let q = db
-    .from('catalog_match_suggestions')
-    .select('id, csv_product_id, scraper_product_id, confidence')
-    .eq('state', 'possible')
-    .not('scraper_product_id', 'is', null);
-  if (ids) q = q.in('id', ids);
-  else if (confidence) q = q.eq('confidence', confidence);
-  const { data: rows, error } = await q.order('score', { ascending: false, nullsFirst: false }).limit(limit);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  const candidates = (rows ?? []) as { id: string; csv_product_id: string; scraper_product_id: string | null }[];
+    .selectFrom('catalog_match_suggestions')
+    .select(['id', 'csv_product_id', 'scraper_product_id', 'confidence'])
+    .where('state', '=', 'possible')
+    .where('scraper_product_id', 'is not', null);
+  if (ids) q = q.where('id', 'in', ids);
+  else if (confidence) q = q.where('confidence', '=', confidence);
+  let candidates: { id: string; csv_product_id: string; scraper_product_id: string | null }[];
+  try {
+    candidates = await q.orderBy('score', (ob) => ob.desc().nullsLast()).limit(limit).execute();
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message ?? 'query_failed' }, { status: 500 });
+  }
   let approved = 0;
   const skipped: { id: string; reason: string }[] = [];
   // Time budget so a big batch never exceeds maxDuration.

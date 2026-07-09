@@ -6,7 +6,7 @@
 import 'server-only';
 import { getDb } from './supabase/db';
 import { getCatalogStats } from './catalog';
-import { supabaseStatus, geminiStatus, metaStatus, appBaseUrl } from '@integrations/status';
+import { databaseStatus, geminiStatus, metaStatus, appBaseUrl } from '@integrations/status';
 
 /**
  * Go-live readiness checklist. Each item is computed from real state — no faked
@@ -28,7 +28,7 @@ export interface Readiness {
 }
 
 export async function getReadiness(): Promise<Readiness> {
-  const sb = supabaseStatus();
+  const sb = databaseStatus();
   const gm = geminiStatus();
   const mt = metaStatus();
   const baseUrl = appBaseUrl();
@@ -39,28 +39,30 @@ export async function getReadiness(): Promise<Readiness> {
   let activeNoPrice = 0;
   const db = getDb();
   if (db) {
-    const { count } = await db
-      .from('products')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'active')
-      .is('base_price', null);
-    activeNoPrice = count ?? 0;
+    const row = await db
+      .selectFrom('products')
+      .select((eb) => eb.fn.countAll().as('n'))
+      .where('status', '=', 'active')
+      .where('base_price', 'is', null)
+      .executeTakeFirst();
+    activeNoPrice = Number(row?.n ?? 0);
   }
 
   // Enabled AI behaviors.
   let behaviorsEnabled = 0;
   if (db) {
-    const { count } = await db
-      .from('ai_behaviors')
-      .select('id', { count: 'exact', head: true })
-      .eq('enabled', true);
-    behaviorsEnabled = count ?? 0;
+    const row = await db
+      .selectFrom('ai_behaviors')
+      .select((eb) => eb.fn.countAll().as('n'))
+      .where('enabled', '=', true)
+      .executeTakeFirst();
+    behaviorsEnabled = Number(row?.n ?? 0);
   }
 
   const matchTotal = stats.matchPossible + stats.matchApproved + stats.matchNeedsReview + stats.matchNoSafe;
 
   const items: ReadinessItem[] = [
-    { key: 'supabase', label: 'Supabase connected', ok: sb.configured, critical: true, detail: sb.configured ? 'Database reachable' : `Missing: ${sb.missing.join(', ')}` },
+    { key: 'database', label: 'Database connected', ok: sb.configured, critical: true, detail: sb.configured ? 'Database reachable' : `Missing: ${sb.missing.join(', ')}` },
     { key: 'gemini', label: 'Gemini connected', ok: gm.configured, critical: true, detail: gm.configured ? 'AI provider ready' : 'Missing: GEMINI_API_KEY' },
     { key: 'catalog', label: 'Catalog loaded', ok: stats.products > 0, critical: true, detail: `${stats.products.toLocaleString()} products` },
     { key: 'active_priced', label: 'Active products have prices', ok: stats.activeProducts > 0, critical: true, detail: `${stats.activeProducts.toLocaleString()} active` },

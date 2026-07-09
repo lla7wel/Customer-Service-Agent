@@ -9,12 +9,12 @@ import SystemStatus from '@/components/dashboard/SystemStatus';
 import Diagnostics from '@/components/catalog/Diagnostics';
 import NotConnected from '@/components/NotConnected';
 import { getT } from '@/lib/i18n/server';
-import { allIntegrationStatuses, supabaseStatus, geminiStatus } from '@integrations/status';
+import { allIntegrationStatuses, databaseStatus, geminiStatus } from '@integrations/status';
 import { fetchRows, countRows } from '@/lib/data';
 import { getCatalogStats } from '@/lib/catalog';
 import { conversationTone, campaignTone } from '@/lib/status-tone';
 import { activityLabel, activitySummary, humanize, timeAgo, formatDate } from '@/lib/format';
-import type { Conversation, Campaign, ActivityLog, AiEvent } from '@integrations/supabase/types';
+import type { Conversation, Campaign, ActivityLog, AiEvent } from '@integrations/db/rows';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,22 +24,22 @@ export default async function DashboardPage() {
   const { t, locale } = getT();
   const ar = locale === 'ar';
   const statuses = allIntegrationStatuses();
-  const sConnected = supabaseStatus().configured;
+  const sConnected = databaseStatus().configured;
 
   const [
     needsAction, campaigns, activity, aiErrors,
     convCount, actionCount, productCount, aiErrCount, aiOkCount, importRun,
   ] = await Promise.all([
-    fetchRows<Conversation>('conversations', (q) => q.in('status', NEEDS_ACTION).order('last_message_at', { ascending: false, nullsFirst: false }).limit(6)),
-    fetchRows<Campaign>('campaigns', (q) => q.in('status', ['scheduled', 'publishing', 'published', 'draft']).order('starts_at', { ascending: true, nullsFirst: false }).limit(5)),
-    fetchRows<ActivityLog>('activity_logs', (q) => q.order('created_at', { ascending: false }).limit(8)),
-    fetchRows<AiEvent>('ai_events', (q) => q.eq('success', false).order('created_at', { ascending: false }).limit(4)),
+    fetchRows<Conversation>('conversations', (q) => q.where('status', 'in', NEEDS_ACTION).orderBy('last_message_at', (ob: any) => ob.desc().nullsLast()).limit(6)),
+    fetchRows<Campaign>('campaigns', (q) => q.where('status', 'in', ['scheduled', 'publishing', 'published', 'draft']).orderBy('starts_at', (ob: any) => ob.asc().nullsLast()).limit(5)),
+    fetchRows<ActivityLog>('activity_logs', (q) => q.orderBy('created_at', 'desc').limit(8)),
+    fetchRows<AiEvent>('ai_events', (q) => q.where('success', '=', false).orderBy('created_at', 'desc').limit(4)),
     countRows('conversations'),
-    countRows('conversations', (q) => q.in('status', NEEDS_ACTION)),
+    countRows('conversations', (q) => q.where('status', 'in', NEEDS_ACTION)),
     countRows('products'),
-    countRows('ai_events', (q) => q.eq('success', false)),
-    countRows('ai_events', (q) => q.eq('success', true)),
-    fetchRows<any>('product_import_runs', (q) => q.order('started_at', { ascending: false }).limit(1)),
+    countRows('ai_events', (q) => q.where('success', '=', false)),
+    countRows('ai_events', (q) => q.where('success', '=', true)),
+    fetchRows<any>('product_import_runs', (q) => q.orderBy('started_at', 'desc').limit(1)),
   ]);
 
   const catalog = await getCatalogStats();
@@ -55,7 +55,7 @@ export default async function DashboardPage() {
 
       {!sConnected && (
         <div className="mb-6">
-          <NotConnected status={supabaseStatus()} />
+          <NotConnected status={databaseStatus()} />
         </div>
       )}
 

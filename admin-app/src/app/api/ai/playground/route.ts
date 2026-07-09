@@ -18,7 +18,7 @@ import {
 import { matchCustomerImage } from '@integrations/pipelines/image-match';
 import { resolveProductsFromText, parseProductUrl } from '@integrations/pipelines/product-resolve';
 import { composeCustomerReply, situationNote } from '@integrations/pipelines/compose-reply';
-import { adminClient } from '@integrations/supabase/admin-client';
+import { getDb } from '@integrations/db/client';
 import { composeBehaviorContext, loadBehaviors, type AiBehaviorTask } from '@/lib/ai-behaviors';
 import {
   getCustomerMemory, buildMemoryContext,
@@ -58,8 +58,8 @@ export async function POST(req: NextRequest) {
   const customerId: string | null = typeof body?.customer_id === 'string' ? body.customer_id : null;
   const previousImageContext = normalizeLastImageContext(body?.previousImageContext ?? body?.previous_image_context);
 
-  const db = adminClient();
-  if (!db) return NextResponse.json({ error: 'integration_not_configured', missing: ['SUPABASE_SERVICE_ROLE_KEY'] }, { status: 503 });
+  const db = getDb();
+  if (!db) return NextResponse.json({ error: 'integration_not_configured', missing: ['DATABASE_URL'] }, { status: 503 });
 
   const behaviors = await loadBehaviors();
   const memory = customerId ? await getCustomerMemory(db, customerId) : null;

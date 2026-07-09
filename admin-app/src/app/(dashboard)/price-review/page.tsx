@@ -6,7 +6,8 @@ import Diagnostics from '@/components/catalog/Diagnostics';
 import CatalogReviewTabs from '@/components/catalog/CatalogReviewTabs';
 import PriceReviewCard, { type ReviewItem } from '@/components/products/PriceReviewCard';
 import { getT } from '@/lib/i18n/server';
-import { supabaseStatus } from '@integrations/status';
+import { databaseStatus } from '@integrations/status';
+import { jsonArrayFrom } from 'kysely/helpers/postgres';
 import { getDb } from '@/lib/supabase/db';
 import { getCatalogStats } from '@/lib/catalog';
 
@@ -47,7 +48,7 @@ function toItem(r: Row): ReviewItem {
 export default async function PriceReviewPage({ searchParams }: { searchParams: { page?: string } }) {
   const { locale } = getT();
   const ar = locale === 'ar';
-  const status = supabaseStatus();
+  const status = databaseStatus();
   const page = Math.max(0, parseInt(searchParams.page ?? '0', 10) || 0);
 
   const supabase = getDb();
@@ -60,18 +61,24 @@ export default async function PriceReviewPage({ searchParams }: { searchParams: 
     );
   }
 
-  const [stats, { data, count }] = await Promise.all([
+  const baseQuery = supabase
+    .selectFrom('products')
+    .select(['id', 'product_code', 'barcode', 'source_name', 'english_name', 'arabic_name', 'libyan_display_name', 'category', 'website_url'])
+    .select((eb) => [
+      jsonArrayFrom(
+        eb.selectFrom('product_images').select(['public_url', 'is_primary', 'position'])
+          .whereRef('product_images.product_id', '=', 'products.id').orderBy('position', 'asc'),
+      ).as('product_images'),
+    ])
+    .where('base_price', 'is', null);
+  const [stats, data, countRow] = await Promise.all([
     getCatalogStats(),
-    supabase
-      .from('products')
-      .select('id,product_code,barcode,source_name,english_name,arabic_name,libyan_display_name,category,website_url,product_images!product_images_product_id_fkey(public_url,is_primary,position)', { count: 'exact' })
-      .is('base_price', null)
-      .order('updated_at', { ascending: false })
-      .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1),
+    baseQuery.orderBy('updated_at', 'desc').limit(PAGE_SIZE).offset(page * PAGE_SIZE).execute(),
+    baseQuery.clearSelect().select((eb) => eb.fn.countAll().as('n')).executeTakeFirst(),
   ]);
 
-  const rows = (data ?? []) as Row[];
-  const total = count ?? 0;
+  const rows = data as unknown as Row[];
+  const total = Number(countRow?.n ?? 0);
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
   return (

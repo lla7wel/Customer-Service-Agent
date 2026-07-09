@@ -3,7 +3,7 @@
  *
  * catalog.csv is the business catalog: customer/admin-facing names (English),
  * Arabic/English keywords, search text, barcodes and prices in L.D. This script
- * makes Supabase reflect that catalog:
+ * makes the database reflect that catalog:
  *
  *   1. Normalizes every existing product_code to canonical form (strips leading
  *      zeros) so scraped products (e.g. 000000010001821004) share identity with
@@ -17,19 +17,19 @@
  *   4. Scraped-only products that are not in the CSV are left untouched in the
  *      review/staging flow (draft, no price).
  *
- * SOURCE OF TRUTH: after this import, Supabase/admin is the source of truth.
+ * SOURCE OF TRUTH: after this import, the admin database is the source of truth.
  *   - Prices are set ONLY where base_price is currently null → an admin-edited
  *     price is never overwritten, so this is safe to re-run as recovery/setup.
  *   - A CSV row without a price is imported but kept in review (draft, no price).
  *
  * Run (dry):  npm run catalog:csv -- --dry
  * Run:        npm run catalog:csv
- * Needs: SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY in EH-SYSTEM1/.env
+ * Needs: DATABASE_URL in EH-SYSTEM1/.env
  */
-import { requireAdminClient } from '../integrations/supabase/admin-client';
+import { requireDb, type DB } from '../integrations/db/client';
+import type { Kysely } from 'kysely';
 import { stripLockedFields } from '../integrations/product-locks';
 import { readCatalogCsv, normalizeCode, catalogCsvPath, type CatalogRow } from './_lib';
-import type { SupabaseClient } from '@supabase/supabase-js';
 
 const DRY = process.argv.includes('--dry') || process.argv.includes('--dry-run');
 const CHUNK = 40;
@@ -47,20 +47,11 @@ interface DbProduct {
   admin_locked_fields: Record<string, boolean> | null;
 }
 
-async function loadAll(db: SupabaseClient): Promise<DbProduct[]> {
-  const out: DbProduct[] = [];
-  let from = 0;
-  for (;;) {
-    const { data, error } = await db
-      .from('products')
-      .select('id, product_code, barcode, base_price, english_name, arabic_name, search_keywords, arabic_keywords, source, admin_locked_fields')
-      .range(from, from + 999);
-    if (error) throw new Error(error.message);
-    out.push(...((data ?? []) as DbProduct[]));
-    if (!data || data.length < 1000) break;
-    from += 1000;
-  }
-  return out;
+async function loadAll(db: Kysely<DB>): Promise<DbProduct[]> {
+  return (await db
+    .selectFrom('products')
+    .select(['id', 'product_code', 'barcode', 'base_price', 'english_name', 'arabic_name', 'search_keywords', 'arabic_keywords', 'source', 'admin_locked_fields'])
+    .execute()) as unknown as DbProduct[];
 }
 
 async function runChunked<T>(items: T[], fn: (item: T) => Promise<boolean>): Promise<{ ok: number; fail: number }> {
@@ -78,12 +69,12 @@ async function runChunked<T>(items: T[], fn: (item: T) => Promise<boolean>): Pro
 }
 
 async function main() {
-  console.log('EH-SYSTEM1 — import CSV catalog → Supabase (main priced catalog)\n');
+  console.log('EH-SYSTEM — import CSV catalog → database (main priced catalog)\n');
   console.log('Source:', catalogCsvPath());
   if (DRY) console.log('** DRY RUN — no writes **');
   console.log('');
 
-  const db = requireAdminClient();
+  const db = requireDb();
   const csv = readCatalogCsv();
   console.log(`CSV rows: ${csv.length} (${csv.filter((r) => r.price != null).length} with a price)\n`);
 
@@ -95,8 +86,7 @@ async function main() {
   console.log(`Codes needing normalization: ${needNorm.length}`);
   if (!DRY && needNorm.length) {
     const res = await runChunked(needNorm, async (p) => {
-      const { error } = await db.from('products').update({ product_code: normalizeCode(p.product_code) }).eq('id', p.id);
-      if (error) throw new Error(error.message);
+      await db.updateTable('products').set({ product_code: normalizeCode(p.product_code) }).where('id', '=', p.id).execute();
       return true;
     });
     console.log(`   normalized: ${res.ok}, failed: ${res.fail}`);
@@ -171,7 +161,7 @@ async function main() {
         status: canActivate ? 'active' : 'draft',
         availability: 'assume_available',
         source: 'csv',
-        raw: { csv: row },
+        raw: JSON.stringify({ csv: row }),
       });
     }
   }
@@ -192,8 +182,7 @@ async function main() {
   // 3) Apply updates.
   console.log('\nApplying updates…');
   const uRes = await runChunked(updates, async (u) => {
-    const { error } = await db.from('products').update(u.update).eq('id', u.id);
-    if (error) throw new Error(error.message);
+    await db.updateTable('products').set(u.update as any).where('id', '=', u.id).execute();
     return true;
   });
   console.log(`   updated: ${uRes.ok}, failed: ${uRes.fail}`);
@@ -204,18 +193,18 @@ async function main() {
   let insFailed = 0;
   for (let i = 0; i < inserts.length; i += 500) {
     const batch = inserts.slice(i, i + 500);
-    const { error } = await db.from('products').insert(batch);
-    if (error) {
-      insFailed += batch.length;
-      console.warn(`   batch ${i}-${i + batch.length} failed: ${error.message}`);
-    } else {
+    try {
+      await db.insertInto('products').values(batch as any[]).execute();
       inserted += batch.length;
+    } catch (e: any) {
+      insFailed += batch.length;
+      console.warn(`   batch ${i}-${i + batch.length} failed: ${e?.message}`);
     }
   }
   console.log(`   inserted: ${inserted}, failed: ${insFailed}`);
 
   // Audit.
-  await db.from('product_import_runs').insert({
+  await db.insertInto('product_import_runs').values({
     source: 'csv',
     source_file: 'catalog.csv',
     status: uRes.fail + insFailed ? 'completed_with_errors' : 'completed',
@@ -224,15 +213,15 @@ async function main() {
     updated_count: uRes.ok,
     error_count: uRes.fail + insFailed,
     finished_at: new Date().toISOString(),
-  });
-  await db.from('activity_logs').insert({
+  }).execute();
+  await db.insertInto('activity_logs').values({
     actor_type: 'system',
     action: 'csv_catalog_import',
     entity_type: 'product',
     summary: `CSV catalog import: ${inserted} inserted, ${uRes.ok} updated/activated.`,
-  });
+  }).execute();
 
-  console.log('\nDone. Supabase now reflects the CSV catalog as the priced source of truth.');
+  console.log('\nDone. The database now reflects the CSV catalog as the priced source of truth.');
   console.log('Scraped-only products remain in review/staging until an admin completes them.');
 }
 

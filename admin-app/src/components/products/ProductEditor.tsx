@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Save, Check, Lock } from 'lucide-react';
-import type { Product } from '@integrations/supabase/types';
+import type { Product } from '@integrations/db/rows';
 import type { Locale } from '@/lib/i18n/config';
 
 export default function ProductEditor({ product, locale }: { product: Product; locale: Locale }) {

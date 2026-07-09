@@ -7,8 +7,8 @@
  * Body: { image?: {data,mime}, imageUrl?: string, limit?: number }
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { adminClient } from '@integrations/supabase/admin-client';
-import { supabaseStatus, geminiStatus } from '@integrations/status';
+import { getDb } from '@integrations/db/client';
+import { databaseStatus, geminiStatus } from '@integrations/status';
 import { resolveProducts } from '@integrations/pipelines/resolver';
 
 export const runtime = 'nodejs';
@@ -16,10 +16,10 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
-  const db = adminClient();
+  const db = getDb();
   if (!db) {
     return NextResponse.json(
-      { error: 'integration_not_configured', missing: supabaseStatus().missing.concat('SUPABASE_SERVICE_ROLE_KEY') },
+      { error: 'integration_not_configured', missing: databaseStatus().missing },
       { status: 503 },
     );
   }

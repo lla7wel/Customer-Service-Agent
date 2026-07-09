@@ -5,7 +5,7 @@ import {
 import { PageHeader, Card, StatCard, SectionTitle, Meter } from '@/components/ui';
 import NotConnected from '@/components/NotConnected';
 import { getT } from '@/lib/i18n/server';
-import { supabaseStatus } from '@integrations/status';
+import { databaseStatus } from '@integrations/status';
 import { countRows } from '@/lib/data';
 
 export const dynamic = 'force-dynamic';
@@ -13,16 +13,16 @@ export const dynamic = 'force-dynamic';
 export default async function AnalyticsPage() {
   const { t, locale } = getT();
   const ar = locale === 'ar';
-  const status = supabaseStatus();
+  const status = databaseStatus();
 
   const [conversations, needsHuman, matches, failedMatches, campaigns, aiErrors, aiOk] = await Promise.all([
     countRows('conversations'),
-    countRows('conversations', (q) => q.in('status', ['needs_human', 'human_active', 'issue_refund_exchange'])),
-    countRows('image_match_corrections', (q) => q.neq('outcome', 'none')),
-    countRows('image_match_corrections', (q) => q.eq('outcome', 'none')),
-    countRows('facebook_posts', (q) => q.eq('status', 'published')),
-    countRows('ai_events', (q) => q.eq('success', false)),
-    countRows('ai_events', (q) => q.eq('success', true)),
+    countRows('conversations', (q) => q.where('status', 'in', ['needs_human', 'human_active', 'issue_refund_exchange'])),
+    countRows('image_match_corrections', (q) => q.where('outcome', '!=', 'none')),
+    countRows('image_match_corrections', (q) => q.where('outcome', '=', 'none')),
+    countRows('facebook_posts', (q) => q.where('status', '=', 'published')),
+    countRows('ai_events', (q) => q.where('success', '=', false)),
+    countRows('ai_events', (q) => q.where('success', '=', true)),
   ]);
 
   const v = (r: { connected: boolean; count: number | null }) => (!r.connected ? '—' : (r.count ?? 0).toString());

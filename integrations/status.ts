@@ -5,7 +5,7 @@ import { envAny } from './env';
  * built on this: if `configured` is false, the UI shows a setup card and server
  * endpoints return 503 — nothing is ever faked.
  */
-export type IntegrationKey = 'supabase' | 'gemini' | 'meta' | 'cloudflare';
+export type IntegrationKey = 'database' | 'gemini' | 'meta' | 'cron';
 
 export interface IntegrationStatus {
   key: IntegrationKey;
@@ -17,19 +17,23 @@ export interface IntegrationStatus {
   hint: string;
 }
 
-export function supabaseStatus(): IntegrationStatus {
-  const url = envAny('NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_URL');
-  const anon = envAny('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'SUPABASE_ANON_KEY');
-  const missing: string[] = [];
-  if (!url) missing.push('NEXT_PUBLIC_SUPABASE_URL');
-  if (!anon) missing.push('NEXT_PUBLIC_SUPABASE_ANON_KEY');
+export function databaseStatus(): IntegrationStatus {
+  const url = envAny('DATABASE_URL');
   return {
-    key: 'supabase',
-    label: 'Supabase',
-    configured: missing.length === 0,
-    missing,
-    hint: 'Database, auth and storage. Run database/schema.sql, then add the API keys.',
+    key: 'database',
+    label: 'Database',
+    configured: !!url,
+    missing: url ? [] : ['DATABASE_URL'],
+    hint: 'PostgreSQL connection. Apply database/schema.sql + migrations, then set DATABASE_URL.',
   };
+}
+
+/** Where product/campaign images live and the public base URL they are served from. */
+export function mediaStatus(): { configured: boolean; missing: string[] } {
+  const missing: string[] = [];
+  if (!envAny('MEDIA_ROOT')) missing.push('MEDIA_ROOT');
+  if (!envAny('PUBLIC_MEDIA_BASE_URL')) missing.push('PUBLIC_MEDIA_BASE_URL');
+  return { configured: missing.length === 0, missing };
 }
 
 export function geminiStatus(): IntegrationStatus {
@@ -60,19 +64,19 @@ export function metaStatus(): IntegrationStatus {
   };
 }
 
-export function cloudflareStatus(): IntegrationStatus {
-  const secret = envAny('CLOUDFLARE_WEBHOOK_SECRET');
+export function cronStatus(): IntegrationStatus {
+  const secret = envAny('CRON_SECRET', 'CLOUDFLARE_WEBHOOK_SECRET');
   return {
-    key: 'cloudflare',
-    label: 'Workers / Cron',
+    key: 'cron',
+    label: 'Scheduler',
     configured: !!secret,
-    missing: secret ? [] : ['CLOUDFLARE_WEBHOOK_SECRET'],
-    hint: 'Optional: move webhooks/cron off the Next.js app (campaign scheduler).',
+    missing: secret ? [] : ['CRON_SECRET'],
+    hint: 'Shared secret for the campaign-scheduler cron endpoint.',
   };
 }
 
 export function allIntegrationStatuses(): IntegrationStatus[] {
-  return [supabaseStatus(), geminiStatus(), metaStatus(), cloudflareStatus()];
+  return [databaseStatus(), geminiStatus(), metaStatus(), cronStatus()];
 }
 
 /** The public base URL of the deployed app (used for Meta webhook callbacks). */

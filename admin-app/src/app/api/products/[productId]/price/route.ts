@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminClient } from '@integrations/supabase/admin-client';
-import { supabaseStatus } from '@integrations/status';
+import { getDb } from '@integrations/db/client';
+import { databaseStatus } from '@integrations/status';
 import { lockEditedFields } from '@integrations/product-locks';
 
 export const runtime = 'nodejs';
@@ -20,10 +20,10 @@ export const runtime = 'nodejs';
  * The admin app is the source of truth — a later scraper sync never overwrites these.
  */
 export async function POST(req: NextRequest, { params }: { params: { productId: string } }) {
-  const db = adminClient();
+  const db = getDb();
   if (!db) {
     return NextResponse.json(
-      { error: 'integration_not_configured', missing: supabaseStatus().missing.concat('SUPABASE_SERVICE_ROLE_KEY') },
+      { error: 'integration_not_configured', missing: databaseStatus().missing },
       { status: 503 },
     );
   }
@@ -38,12 +38,16 @@ export async function POST(req: NextRequest, { params }: { params: { productId: 
   const arabicName = typeof body?.arabic_name === 'string' ? body.arabic_name.trim() : '';
   const libyanName = typeof body?.libyan_display_name === 'string' ? body.libyan_display_name.trim() : '';
 
-  const { data: product, error: fErr } = await db
-    .from('products')
-    .select('id, active_campaign_id, campaign_price, english_name, arabic_name, libyan_display_name, admin_locked_fields')
-    .eq('id', params.productId)
-    .maybeSingle();
-  if (fErr) return NextResponse.json({ error: fErr.message }, { status: 500 });
+  let product;
+  try {
+    product = await db
+      .selectFrom('products')
+      .select(['id', 'active_campaign_id', 'campaign_price', 'english_name', 'arabic_name', 'libyan_display_name', 'admin_locked_fields'])
+      .where('id', '=', params.productId)
+      .executeTakeFirst();
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message ?? 'query_failed' }, { status: 500 });
+  }
   if (!product) return NextResponse.json({ error: 'not_found' }, { status: 404 });
 
   // A customer-facing Arabic/English name is required to activate.
@@ -63,18 +67,21 @@ export async function POST(req: NextRequest, { params }: { params: { productId: 
   if (libyanName) update.libyan_display_name = libyanName;
 
   // Admin review is an admin decision: lock the price/name/status it sets.
-  update.admin_locked_fields = lockEditedFields(product.admin_locked_fields, update);
+  update.admin_locked_fields = JSON.stringify(lockEditedFields(product.admin_locked_fields, update));
 
-  const { error } = await db.from('products').update(update).eq('id', params.productId);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  try {
+    await db.updateTable('products').set(update as any).where('id', '=', params.productId).execute();
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message ?? 'update_failed' }, { status: 500 });
+  }
 
-  await db.from('activity_logs').insert({
+  await db.insertInto('activity_logs').values({
     actor_type: 'human',
     action: 'price_review_complete',
     entity_type: 'product',
     entity_id: params.productId,
     summary: `Activated product: price ${price} LYD${englishName ? `, en="${englishName}"` : ''}${arabicName ? `, ar="${arabicName}"` : ''}`,
-  });
+  }).execute();
 
   return NextResponse.json({ ok: true, active_price: activePrice });
 }

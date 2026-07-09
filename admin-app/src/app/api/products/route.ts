@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminClient } from '@integrations/supabase/admin-client';
-import { supabaseStatus } from '@integrations/status';
+import { getDb } from '@integrations/db/client';
+import { databaseStatus } from '@integrations/status';
 import { lockEditedFields } from '@integrations/product-locks';
 
 export const runtime = 'nodejs';
@@ -19,10 +19,10 @@ const EDITABLE = [
  * later import can never overwrite it.
  */
 export async function POST(req: NextRequest) {
-  const db = adminClient();
+  const db = getDb();
   if (!db) {
     return NextResponse.json(
-      { error: 'integration_not_configured', missing: supabaseStatus().missing.concat('SUPABASE_SERVICE_ROLE_KEY') },
+      { error: 'integration_not_configured', missing: databaseStatus().missing },
       { status: 503 },
     );
   }
@@ -51,21 +51,24 @@ export async function POST(req: NextRequest) {
   insert.status = basePrice != null ? 'active' : 'draft';
 
   // Lock everything the admin entered against future sync/import overwrites.
-  insert.admin_locked_fields = lockEditedFields({}, insert);
+  insert.admin_locked_fields = JSON.stringify(lockEditedFields({}, insert));
 
-  const { data, error } = await db.from('products').insert(insert).select('id, product_code').single();
-  if (error) {
-    const conflict = /duplicate key|unique/i.test(error.message);
-    return NextResponse.json({ error: conflict ? 'product_code_exists' : error.message }, { status: conflict ? 409 : 500 });
+  let data: { id: string; product_code: string };
+  try {
+    data = await db.insertInto('products').values(insert as any).returning(['id', 'product_code']).executeTakeFirstOrThrow();
+  } catch (e: any) {
+    const msg = e?.message ?? 'insert_failed';
+    const conflict = /duplicate key|unique/i.test(msg);
+    return NextResponse.json({ error: conflict ? 'product_code_exists' : msg }, { status: conflict ? 409 : 500 });
   }
 
-  await db.from('activity_logs').insert({
+  await db.insertInto('activity_logs').values({
     actor_type: 'human',
     action: 'product_created',
     entity_type: 'product',
     entity_id: data.id,
     summary: `Created product ${data.product_code}`,
-  });
+  }).execute();
 
   return NextResponse.json({ ok: true, id: data.id, product_code: data.product_code });
 }

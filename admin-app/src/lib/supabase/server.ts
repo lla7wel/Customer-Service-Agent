@@ -1,13 +1,13 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
-import { supabaseStatus } from '@integrations/status';
+import { databaseStatus } from '@integrations/status';
 
 /**
  * Cookie-bound Supabase client for Server Components / Route Handlers.
  * Returns null when not configured so callers render "not connected".
  */
 export function getServerSupabase() {
-  const status = supabaseStatus();
+  const status = databaseStatus();
   if (!status.configured) return null;
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL!;

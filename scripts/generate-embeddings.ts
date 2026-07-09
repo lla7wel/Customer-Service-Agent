@@ -11,10 +11,10 @@
  * Dry:    DRY=1 npm run embeddings        (report only, no writes)
  * Force:  FORCE=1 npm run embeddings      (recompute even if already set)
  * Limit:  LIMIT=2000 npm run embeddings
- * Needs:  SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY + GEMINI_API_KEY
+ * Needs:  DATABASE_URL + GEMINI_API_KEY
  */
 import './_env';
-import { requireAdminClient } from '../integrations/supabase/admin-client';
+import { requireDb } from '../integrations/db/client';
 import { embedText, isGeminiConfigured } from '../integrations/gemini/client';
 
 const FETCH_BATCH = 200;
@@ -48,20 +48,21 @@ async function run() {
     console.error('GEMINI_API_KEY is required to generate real embeddings. Aborting (no fake vectors written).');
     process.exit(1);
   }
-  const db = requireAdminClient();
+  const db = requireDb();
   const stats = { scanned: 0, embedded: 0, skippedEmpty: 0, failed: 0, alreadyHad: 0 };
   let processed = 0;
   let from = 0;
 
   for (;;) {
     if (processed >= LIMIT) break;
-    let q = db.from('products')
-      .select('id, libyan_display_name, arabic_name, english_name, source_name, category, search_keywords, arabic_keywords, text_embedding')
-      .eq('status', 'active');
-    if (!FORCE) q = q.is('text_embedding', null);
-    const { data, error } = await q.range(from, from + FETCH_BATCH - 1);
-    if (error) { console.error('query error:', error.message); process.exitCode = 1; break; }
-    const rows = (data ?? []) as Row[];
+    let q = db.selectFrom('products')
+      .select(['id', 'libyan_display_name', 'arabic_name', 'english_name', 'source_name', 'category', 'search_keywords', 'arabic_keywords', 'text_embedding'])
+      .where('status', '=', 'active');
+    if (!FORCE) q = q.where('text_embedding', 'is', null);
+    let rows: Row[];
+    try {
+      rows = (await q.orderBy('id', 'asc').limit(FETCH_BATCH).offset(from).execute()) as Row[];
+    } catch (e: any) { console.error('query error:', e?.message); process.exitCode = 1; break; }
     if (rows.length === 0) break;
     // Pagination correctness: in non-FORCE mode, embedded rows DROP OUT of the
     // `text_embedding IS NULL` filter, so the result set shifts under us. We must
@@ -82,8 +83,9 @@ async function run() {
         const emb = await embedText(text, 'RETRIEVAL_DOCUMENT');
         if (!emb.values) { stats.failed++; return; }
         if (DRY) { stats.embedded++; return; }
-        const { error: upErr } = await db.from('products').update({ text_embedding: emb.values }).eq('id', row.id);
-        if (upErr) { stats.failed++; return; }
+        try {
+          await db.updateTable('products').set({ text_embedding: JSON.stringify(emb.values) }).where('id', '=', row.id).execute();
+        } catch { stats.failed++; return; }
         stats.embedded++;
       }));
       process.stdout.write(`\r  processed ${processed} · embedded ${stats.embedded} · empty ${stats.skippedEmpty} · failed ${stats.failed}   `);

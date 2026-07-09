@@ -1,11 +1,13 @@
 /**
  * UI-layer product row helpers used by catalog and inbox components.
- * toUiCandidate() shapes a raw Supabase products row into a UiCandidate.
- * productSelectColumns() is the canonical SELECT string for product queries in
+ * toUiCandidate() shapes a raw products row into a UiCandidate.
+ * uiProductQuery() is the canonical product select (with embedded images) for
  * the admin app — keeps join paths and column lists consistent.
  * Called by: catalog-match components, inbox components, product pages.
  * Must not: contain business logic or DB writes.
  */
+import { jsonArrayFrom } from 'kysely/helpers/postgres';
+import type { DB, Kysely } from '@integrations/db/client';
 import {
   customerProductName,
   originalProductName,
@@ -24,12 +26,24 @@ export interface UiCandidate {
   reason?: string | null;
 }
 
-const PRODUCT_SELECT =
-  'id,product_code,libyan_display_name,arabic_name,english_name,source_name,active_price,base_price,website_url,category,arabic_keywords,' +
-  'product_images!product_images_product_id_fkey(public_url,storage_path,is_primary,position)';
+const PRODUCT_COLS = [
+  'id', 'product_code', 'libyan_display_name', 'arabic_name', 'english_name', 'source_name',
+  'active_price', 'base_price', 'website_url', 'category', 'arabic_keywords',
+] as const;
 
-export function productSelectColumns(): string {
-  return PRODUCT_SELECT;
+/** Canonical admin product select: shared columns + embedded images array. */
+export function uiProductQuery(db: Kysely<DB>) {
+  return db
+    .selectFrom('products')
+    .select(PRODUCT_COLS.map((c) => `products.${c}` as const))
+    .select((eb) => [
+      jsonArrayFrom(
+        eb.selectFrom('product_images')
+          .select(['public_url', 'storage_path', 'is_primary', 'position'])
+          .whereRef('product_images.product_id', '=', 'products.id')
+          .orderBy('position', 'asc'),
+      ).as('product_images'),
+    ]);
 }
 
 export function toUiCandidate(product: any, raw: Partial<UiCandidate> = {}): UiCandidate {
@@ -46,15 +60,12 @@ export function toUiCandidate(product: any, raw: Partial<UiCandidate> = {}): UiC
   };
 }
 
-export async function hydrateUiCandidates(db: any, candidates: any[]): Promise<UiCandidate[]> {
+export async function hydrateUiCandidates(db: Kysely<DB>, candidates: any[]): Promise<UiCandidate[]> {
   const raw = (Array.isArray(candidates) ? candidates : []).filter((c) => c?.id);
   if (!raw.length) return [];
   const ids = Array.from(new Set(raw.map((c) => String(c.id))));
-  const { data } = await db
-    .from('products')
-    .select(PRODUCT_SELECT)
-    .in('id', ids);
-  const byId = new Map((data ?? []).map((p: any) => [p.id, p]));
+  const data = await uiProductQuery(db).where('products.id', 'in', ids).execute();
+  const byId = new Map(data.map((p: any) => [p.id, p]));
   return raw.map((c) => {
     const product = byId.get(String(c.id));
     if (product) return toUiCandidate(product, c);
@@ -72,7 +83,7 @@ export async function hydrateUiCandidates(db: any, candidates: any[]): Promise<U
   });
 }
 
-export async function hydrateMessagesWithCandidates(db: any, messages: any[]): Promise<any[]> {
+export async function hydrateMessagesWithCandidates(db: Kysely<DB>, messages: any[]): Promise<any[]> {
   const out = [...(messages ?? [])];
   const metas = out
     .map((m) => m?.ai_meta)
@@ -81,8 +92,8 @@ export async function hydrateMessagesWithCandidates(db: any, messages: any[]): P
 
   const ids = Array.from(new Set(metas.flatMap((meta) => meta.candidates.map((c: any) => c?.id).filter(Boolean).map(String))));
   if (!ids.length) return out;
-  const { data } = await db.from('products').select(PRODUCT_SELECT).in('id', ids);
-  const byId = new Map((data ?? []).map((p: any) => [p.id, p]));
+  const data = await uiProductQuery(db).where('products.id', 'in', ids).execute();
+  const byId = new Map(data.map((p: any) => [p.id, p]));
 
   return out.map((m) => {
     const candidates = m?.ai_meta?.candidates;

@@ -4,8 +4,8 @@
  * See [campaignId]/route.ts for per-campaign CRUD, publish, and asset management.
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { adminClient } from '@integrations/supabase/admin-client';
-import { supabaseStatus } from '@integrations/status';
+import { getDb } from '@integrations/db/client';
+import { databaseStatus } from '@integrations/status';
 
 export const runtime = 'nodejs';
 
@@ -17,10 +17,10 @@ const FIELDS = [
 
 /** Create a draft campaign. */
 export async function POST(req: NextRequest) {
-  const db = adminClient();
+  const db = getDb();
   if (!db) {
     return NextResponse.json(
-      { error: 'integration_not_configured', missing: supabaseStatus().missing.concat('SUPABASE_SERVICE_ROLE_KEY') },
+      { error: 'integration_not_configured', missing: databaseStatus().missing },
       { status: 503 },
     );
   }
@@ -30,16 +30,20 @@ export async function POST(req: NextRequest) {
   const row: Record<string, unknown> = { status: 'draft' };
   for (const k of FIELDS) if (k in body) row[k] = body[k];
 
-  const { data, error } = await db.from('campaigns').insert(row).select('id').single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  let data: { id: string };
+  try {
+    data = await db.insertInto('campaigns').values(row as any).returning('id').executeTakeFirstOrThrow();
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message ?? 'insert_failed' }, { status: 500 });
+  }
 
-  await db.from('activity_logs').insert({
+  await db.insertInto('activity_logs').values({
     actor_type: 'human',
     action: 'campaign_created',
     entity_type: 'campaign',
     entity_id: data.id,
     summary: body.name,
-  });
+  }).execute();
 
   return NextResponse.json({ ok: true, id: data.id });
 }

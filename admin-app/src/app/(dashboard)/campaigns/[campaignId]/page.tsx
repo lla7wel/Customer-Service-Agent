@@ -3,11 +3,11 @@ import { ArrowLeft, Eye, Percent, CalendarClock, ImageOff } from 'lucide-react';
 import { Card, Badge, Notice, SectionTitle } from '@/components/ui';
 import NotConnected from '@/components/NotConnected';
 import { getT } from '@/lib/i18n/server';
-import { supabaseStatus, metaStatus } from '@integrations/status';
+import { databaseStatus, metaStatus } from '@integrations/status';
 import { fetchOne, fetchRows } from '@/lib/data';
 import { campaignTone } from '@/lib/status-tone';
 import { humanize, formatDate } from '@/lib/format';
-import type { Campaign } from '@integrations/supabase/types';
+import type { Campaign } from '@integrations/db/rows';
 import AssetManager from '@/components/campaigns/AssetManager';
 import CaptionPanel from '@/components/campaigns/CaptionPanel';
 import PostComposer from '@/components/campaigns/PostComposer';
@@ -20,13 +20,13 @@ interface Post { id: string; type: string; status: string; asset_ids: string[]; 
 export default async function CampaignDetailPage({ params }: { params: { campaignId: string } }) {
   const { locale } = getT();
   const ar = locale === 'ar';
-  const status = supabaseStatus();
+  const status = databaseStatus();
   if (!status.configured) return (<div><Back ar={ar} /><NotConnected status={status} /></div>);
 
   const [{ row: campaign }, assetsRes, postsRes] = await Promise.all([
     fetchOne<Campaign>('campaigns', params.campaignId),
-    fetchRows<Asset>('campaign_assets', (q) => q.eq('campaign_id', params.campaignId).order('position', { ascending: true })),
-    fetchRows<Post>('facebook_posts', (q) => q.eq('campaign_id', params.campaignId).order('created_at', { ascending: true })),
+    fetchRows<Asset>('campaign_assets', (q) => q.where('campaign_id', '=', params.campaignId).orderBy('position', 'asc')),
+    fetchRows<Post>('facebook_posts', (q) => q.where('campaign_id', '=', params.campaignId).orderBy('created_at', 'asc')),
   ]);
 
   if (!campaign) return (<div><Back ar={ar} /><Notice tone="error">{ar ? 'الحملة غير موجودة' : 'Campaign not found'}</Notice></div>);

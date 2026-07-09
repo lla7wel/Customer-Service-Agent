@@ -3,7 +3,8 @@ import { Megaphone, Plus, Percent, CalendarClock, ImageOff, Images, Sparkles } f
 import { PageHeader, Card, EmptyState, Badge } from '@/components/ui';
 import NotConnected from '@/components/NotConnected';
 import { getT } from '@/lib/i18n/server';
-import { supabaseStatus } from '@integrations/status';
+import { databaseStatus } from '@integrations/status';
+import { jsonArrayFrom } from 'kysely/helpers/postgres';
 import { getDb } from '@/lib/supabase/db';
 import { campaignTone } from '@/lib/status-tone';
 import { humanize, formatDate } from '@/lib/format';
@@ -23,7 +24,7 @@ interface Row {
 export default async function CampaignsPage() {
   const { t, locale } = getT();
   const ar = locale === 'ar';
-  const status = supabaseStatus();
+  const status = databaseStatus();
   const supabase = getDb();
 
   const newBtn = (
@@ -34,12 +35,23 @@ export default async function CampaignsPage() {
     return (<div><PageHeader icon={Megaphone} title={t('nav_campaigns')} subtitle={ar ? 'منشئ الحملات التسويقية' : 'Marketing campaign builder'} actions={newBtn} /><NotConnected status={status} /></div>);
   }
 
-  const { data, error } = await supabase
-    .from('campaigns')
-    .select('id,name,type,status,discount_percent,starts_at,campaign_assets(public_url)')
-    .order('created_at', { ascending: false })
-    .limit(60);
-  const rows = (data ?? []) as unknown as Row[];
+  let rows: Row[] = [];
+  let error: { message: string } | null = null;
+  try {
+    rows = (await supabase
+      .selectFrom('campaigns')
+      .select(['id', 'name', 'type', 'status', 'discount_percent', 'starts_at'])
+      .select((eb) => [
+        jsonArrayFrom(
+          eb.selectFrom('campaign_assets').select('public_url').whereRef('campaign_assets.campaign_id', '=', 'campaigns.id'),
+        ).as('campaign_assets'),
+      ])
+      .orderBy('created_at', 'desc')
+      .limit(60)
+      .execute()) as unknown as Row[];
+  } catch (e: any) {
+    error = { message: e?.message ?? 'query_failed' };
+  }
 
   return (
     <div>

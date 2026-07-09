@@ -3,16 +3,16 @@ import { ArrowLeft, AlertTriangle, MessageSquare } from 'lucide-react';
 import { Badge, EmptyState } from '@/components/ui';
 import NotConnected from '@/components/NotConnected';
 import { getT } from '@/lib/i18n/server';
-import { supabaseStatus } from '@integrations/status';
+import { databaseStatus } from '@integrations/status';
 import { fetchOne, fetchRows } from '@/lib/data';
 import { conversationTone } from '@/lib/status-tone';
 import { humanize, formatDate } from '@/lib/format';
-import type { Conversation, Message, Customer } from '@integrations/supabase/types';
+import type { Conversation, Message, Customer } from '@integrations/db/rows';
 import ConversationWorkspace from '@/components/inbox/ConversationWorkspace';
 import AiControls from '@/components/inbox/AiControls';
 import CustomerInfoPanel from '@/components/inbox/CustomerInfoPanel';
 import CustomerMemoryPanel from '@/components/inbox/CustomerMemoryPanel';
-import { adminClient } from '@integrations/supabase/admin-client';
+import { getDb } from '@integrations/db/client';
 import { getCustomerMemory } from '@integrations/tools';
 import { hydrateMessagesWithCandidates, hydrateUiCandidates, type UiCandidate } from '@/lib/product-candidates';
 
@@ -21,7 +21,7 @@ export const dynamic = 'force-dynamic';
 export default async function ConversationPage({ params }: { params: { conversationId: string } }) {
   const { locale } = getT();
   const ar = locale === 'ar';
-  const status = supabaseStatus();
+  const status = databaseStatus();
   const id = params.conversationId;
 
   if (!status.configured) {
@@ -30,7 +30,7 @@ export default async function ConversationPage({ params }: { params: { conversat
 
   const [{ row: convo }, msgs] = await Promise.all([
     fetchOne<Conversation>('conversations', id),
-    fetchRows<Message>('messages', (q) => q.eq('conversation_id', id).order('created_at', { ascending: true }).limit(200)),
+    fetchRows<Message>('messages', (q) => q.where('conversation_id', '=', id).orderBy('created_at', 'asc').limit(200)),
   ]);
 
   if (!convo) {
@@ -51,7 +51,7 @@ export default async function ConversationPage({ params }: { params: { conversat
     const c = extractCands(msgs.rows[i].ai_meta);
     if (c.length) { candidates = c; break; }
   }
-  const db = adminClient();
+  const db = getDb();
   const safeMessages = db ? await hydrateMessagesWithCandidates(db, msgs.rows) : msgs.rows;
   if (db && candidates.length) candidates = await hydrateUiCandidates(db, candidates);
   const memory = db && convo.customer_id ? await getCustomerMemory(db, convo.customer_id) : null;

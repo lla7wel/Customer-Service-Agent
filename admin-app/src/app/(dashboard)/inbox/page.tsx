@@ -4,14 +4,15 @@ import { PageHeader, Card, EmptyState, Badge } from '@/components/ui';
 import NotConnected from '@/components/NotConnected';
 import AutoRefresh from '@/components/AutoRefresh';
 import { getT } from '@/lib/i18n/server';
-import { supabaseStatus } from '@integrations/status';
+import { databaseStatus } from '@integrations/status';
+import { jsonObjectFrom } from 'kysely/helpers/postgres';
 import { getDb } from '@/lib/supabase/db';
 import { conversationTone } from '@/lib/status-tone';
 import { humanize, timeAgo } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
-const NEEDS_ACTION = ['needs_human', 'waiting_for_order_confirmation', 'issue_refund_exchange', 'human_active'];
+const NEEDS_ACTION = ['needs_human', 'waiting_for_order_confirmation', 'issue_refund_exchange', 'human_active'] as const;
 
 const FILTERS: { id: string; en: string; ar: string }[] = [
   { id: 'all', en: 'All', ar: 'الكل' },
@@ -37,7 +38,7 @@ interface Row {
 export default async function InboxPage({ searchParams }: { searchParams: { filter?: string } }) {
   const { t, locale } = getT();
   const ar = locale === 'ar';
-  const status = supabaseStatus();
+  const status = databaseStatus();
   const filter = searchParams.filter ?? 'all';
 
   const supabase = getDb();
@@ -46,17 +47,27 @@ export default async function InboxPage({ searchParams }: { searchParams: { filt
   }
 
   let query = supabase
-    .from('conversations')
-    .select('id,channel,status,ai_enabled,detected_intent,context_summary,last_message_at,last_message_preview,unread_count,customers(display_name)')
-    .order('last_message_at', { ascending: false, nullsFirst: false })
+    .selectFrom('conversations')
+    .select(['id', 'channel', 'status', 'ai_enabled', 'detected_intent', 'context_summary', 'last_message_at', 'last_message_preview', 'unread_count'])
+    .select((eb) => [
+      jsonObjectFrom(
+        eb.selectFrom('customers').select('display_name').whereRef('customers.id', '=', 'conversations.customer_id'),
+      ).as('customers'),
+    ])
+    .orderBy('last_message_at', (ob) => ob.desc().nullsLast())
     .limit(100);
-  if (filter === 'action') query = query.in('status', NEEDS_ACTION);
-  else if (filter === 'ai') query = query.eq('status', 'ai_handling');
-  else if (filter === 'human') query = query.eq('status', 'human_active');
-  else if (filter === 'resolved') query = query.in('status', ['resolved', 'completed']);
+  if (filter === 'action') query = query.where('status', 'in', [...NEEDS_ACTION]);
+  else if (filter === 'ai') query = query.where('status', '=', 'ai_handling');
+  else if (filter === 'human') query = query.where('status', '=', 'human_active');
+  else if (filter === 'resolved') query = query.where('status', 'in', ['resolved', 'completed']);
 
-  const { data, error } = await query;
-  const rows = (data ?? []) as unknown as Row[];
+  let rows: Row[] = [];
+  let error: { message: string } | null = null;
+  try {
+    rows = (await query.execute()) as unknown as Row[];
+  } catch (e: any) {
+    error = { message: e?.message ?? 'query_failed' };
+  }
 
   return (
     <div>
@@ -77,7 +88,7 @@ export default async function InboxPage({ searchParams }: { searchParams: { filt
         </div>
         <div className="relative grid grid-cols-3 gap-2 text-xs sm:w-80">
           <QueueStat label={ar ? 'المحادثات' : 'Threads'} value={rows.length} />
-          <QueueStat label={ar ? 'تحتاج إجراء' : 'Action'} value={rows.filter((r) => NEEDS_ACTION.includes(r.status)).length} tone="warn" />
+          <QueueStat label={ar ? 'تحتاج إجراء' : 'Action'} value={rows.filter((r) => (NEEDS_ACTION as readonly string[]).includes(r.status)).length} tone="warn" />
           <QueueStat label={ar ? 'AI يعمل' : 'AI live'} value={rows.filter((r) => r.ai_enabled).length} tone="accent" />
         </div>
       </section>
@@ -108,7 +119,7 @@ export default async function InboxPage({ searchParams }: { searchParams: { filt
         <Card pad={false} className="divide-y divide-line overflow-hidden">
           {rows.map((c) => {
             const name = c.customers?.display_name || c.context_summary?.slice(0, 40) || `#${c.id.slice(0, 8)}`;
-            const needsAction = NEEDS_ACTION.includes(c.status);
+            const needsAction = (NEEDS_ACTION as readonly string[]).includes(c.status);
             return (
               <Link key={c.id} href={`/inbox/${c.id}`} className="group flex items-center gap-3 px-4 py-3 transition hover:bg-surface2/50">
                 <span className="relative inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-line bg-surface2 text-sm font-semibold text-fg shadow-card">

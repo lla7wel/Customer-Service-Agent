@@ -8,12 +8,13 @@
  *
  * Default is dry-run. Apply with: npx tsx approve-catalog-matches.ts --apply
  */
-import { createClient } from '@supabase/supabase-js';
 import { config } from 'dotenv';
 import path from 'node:path';
 
 config({ path: path.resolve(new URL('.', import.meta.url).pathname, '../.env') });
 config();
+
+import { requireDb } from '../integrations/db/client';
 
 type ProductRow = {
   id: string;
@@ -44,22 +45,8 @@ type ImageRow = {
 const apply = process.argv.includes('--apply');
 const limitArg = process.argv.find((x) => x.startsWith('--limit='));
 const limit = limitArg ? Math.max(1, Number(limitArg.split('=')[1]) || 0) : null;
-const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-if (!url || !key) {
-  console.log(JSON.stringify({
-    ok: false,
-    error: 'missing_supabase_env',
-    missing: [
-      !url ? 'SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL' : null,
-      !key ? 'SUPABASE_SERVICE_ROLE_KEY' : null,
-    ].filter(Boolean),
-  }, null, 2));
-  process.exit(1);
-}
-
-const db = createClient(url, key, { auth: { persistSession: false } });
+const db = requireDb();
 
 function chunk<T>(arr: T[], size: number): T[][] {
   const out: T[][] = [];
@@ -91,30 +78,24 @@ function appendRawEvent(raw: unknown, key: string, event: Record<string, unknown
 }
 
 async function loadPossible(): Promise<SuggestionRow[]> {
-  const rows: SuggestionRow[] = [];
-  for (let from = 0;; from += 1000) {
-    const { data, error } = await db
-      .from('catalog_match_suggestions')
-      .select('id, csv_product_id, scraper_product_id, score, confidence, evidence')
-      .eq('state', 'possible')
-      .order('score', { ascending: false, nullsFirst: false })
-      .range(from, from + 999);
-    if (error) throw new Error(error.message);
-    rows.push(...((data ?? []) as SuggestionRow[]));
-    if (!data || data.length < 1000) break;
-  }
+  const rows = (await db
+    .selectFrom('catalog_match_suggestions')
+    .select(['id', 'csv_product_id', 'scraper_product_id', 'score', 'confidence', 'evidence'])
+    .where('state', '=', 'possible')
+    .orderBy('score', (ob) => ob.desc().nullsLast())
+    .execute()) as unknown as SuggestionRow[];
   return limit ? rows.slice(0, limit) : rows;
 }
 
 async function loadProducts(ids: string[]): Promise<Map<string, ProductRow>> {
   const map = new Map<string, ProductRow>();
   for (const idsChunk of chunk(Array.from(new Set(ids)), 100)) {
-    const { data, error } = await retry('load_products', () => db
-      .from('products')
-      .select('id, source, status, base_price, primary_image_id, source_name, product_code, raw')
-      .in('id', idsChunk));
-    if (error) throw new Error(error.message);
-    for (const p of (data ?? []) as ProductRow[]) map.set(p.id, p);
+    const data = await retry('load_products', () => db
+      .selectFrom('products')
+      .select(['id', 'source', 'status', 'base_price', 'primary_image_id', 'source_name', 'product_code', 'raw'])
+      .where('id', 'in', idsChunk)
+      .execute());
+    for (const p of data as unknown as ProductRow[]) map.set(p.id, p);
   }
   return map;
 }
@@ -122,13 +103,13 @@ async function loadProducts(ids: string[]): Promise<Map<string, ProductRow>> {
 async function loadImages(scraperIds: string[]): Promise<Map<string, ImageRow[]>> {
   const map = new Map<string, ImageRow[]>();
   for (const idsChunk of chunk(Array.from(new Set(scraperIds)), 100)) {
-    const { data, error } = await retry('load_images', () => db
-      .from('product_images')
-      .select('id, product_id, position, is_primary, public_url')
-      .in('product_id', idsChunk)
-      .order('position', { ascending: true }));
-    if (error) throw new Error(error.message);
-    for (const img of (data ?? []) as ImageRow[]) {
+    const data = await retry('load_images', () => db
+      .selectFrom('product_images')
+      .select(['id', 'product_id', 'position', 'is_primary', 'public_url'])
+      .where('product_id', 'in', idsChunk)
+      .orderBy('position', 'asc')
+      .execute());
+    for (const img of data as unknown as ImageRow[]) {
       const arr = map.get(img.product_id) ?? [];
       arr.push(img);
       map.set(img.product_id, arr);
@@ -169,37 +150,41 @@ async function approve(row: SuggestionRow, csv: ProductRow, scraper: ProductRow,
     score: row.score,
   };
 
-  const move = await db.from('product_images').update({ product_id: row.csv_product_id }).eq('product_id', scraperId);
-  if (move.error) return { ok: false, reason: `move_images:${move.error.message}` };
+  try {
+    await db.updateTable('product_images').set({ product_id: row.csv_product_id }).where('product_id', '=', scraperId).execute();
+  } catch (e: any) { return { ok: false, reason: `move_images:${e?.message}` }; }
 
-  const csvUpdate = await db.from('products').update({
-    primary_image_id: primary.id,
-    raw: appendRawEvent(csv.raw, 'catalog_match_attached', baseEvent),
-  }).eq('id', row.csv_product_id);
-  if (csvUpdate.error) return { ok: false, reason: `update_csv:${csvUpdate.error.message}` };
+  try {
+    await db.updateTable('products').set({
+      primary_image_id: primary.id,
+      raw: JSON.stringify(appendRawEvent(csv.raw, 'catalog_match_attached', baseEvent)),
+    }).where('id', '=', row.csv_product_id).execute();
+  } catch (e: any) { return { ok: false, reason: `update_csv:${e?.message}` }; }
 
-  const archive = await db.from('products').update({
-    status: 'archived',
-    primary_image_id: null,
-    raw: {
-      ...asRecord(scraper.raw),
-      catalog_match_merged_into: {
-        csv_product_id: row.csv_product_id,
-        image_count: imgs.length,
-        merged_at: attachedAt,
-        mode: 'bulk_approve',
-        suggestion_id: row.id,
-      },
-    },
-  }).eq('id', scraperId);
-  if (archive.error) return { ok: false, reason: `archive_scraper:${archive.error.message}` };
+  try {
+    await db.updateTable('products').set({
+      status: 'archived',
+      primary_image_id: null,
+      raw: JSON.stringify({
+        ...asRecord(scraper.raw),
+        catalog_match_merged_into: {
+          csv_product_id: row.csv_product_id,
+          image_count: imgs.length,
+          merged_at: attachedAt,
+          mode: 'bulk_approve',
+          suggestion_id: row.id,
+        },
+      }),
+    }).where('id', '=', scraperId).execute();
+  } catch (e: any) { return { ok: false, reason: `archive_scraper:${e?.message}` }; }
 
-  const suggestion = await db.from('catalog_match_suggestions').update({
-    state: 'approved',
-    reviewed_at: attachedAt,
-    evidence: { ...(row.evidence ?? {}), mode: 'bulk_approve', image_count: imgs.length, scraper_source_name: scraper.source_name },
-  }).eq('id', row.id);
-  if (suggestion.error) return { ok: false, reason: `update_suggestion:${suggestion.error.message}` };
+  try {
+    await db.updateTable('catalog_match_suggestions').set({
+      state: 'approved',
+      reviewed_at: attachedAt,
+      evidence: JSON.stringify({ ...(row.evidence ?? {}), mode: 'bulk_approve', image_count: imgs.length, scraper_source_name: scraper.source_name }),
+    }).where('id', '=', row.id).execute();
+  } catch (e: any) { return { ok: false, reason: `update_suggestion:${e?.message}` }; }
 
   return { ok: true, moved: imgs.length };
 }
@@ -263,14 +248,14 @@ if (apply) {
         entity_type: 'product',
         entity_id: item.row.csv_product_id,
         summary: `Attached ${r.moved} scraped images from ${item.row.scraper_product_id} to CSV product ${item.row.csv_product_id}`,
-        meta: {
+        meta: JSON.stringify({
           csv_product_id: item.row.csv_product_id,
           scraper_product_id: item.row.scraper_product_id,
           image_count: r.moved,
           suggestion_id: item.row.id,
           confidence: item.row.confidence,
           score: item.row.score,
-        },
+        }),
       });
     } else {
       result.failed[r.reason] = (result.failed[r.reason] ?? 0) + 1;
@@ -279,20 +264,24 @@ if (apply) {
       console.log(`progress ${i + 1}/${valid.length} approved=${result.approved}`);
     }
     if (logs.length >= 200) {
-      await db.from('activity_logs').insert(logs.splice(0, logs.length));
+      await db.insertInto('activity_logs').values(logs.splice(0, logs.length) as any[]).execute();
     }
   }
-  if (logs.length) await db.from('activity_logs').insert(logs);
+  if (logs.length) await db.insertInto('activity_logs').values(logs as any[]).execute();
 
   for (let i = 0; i < invalidRows.length; i++) {
     const { row, reason } = invalidRows[i];
-    const { error } = await db.from('catalog_match_suggestions').update({
-      state: 'needs_review',
-      reviewed_at: new Date().toISOString(),
-      evidence: { ...(row.evidence ?? {}), bulk_approve_skipped: true, skip_reason: reason },
-    }).eq('id', row.id);
-    if (error) result.failed[`mark_invalid:${error.message}`] = (result.failed[`mark_invalid:${error.message}`] ?? 0) + 1;
-    else result.marked_invalid_needs_review++;
+    try {
+      await db.updateTable('catalog_match_suggestions').set({
+        state: 'needs_review',
+        reviewed_at: new Date().toISOString(),
+        evidence: JSON.stringify({ ...(row.evidence ?? {}), bulk_approve_skipped: true, skip_reason: reason }),
+      }).where('id', '=', row.id).execute();
+      result.marked_invalid_needs_review++;
+    } catch (e: any) {
+      const key = `mark_invalid:${e?.message}`;
+      result.failed[key] = (result.failed[key] ?? 0) + 1;
+    }
     if ((i + 1) % 200 === 0) console.log(`marked invalid ${i + 1}/${invalidRows.length}`);
   }
 }

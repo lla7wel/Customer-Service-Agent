@@ -5,10 +5,10 @@ import {
 import { PageHeader, Card, EmptyState, Badge } from '@/components/ui';
 import NotConnected from '@/components/NotConnected';
 import { getT } from '@/lib/i18n/server';
-import { supabaseStatus } from '@integrations/status';
+import { databaseStatus } from '@integrations/status';
 import { fetchRows } from '@/lib/data';
 import { activityLabel, activitySummary, formatDate, humanize } from '@/lib/format';
-import type { ActivityLog } from '@integrations/supabase/types';
+import type { ActivityLog } from '@integrations/db/rows';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,8 +30,8 @@ const ICON: Record<string, any> = {
 export default async function LogsPage() {
   const { t, locale } = getT();
   const ar = locale === 'ar';
-  const status = supabaseStatus();
-  const { connected, rows, error } = await fetchRows<ActivityLog>('activity_logs', (q) => q.order('created_at', { ascending: false }).limit(150));
+  const status = databaseStatus();
+  const { connected, rows, error } = await fetchRows<ActivityLog>('activity_logs', (q) => q.orderBy('created_at', 'desc').limit(150));
 
   return (
     <div>

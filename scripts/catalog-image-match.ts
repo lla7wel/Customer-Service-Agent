@@ -8,7 +8,8 @@
  *   npm run match:images -- --apply --yes --limit=100
  */
 import './_lib';
-import { requireAdminClient } from '../integrations/supabase/admin-client';
+import { requireDb } from '../integrations/db/client';
+import { jsonArrayFrom } from 'kysely/helpers/postgres';
 import {
   bestCatalogMatch,
   displayProductName,
@@ -86,108 +87,96 @@ function shouldAttach(level: MatchConfidenceLevel, minLevel: 'high' | 'medium') 
   return minLevel === 'medium' && level === 'medium';
 }
 
-async function loadTargets(db: ReturnType<typeof requireAdminClient>): Promise<CsvTarget[]> {
-  const rows: CsvTarget[] = [];
-  let from = 0;
-  for (;;) {
-    const { data, error } = await db
-      .from('products')
-      .select('id, english_name, arabic_name, libyan_display_name, product_code, barcode, category, search_keywords, arabic_keywords, base_price, raw')
-      .eq('source', 'csv')
-      .eq('status', 'active')
-      .not('base_price', 'is', null)
-      .is('primary_image_id', null)
-      .order('updated_at', { ascending: false })
-      .range(from, from + 999);
-    if (error) throw new Error(error.message);
-    rows.push(...((data ?? []) as CsvTarget[]));
-    if (!data || data.length < 1000) break;
-    from += 1000;
-  }
-  return rows;
+async function loadTargets(db: ReturnType<typeof requireDb>): Promise<CsvTarget[]> {
+  return (await db
+    .selectFrom('products')
+    .select(['id', 'english_name', 'arabic_name', 'libyan_display_name', 'product_code', 'barcode', 'category', 'search_keywords', 'arabic_keywords', 'base_price', 'raw'])
+    .where('source', '=', 'csv')
+    .where('status', '=', 'active')
+    .where('base_price', 'is not', null)
+    .where('primary_image_id', 'is', null)
+    .orderBy('updated_at', 'desc')
+    .execute()) as unknown as CsvTarget[];
 }
 
-async function loadCandidates(db: ReturnType<typeof requireAdminClient>): Promise<Candidate[]> {
+async function loadCandidates(db: ReturnType<typeof requireDb>): Promise<Candidate[]> {
+  const data = await db
+    .selectFrom('products')
+    .select(['id', 'source_name', 'product_code', 'barcode', 'category', 'raw'])
+    .select((eb) => [
+      jsonArrayFrom(
+        eb.selectFrom('product_images').select(['public_url', 'is_primary', 'position'])
+          .whereRef('product_images.product_id', '=', 'products.id').orderBy('position', 'asc'),
+      ).as('product_images'),
+    ])
+    .where('source', '=', 'scraper')
+    .where('status', '!=', 'archived')
+    .where('base_price', 'is', null)
+    .execute();
   const rows: Candidate[] = [];
-  let from = 0;
-  for (;;) {
-    const { data, error } = await db
-      .from('products')
-      .select('id, source_name, product_code, barcode, category, raw, product_images!product_images_product_id_fkey(public_url,is_primary,position)')
-      .eq('source', 'scraper')
-      .neq('status', 'archived')
-      .is('base_price', null)
-      .range(from, from + 999);
-    if (error) throw new Error(error.message);
-    for (const p of (data ?? []) as any[]) {
-      const imgs = p.product_images ?? [];
-      if (imgs.length === 0) continue;
-      const primary = imgs.find((i: any) => i.is_primary) ?? imgs.find((i: any) => i.public_url) ?? imgs[0];
-      rows.push({
-        id: p.id,
-        source_name: p.source_name,
-        product_code: p.product_code ?? null,
-        barcode: p.barcode ?? null,
-        category: p.category,
-        image: primary?.public_url ?? null,
-        image_count: imgs.length,
-        raw: p.raw,
-      });
-    }
-    if (!data || data.length < 1000) break;
-    from += 1000;
+  for (const p of data as any[]) {
+    const imgs = p.product_images ?? [];
+    if (imgs.length === 0) continue;
+    const primary = imgs.find((i: any) => i.is_primary) ?? imgs.find((i: any) => i.public_url) ?? imgs[0];
+    rows.push({
+      id: p.id,
+      source_name: p.source_name,
+      product_code: p.product_code ?? null,
+      barcode: p.barcode ?? null,
+      category: p.category,
+      image: primary?.public_url ?? null,
+      image_count: imgs.length,
+      raw: p.raw,
+    });
   }
   return rows;
 }
 
-async function attachImages(db: ReturnType<typeof requireAdminClient>, args: {
+async function attachImages(db: ReturnType<typeof requireDb>, args: {
   csvProductId: string;
   scraperProductId: string;
   level: MatchConfidenceLevel;
   confidence: number;
   reason: string;
 }) {
-  const { data: csv, error: csvErr } = await db
-    .from('products')
-    .select('id, source, status, base_price, primary_image_id, raw')
-    .eq('id', args.csvProductId)
-    .maybeSingle();
-  if (csvErr) throw new Error(csvErr.message);
+  const csv = await db
+    .selectFrom('products')
+    .select(['id', 'source', 'status', 'base_price', 'primary_image_id', 'raw'])
+    .where('id', '=', args.csvProductId)
+    .executeTakeFirst();
   if (!csv) throw new Error('csv_not_found');
   if (csv.source !== 'csv' || csv.status !== 'active' || csv.base_price == null) {
     throw new Error('target_is_not_active_priced_csv_product');
   }
   if (csv.primary_image_id) return { moved: 0, skipped: 'csv_already_has_primary_image' };
 
-  const { data: scraper, error: scraperErr } = await db
-    .from('products')
-    .select('id, source, status, source_name, product_code, raw')
-    .eq('id', args.scraperProductId)
-    .maybeSingle();
-  if (scraperErr) throw new Error(scraperErr.message);
+  const scraper = await db
+    .selectFrom('products')
+    .select(['id', 'source', 'status', 'source_name', 'product_code', 'raw'])
+    .where('id', '=', args.scraperProductId)
+    .executeTakeFirst();
   if (!scraper) throw new Error('scraper_not_found');
   if (scraper.source !== 'scraper' || scraper.status === 'archived') {
     throw new Error('source_is_not_open_scraper_review_product');
   }
 
-  const { data: imgs, error: imgErr } = await db
-    .from('product_images')
-    .select('id, position, is_primary, public_url')
-    .eq('product_id', args.scraperProductId)
-    .order('position', { ascending: true });
-  if (imgErr) throw new Error(imgErr.message);
-  if (!imgs || imgs.length === 0) throw new Error('no_images_on_source');
+  const imgs = await db
+    .selectFrom('product_images')
+    .select(['id', 'position', 'is_primary', 'public_url'])
+    .where('product_id', '=', args.scraperProductId)
+    .orderBy('position', 'asc')
+    .execute();
+  if (imgs.length === 0) throw new Error('no_images_on_source');
 
-  const { error: moveErr } = await db.from('product_images').update({ product_id: args.csvProductId }).eq('product_id', args.scraperProductId);
-  if (moveErr) throw new Error(moveErr.message);
+  await db.updateTable('product_images').set({ product_id: args.csvProductId }).where('product_id', '=', args.scraperProductId).execute();
 
   const primary = imgs.find((i) => i.public_url) ?? imgs[0];
   const attachedAt = new Date().toISOString();
-  const { error: csvUpdateErr } = await db
-    .from('products')
-    .update({
+  await db
+    .updateTable('products')
+    .set({
       primary_image_id: primary.id,
-      raw: appendRawEvent(csv.raw, 'catalog_match_attached', {
+      raw: JSON.stringify(appendRawEvent(csv.raw, 'catalog_match_attached', {
         scraper_product_id: args.scraperProductId,
         scraper_product_code: scraper.product_code,
         scraper_source_name: scraper.source_name,
@@ -197,17 +186,16 @@ async function attachImages(db: ReturnType<typeof requireAdminClient>, args: {
         reason: args.reason,
         attached_at: attachedAt,
         mode: 'script_auto_attach',
-      }),
+      })),
     })
-    .eq('id', args.csvProductId);
-  if (csvUpdateErr) throw new Error(csvUpdateErr.message);
+    .where('id', '=', args.csvProductId).execute();
 
-  const { error: archiveErr } = await db
-    .from('products')
-    .update({
+  await db
+    .updateTable('products')
+    .set({
       status: 'archived',
       primary_image_id: null,
-      raw: {
+      raw: JSON.stringify({
         ...asRecord(scraper.raw),
         catalog_match_merged_into: {
           csv_product_id: args.csvProductId,
@@ -218,18 +206,17 @@ async function attachImages(db: ReturnType<typeof requireAdminClient>, args: {
           merged_at: attachedAt,
           mode: 'script_auto_attach',
         },
-      },
+      }),
     })
-    .eq('id', args.scraperProductId);
-  if (archiveErr) throw new Error(archiveErr.message);
+    .where('id', '=', args.scraperProductId).execute();
 
-  await db.from('activity_logs').insert({
+  await db.insertInto('activity_logs').values({
     actor_type: 'system',
     action: 'catalog_image_match_auto_attached',
     entity_type: 'product',
     entity_id: args.csvProductId,
     summary: `Auto-attached ${imgs.length} scraped images from ${args.scraperProductId} to CSV product ${args.csvProductId}`,
-    meta: {
+    meta: JSON.stringify({
       csv_product_id: args.csvProductId,
       scraper_product_id: args.scraperProductId,
       image_count: imgs.length,
@@ -237,8 +224,8 @@ async function attachImages(db: ReturnType<typeof requireAdminClient>, args: {
       confidence_level: args.level,
       reason: args.reason,
       duplicate_archived: true,
-    },
-  });
+    }),
+  }).execute();
 
   return { moved: imgs.length, skipped: null };
 }
@@ -249,12 +236,12 @@ async function main() {
     throw new Error('Refusing to apply without --yes. Run dry-run first, then use --apply --yes.');
   }
 
-  console.log('EH-SYSTEM1 — catalog image match');
+  console.log('EH-SYSTEM — catalog image match');
   console.log(opts.apply ? 'Mode: APPLY' : 'Mode: DRY RUN');
   console.log(`Confidence: ${opts.minLevel}+`);
   console.log(`Limit: ${opts.limit}\n`);
 
-  const db = requireAdminClient();
+  const db = requireDb();
   const [targetsRaw, candidatesRaw] = await Promise.all([loadTargets(db), loadCandidates(db)]);
   const targets = targetsRaw.map((p) => prepareMatchProduct(p));
   const candidates = candidatesRaw.map((p) => prepareMatchProduct(p));

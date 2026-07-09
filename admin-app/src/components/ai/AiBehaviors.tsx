@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { Card } from '@/components/ui';
-import type { AiBehavior } from '@integrations/supabase/types';
+import type { AiBehavior } from '@integrations/db/rows';
 import type { Locale } from '@/lib/i18n/config';
 
 interface BehaviorMeta {

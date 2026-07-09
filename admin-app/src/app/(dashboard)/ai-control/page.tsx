@@ -3,9 +3,9 @@ import Link from 'next/link';
 import { PageHeader, Notice, Badge } from '@/components/ui';
 import NotConnected from '@/components/NotConnected';
 import { getT } from '@/lib/i18n/server';
-import { supabaseStatus, geminiStatus } from '@integrations/status';
+import { databaseStatus, geminiStatus } from '@integrations/status';
 import { fetchRows } from '@/lib/data';
-import type { AiBehavior } from '@integrations/supabase/types';
+import type { AiBehavior } from '@integrations/db/rows';
 import AiBehaviors from '@/components/ai/AiBehaviors';
 
 export const dynamic = 'force-dynamic';
@@ -13,10 +13,10 @@ export const dynamic = 'force-dynamic';
 export default async function AiControlPage() {
   const { t, locale } = getT();
   const ar = locale === 'ar';
-  const sStatus = supabaseStatus();
+  const sStatus = databaseStatus();
   const gStatus = geminiStatus();
 
-  const { connected, rows } = await fetchRows<AiBehavior>('ai_behaviors', (q) => q.order('behavior_key', { ascending: true }));
+  const { connected, rows } = await fetchRows<AiBehavior>('ai_behaviors', (q) => q.orderBy('behavior_key', 'asc'));
 
   return (
     <div>

@@ -12,11 +12,11 @@
  * Force:  FORCE=1 npm run fingerprints         (recompute even if already set)
  * Limit:  LIMIT=2000 npm run fingerprints
  * Tune:   CONCURRENCY=8 npm run fingerprints
- * Needs:  SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY
+ * Needs:  DATABASE_URL
  */
 import './_env';
 import fs from 'node:fs';
-import { requireAdminClient } from '../integrations/supabase/admin-client';
+import { requireDb } from '../integrations/db/client';
 import { dhashFromBytes } from '../integrations/util/image-hash';
 import { resolveImageAbsPath, fileExists } from './_lib';
 
@@ -43,18 +43,19 @@ async function loadBytes(row: ImgRow): Promise<Buffer | null> {
 }
 
 async function run() {
-  const db = requireAdminClient();
+  const db = requireDb();
   const stats = { scanned: 0, hashed: 0, skippedNoBytes: 0, failed: 0, alreadyHad: 0 };
   let processed = 0;
   let from = 0;
 
   for (;;) {
     if (processed >= LIMIT) break;
-    let q = db.from('product_images').select('id, public_url, local_path, perceptual_hash');
-    if (!FORCE) q = q.is('perceptual_hash', null);
-    const { data, error } = await q.range(from, from + FETCH_BATCH - 1);
-    if (error) { console.error('query error:', error.message); process.exitCode = 1; break; }
-    const rows = (data ?? []) as ImgRow[];
+    let q = db.selectFrom('product_images').select(['id', 'public_url', 'local_path', 'perceptual_hash']);
+    if (!FORCE) q = q.where('perceptual_hash', 'is', null);
+    let rows: ImgRow[];
+    try {
+      rows = (await q.orderBy('id', 'asc').limit(FETCH_BATCH).offset(from).execute()) as ImgRow[];
+    } catch (e: any) { console.error('query error:', e?.message); process.exitCode = 1; break; }
     if (rows.length === 0) break;
     // Same pagination correctness fix as the embeddings script: hashed rows leave
     // the `perceptual_hash IS NULL` filter, so only advance the offset past rows
@@ -73,8 +74,9 @@ async function run() {
         const hash = await dhashFromBytes(bytes);
         if (!hash) { stats.failed++; return; }
         if (DRY) { stats.hashed++; return; }
-        const { error: upErr } = await db.from('product_images').update({ perceptual_hash: hash }).eq('id', row.id);
-        if (upErr) { stats.failed++; return; }
+        try {
+          await db.updateTable('product_images').set({ perceptual_hash: hash }).where('id', '=', row.id).execute();
+        } catch { stats.failed++; return; }
         stats.hashed++;
       }));
       process.stdout.write(`\r  processed ${processed} · hashed ${stats.hashed} · no-bytes ${stats.skippedNoBytes} · failed ${stats.failed}   `);

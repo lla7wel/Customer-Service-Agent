@@ -2,12 +2,11 @@
   "name": "eh-system1",
   "version": "0.1.0",
   "private": true,
-  "description": "EH-SYSTEM1 — root for the shared integrations/ provider layer (Postgres/Gemini/Meta). The admin-app and scripts/ each have their own package.json; this one declares the dependencies that the framework-agnostic integrations/ modules import so type resolution works from every consumer.",
+  "description": "EH-SYSTEM1 \u2014 root for the shared integrations/ provider layer (Postgres/Gemini/Meta). The admin-app and scripts/ each have their own package.json; this one declares the dependencies that the framework-agnostic integrations/ modules import so type resolution works from every consumer.",
   "scripts": {
     "db:codegen": "kysely-codegen --dialect postgres --exclude-pattern 'auth.*' --numeric-parser number --out-file integrations/db/types.ts && sed -i '' -e 's|export type Int8 = ColumnType<string,|export type Int8 = ColumnType<number,|' -e 's|export type Timestamp = ColumnType<Date,|export type Timestamp = ColumnType<string,|' integrations/db/types.ts"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.45.4",
     "jimp": "^0.22.12",
     "kysely": "^0.29.3",
     "pg": "^8.22.0"

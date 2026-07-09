@@ -5,7 +5,8 @@ import NotConnected from '@/components/NotConnected';
 import ProductsToolbar from '@/components/products/ProductsToolbar';
 import AddProductButton from '@/components/products/AddProductButton';
 import { getT } from '@/lib/i18n/server';
-import { supabaseStatus } from '@integrations/status';
+import { databaseStatus } from '@integrations/status';
+import { jsonArrayFrom } from 'kysely/helpers/postgres';
 import { getDb } from '@/lib/supabase/db';
 import { formatPrice, humanize, resolveProductName } from '@/lib/format';
 
@@ -42,7 +43,7 @@ export default async function ProductsPage({
 }) {
   const { t, locale } = getT();
   const ar = locale === 'ar';
-  const status = supabaseStatus();
+  const status = databaseStatus();
   const view = searchParams.view === 'list' ? 'list' : 'grid';
   const page = Math.max(0, parseInt(searchParams.page ?? '0', 10) || 0);
   const q = (searchParams.q ?? '').trim();
@@ -62,30 +63,41 @@ export default async function ProductsPage({
 
   // Build query
   let query = supabase
-    .from('products')
-    .select('id,product_code,barcode,source_name,english_name,arabic_name,libyan_display_name,category,base_price,active_price,campaign_price,status,product_images!product_images_product_id_fkey(public_url,is_primary,position)', { count: 'exact' })
-    .order('updated_at', { ascending: false })
-    .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
+    .selectFrom('products')
+    .select(['id', 'product_code', 'barcode', 'source_name', 'english_name', 'arabic_name', 'libyan_display_name', 'category', 'base_price', 'active_price', 'campaign_price', 'status'])
+    .select((eb) => [
+      jsonArrayFrom(
+        eb.selectFrom('product_images').select(['public_url', 'is_primary', 'position'])
+          .whereRef('product_images.product_id', '=', 'products.id').orderBy('position', 'asc'),
+      ).as('product_images'),
+    ]);
   if (q) {
     const like = `%${q}%`;
-    query = query.or(
-      `libyan_display_name.ilike.${like},arabic_name.ilike.${like},english_name.ilike.${like},source_name.ilike.${like},product_code.ilike.${like},barcode.ilike.${like}`,
-    );
+    const cols = ['libyan_display_name', 'arabic_name', 'english_name', 'source_name', 'product_code', 'barcode'] as const;
+    query = query.where((eb) => eb.or(cols.map((c) => eb(`products.${c}`, 'ilike', like))));
   }
-  if (category) query = query.eq('category', category);
-  if (statusF === 'active') query = query.eq('status', 'active');
-  else if (statusF === 'review') query = query.eq('status', 'draft');
-  if (imagesF === 'with') query = query.not('primary_image_id', 'is', null);
-  else if (imagesF === 'missing') query = query.is('primary_image_id', null);
+  if (category) query = query.where('category', '=', category);
+  if (statusF === 'active') query = query.where('products.status', '=', 'active');
+  else if (statusF === 'review') query = query.where('products.status', '=', 'draft');
+  if (imagesF === 'with') query = query.where('primary_image_id', 'is not', null);
+  else if (imagesF === 'missing') query = query.where('primary_image_id', 'is', null);
 
-  const [{ data, count, error }, catRes] = await Promise.all([
-    query,
-    supabase.from('products').select('category').not('category', 'is', null).limit(3000),
-  ]);
-
-  const rows = (data ?? []) as Row[];
-  const categories = Array.from(new Set((catRes.data ?? []).map((r: any) => r.category).filter(Boolean))).sort() as string[];
-  const total = count ?? 0;
+  let rows: Row[] = [];
+  let total = 0;
+  let error: { message: string } | null = null;
+  let categories: string[] = [];
+  try {
+    const [data, countRow, catRes] = await Promise.all([
+      query.orderBy('updated_at', 'desc').limit(PAGE_SIZE).offset(page * PAGE_SIZE).execute(),
+      query.clearSelect().select((eb) => eb.fn.countAll().as('n')).executeTakeFirst(),
+      supabase.selectFrom('products').select('category').distinct().where('category', 'is not', null).execute(),
+    ]);
+    rows = data as unknown as Row[];
+    total = Number(countRow?.n ?? 0);
+    categories = catRes.map((r) => r.category).filter(Boolean).sort() as string[];
+  } catch (e: any) {
+    error = { message: e?.message ?? 'query_failed' };
+  }
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
   return (

@@ -1,41 +1,35 @@
 /**
- * Upload local scraper images to Supabase Storage and fill in
- * product_images.storage_path + public_url. READ-ONLY on the scraper (reads the
- * image files; never modifies them).
+ * Copy local scraper images into media storage (MEDIA_ROOT, served by the
+ * reverse proxy) and fill in product_images.storage_path + public_url.
+ * READ-ONLY on the scraper (reads the image files; never modifies them).
  *
  * Definitions (strict):
  *   - fully uploaded = storage_path IS NOT NULL AND public_url IS NOT NULL
  *   - pending        = storage_path IS NULL  OR  public_url IS NULL
  *
  * Behavior per pending row:
- *   - storage_path set but public_url null → backfill public_url (no re-upload)
- *   - storage_path null                    → upload the local file, then set both
+ *   - storage_path set but public_url null → backfill public_url (no re-copy)
+ *   - storage_path null                    → copy the local file, then set both
  *
- * Resumable + safe to rerun: storage uploads use upsert (no duplicate objects),
- * DB updates are by row id (no duplicate rows). Re-running picks up whatever is
+ * Resumable + safe to rerun: copies overwrite the same object path (no
+ * duplicates), DB updates are by row id. Re-running picks up whatever is
  * still pending — including rows that were skipped/failed in a previous run.
  *
  * Run:   npm run upload:images
  * Limit: LIMIT=2000 npm run upload:images   (process at most N pending rows)
  * Tune:  CONCURRENCY=12 npm run upload:images
- * Needs: SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY + the `eh-media` bucket.
+ * Needs: DATABASE_URL + MEDIA_ROOT + PUBLIC_MEDIA_BASE_URL in EH-SYSTEM1/.env
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { requireAdminClient, storageBucket } from '../integrations/supabase/admin-client';
+import type { Kysely } from 'kysely';
+import { requireDb, type DB } from '../integrations/db/client';
+import { putObject, publicUrl, isStorageConfigured } from '../integrations/storage';
 import { resolveImageAbsPath, fileExists } from './_lib';
 
-const MIME: Record<string, string> = {
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.png': 'image/png',
-  '.webp': 'image/webp',
-};
-
-const FETCH_BATCH = 500; // rows pulled per page (well under PostgREST's 1000 cap)
 const CONCURRENCY = process.env.CONCURRENCY ? Math.max(1, parseInt(process.env.CONCURRENCY, 10)) : 10;
 const LIMIT = process.env.LIMIT ? parseInt(process.env.LIMIT, 10) : Infinity;
+const FETCH_BATCH = 500;
 
 interface ImgRow {
   id: string;
@@ -46,19 +40,15 @@ interface ImgRow {
   product_id: string;
 }
 
-/** Count rows matching a builder predicate (head-only; not capped at 1000). */
-async function countRows(db: SupabaseClient, build?: (q: any) => any): Promise<number> {
-  let q: any = db.from('product_images').select('id', { count: 'exact', head: true });
-  if (build) q = build(q);
-  const { count, error } = await q;
-  if (error) throw new Error(error.message);
-  return count ?? 0;
-}
+type Pending = 'pending' | 'uploaded' | 'all';
 
-// pending = storage_path IS NULL OR public_url IS NULL
-const PENDING = (q: any) => q.or('storage_path.is.null,public_url.is.null');
-// fully uploaded = both present
-const UPLOADED = (q: any) => q.not('storage_path', 'is', null).not('public_url', 'is', null);
+async function countRows(db: Kysely<DB>, which: Pending): Promise<number> {
+  let q = db.selectFrom('product_images').select((eb) => eb.fn.countAll().as('n'));
+  if (which === 'pending') q = q.where((eb) => eb.or([eb('storage_path', 'is', null), eb('public_url', 'is', null)]));
+  if (which === 'uploaded') q = q.where('storage_path', 'is not', null).where('public_url', 'is not', null);
+  const row = await q.executeTakeFirst();
+  return Number(row?.n ?? 0);
+}
 
 /** Run async fn over items with a fixed concurrency pool. */
 async function pool<T>(items: T[], n: number, fn: (item: T) => Promise<void>): Promise<void> {
@@ -74,13 +64,15 @@ async function pool<T>(items: T[], n: number, fn: (item: T) => Promise<void>): P
 }
 
 async function main() {
-  console.log('EH-SYSTEM1 — upload product images → Supabase Storage\n');
-  const db = requireAdminClient();
-  const bucket = storageBucket();
+  console.log('EH-SYSTEM — copy product images → media storage\n');
+  const db = requireDb();
+  if (!isStorageConfigured()) {
+    throw new Error('Media storage is not configured. Set MEDIA_ROOT and PUBLIC_MEDIA_BASE_URL.');
+  }
 
-  const totalRows = await countRows(db);
-  const alreadyUploaded = await countRows(db, UPLOADED);
-  const pendingBefore = await countRows(db, PENDING);
+  const totalRows = await countRows(db, 'all');
+  const alreadyUploaded = await countRows(db, 'uploaded');
+  const pendingBefore = await countRows(db, 'pending');
 
   console.log(`total rows:       ${totalRows}`);
   console.log(`already uploaded: ${alreadyUploaded}  (storage_path AND public_url)`);
@@ -100,7 +92,7 @@ async function main() {
   let processed = 0;
   const errors: string[] = [];
 
-  // Keyset pagination by id (ascending). Rows that succeed leave the PENDING set;
+  // Keyset pagination by id (ascending). Rows that succeed leave the pending set;
   // rows that fail/skip stay pending but the cursor moves past them, so this run
   // won't loop forever. A later rerun retries them from the start.
   let cursor = '';
@@ -109,16 +101,12 @@ async function main() {
   outer: for (;;) {
     if (processed >= LIMIT) break;
 
-    let q: any = db
-      .from('product_images')
-      .select('id, local_path, storage_path, public_url, position, product_id');
-    q = PENDING(q);
-    if (cursor) q = q.gt('id', cursor);
-    q = q.order('id', { ascending: true }).limit(FETCH_BATCH);
-
-    const { data, error } = await q;
-    if (error) throw new Error(error.message);
-    const rows = (data ?? []) as ImgRow[];
+    let q = db
+      .selectFrom('product_images')
+      .select(['id', 'local_path', 'storage_path', 'public_url', 'position', 'product_id'])
+      .where((eb) => eb.or([eb('storage_path', 'is', null), eb('public_url', 'is', null)]));
+    if (cursor) q = q.where('id', '>', cursor);
+    const rows = (await q.orderBy('id', 'asc').limit(FETCH_BATCH).execute()) as ImgRow[];
     if (rows.length === 0) break;
     cursor = rows[rows.length - 1].id;
 
@@ -130,20 +118,17 @@ async function main() {
       (id) => !codeCache.has(id),
     );
     if (needCodes.length) {
-      const { data: prods } = await db.from('products').select('id, product_code').in('id', needCodes);
-      for (const p of (prods ?? []) as any[]) codeCache.set(p.id, p.product_code);
+      const prods = await db.selectFrom('products').select(['id', 'product_code']).where('id', 'in', needCodes).execute();
+      for (const p of prods) codeCache.set(p.id, p.product_code);
     }
 
     await pool(slice, CONCURRENCY, async (img) => {
       try {
         if (img.storage_path) {
-          // Already in Storage — just backfill the public_url.
-          const { data: pub } = db.storage.from(bucket).getPublicUrl(img.storage_path);
-          const { error: upErr } = await db
-            .from('product_images')
-            .update({ public_url: pub.publicUrl })
-            .eq('id', img.id);
-          if (upErr) throw new Error(upErr.message);
+          // Already in storage — just backfill the public_url.
+          const url = publicUrl(img.storage_path);
+          if (!url) throw new Error('PUBLIC_MEDIA_BASE_URL not set');
+          await db.updateTable('product_images').set({ public_url: url }).where('id', '=', img.id).execute();
           backfilled++;
           return;
         }
@@ -162,17 +147,13 @@ async function main() {
         const ext = path.extname(abs).toLowerCase();
         const objectPath = `products/${code}/${String(img.position).padStart(2, '0')}${ext || '.jpg'}`;
         const bytes = fs.readFileSync(abs);
-        const { error: putErr } = await db.storage.from(bucket).upload(objectPath, bytes, {
-          contentType: MIME[ext] || 'image/jpeg',
-          upsert: true, // safe rerun: overwrites the same object, never duplicates
-        });
-        if (putErr) throw new Error(putErr.message);
-        const { data: pub } = db.storage.from(bucket).getPublicUrl(objectPath);
-        const { error: upErr } = await db
-          .from('product_images')
-          .update({ storage_path: objectPath, public_url: pub.publicUrl })
-          .eq('id', img.id);
-        if (upErr) throw new Error(upErr.message);
+        const put = await putObject(objectPath, bytes);
+        if (!put.ok) throw new Error(put.reason);
+        await db
+          .updateTable('product_images')
+          .set({ storage_path: put.data.path, public_url: put.data.publicUrl })
+          .where('id', '=', img.id)
+          .execute();
         uploaded++;
       } catch (e: any) {
         failed++;
@@ -187,7 +168,7 @@ async function main() {
     if (Number.isFinite(LIMIT) && processed >= LIMIT) break outer;
   }
 
-  const remainingPending = await countRows(db, PENDING);
+  const remainingPending = await countRows(db, 'pending');
 
   console.log('\nSummary');
   console.log(`  total_rows:               ${totalRows}`);

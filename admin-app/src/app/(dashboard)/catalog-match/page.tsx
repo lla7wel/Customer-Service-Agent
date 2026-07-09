@@ -4,14 +4,14 @@ import NotConnected from '@/components/NotConnected';
 import CatalogMatch from '@/components/catalog/CatalogMatch';
 import CatalogReviewTabs from '@/components/catalog/CatalogReviewTabs';
 import { getT } from '@/lib/i18n/server';
-import { supabaseStatus } from '@integrations/status';
+import { databaseStatus } from '@integrations/status';
 
 export const dynamic = 'force-dynamic';
 
 export default function CatalogMatchPage() {
   const { locale } = getT();
   const ar = locale === 'ar';
-  const status = supabaseStatus();
+  const status = databaseStatus();
 
   return (
     <div>
