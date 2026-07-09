@@ -4,9 +4,11 @@
  * customer image's dHash as a product_fingerprint so future near-identical
  * images match instantly — the same mistake gets less likely over time.
  *
- * product_fingerprints write is best-effort (table may not exist yet pre-0009).
+ * The product_fingerprints write is best-effort: a failure there must not
+ * lose the correction itself.
  */
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Kysely } from 'kysely';
+import type { DB } from '../db/types';
 import type { ToolResult } from './types';
 
 export interface SaveCorrectionInput {
@@ -20,7 +22,7 @@ export interface SaveCorrectionInput {
 }
 
 /** Persist an admin correction and feed the fingerprint back into matching. */
-export async function saveImageCorrection(db: SupabaseClient, input: SaveCorrectionInput): Promise<ToolResult<{ learned: boolean }>> {
+export async function saveImageCorrection(db: Kysely<DB>, input: SaveCorrectionInput): Promise<ToolResult<{ learned: boolean }>> {
   try {
     let correctionId = input.correctionId ?? null;
     const base = {
@@ -31,26 +33,37 @@ export async function saveImageCorrection(db: SupabaseClient, input: SaveCorrect
       ...(input.notes ? { notes: input.notes.slice(0, 500) } : {}),
     };
     if (correctionId) {
-      await db.from('image_match_corrections').update(base).eq('id', correctionId);
+      await db.updateTable('image_match_corrections').set(base).where('id', '=', correctionId).execute();
     } else {
-      const { data } = await db.from('image_match_corrections').insert({
-        conversation_id: input.conversationId ?? null,
-        message_id: input.messageId ?? null,
-        ...base,
-      }).select('id').maybeSingle();
-      correctionId = (data as any)?.id ?? null;
+      const data = await db
+        .insertInto('image_match_corrections')
+        .values({
+          conversation_id: input.conversationId ?? null,
+          message_id: input.messageId ?? null,
+          ...base,
+        })
+        .returning('id')
+        .executeTakeFirst();
+      correctionId = data?.id ?? null;
     }
 
     // Feed the fingerprint back so future image matching learns from it.
     let learned = false;
     if (input.customerImageHash) {
-      const { error } = await db.from('product_fingerprints').insert({
-        product_id: input.correctedProductId,
-        hash_hex: input.customerImageHash,
-        source: 'admin_correction',
-        correction_id: correctionId,
-      });
-      learned = !error; // table may be absent pre-0009 → just skip
+      try {
+        await db
+          .insertInto('product_fingerprints')
+          .values({
+            product_id: input.correctedProductId,
+            hash_hex: input.customerImageHash,
+            source: 'admin_correction',
+            correction_id: correctionId,
+          })
+          .execute();
+        learned = true;
+      } catch {
+        // best-effort — the correction row above is already saved
+      }
     }
     return { ok: true, data: { learned } };
   } catch (e: any) {

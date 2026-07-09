@@ -12,7 +12,8 @@
  *
  * The situation note is INTERNAL guidance for the model, never shown verbatim.
  */
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Kysely } from 'kysely';
+import type { DB } from '../db/types';
 import { chatReplyWithTools, type ProductContext } from '../gemini';
 import { PRODUCT_TOOL_SCHEMAS, buildProductToolExecutor, type ProductCandidate } from '../tools';
 import { productClarifyingQuestion } from '../util/product-display';
@@ -43,7 +44,7 @@ export function situationNote(memoryContext?: string, situation?: string): strin
   return parts.length ? parts.join('\n\n') : undefined;
 }
 
-export async function composeCustomerReply(db: SupabaseClient, args: ComposeReplyArgs): Promise<ComposedReply> {
+export async function composeCustomerReply(db: Kysely<DB>, args: ComposeReplyArgs): Promise<ComposedReply> {
   const products: ProductContext[] = (args.candidates ?? []).slice(0, 5).map((c) => ({
     id: c.id, name: c.name, price: c.price, product_code: c.product_code, website_url: c.website_url,
   }));

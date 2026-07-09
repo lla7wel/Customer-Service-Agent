@@ -35,7 +35,13 @@ export interface ProductCandidate {
 export type ToolResult<T> = { ok: true; data: T } | { ok: false; reason: string };
 
 /** SELECT column list shared by every product tool (keeps shapes identical). */
-export const PRODUCT_COLUMNS =
-  'id, product_code, barcode, libyan_display_name, arabic_name, english_name, source_name, ' +
-  'category, subcategory, active_price, status, website_url, search_keywords, arabic_keywords, ' +
-  'product_images!product_images_product_id_fkey(public_url,storage_path,is_primary,position,perceptual_hash)';
+export const PRODUCT_COLUMNS = [
+  'id', 'product_code', 'barcode', 'libyan_display_name', 'arabic_name', 'english_name',
+  'source_name', 'category', 'subcategory', 'active_price', 'status', 'website_url',
+  'search_keywords', 'arabic_keywords',
+] as const;
+
+/** Columns of each product's images embedded on every product row. */
+export const PRODUCT_IMAGE_COLUMNS = [
+  'public_url', 'storage_path', 'is_primary', 'position', 'perceptual_hash',
+] as const;

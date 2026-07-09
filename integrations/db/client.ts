@@ -1,5 +1,5 @@
 import { Kysely, PostgresDialect, sql } from 'kysely';
-import { Pool } from 'pg';
+import pg, { Pool } from 'pg';
 import { env } from '../env';
 import type { DB } from './types';
 
@@ -8,7 +8,16 @@ import type { DB } from './types';
  *
  * Returns null when DATABASE_URL is unset so callers can show "not connected"
  * instead of crashing — same contract the Supabase admin client had.
+ *
+ * Rows keep the shapes the app was written against when it spoke PostgREST
+ * (JSON over HTTP): timestamps are ISO strings, numeric is number, bigint
+ * counts are number. db/types.ts is patched to match (see npm run db:codegen).
  */
+pg.types.setTypeParser(pg.types.builtins.NUMERIC, (v) => parseFloat(v));
+pg.types.setTypeParser(pg.types.builtins.INT8, (v) => Number(v));
+pg.types.setTypeParser(pg.types.builtins.TIMESTAMPTZ, (v) => new Date(v).toISOString());
+pg.types.setTypeParser(pg.types.builtins.TIMESTAMP, (v) => new Date(v + 'Z').toISOString());
+
 let cached: Kysely<DB> | null = null;
 
 export function getDb(): Kysely<DB> | null {

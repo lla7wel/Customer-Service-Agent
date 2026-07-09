@@ -11,7 +11,8 @@
  * All retrieval goes through the controlled tools layer, so the hard safety
  * (active+priced only, catalog-safe names, active_price) is enforced in one place.
  */
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Kysely } from 'kysely';
+import type { DB } from '../db/types';
 import { tokenize } from '../catalog-match';
 import {
   findProductByCode, findProductByBarcode, findProductByUrl,
@@ -77,7 +78,7 @@ function mergeDedupe(lists: ProductCandidate[][], limit: number): ProductCandida
 }
 
 /** Resolve a customer's text/URL product question to ranked catalog hits. */
-export async function resolveProductsFromText(db: SupabaseClient, text: string, limit = 5): Promise<ResolveResult> {
+export async function resolveProductsFromText(db: Kysely<DB>, text: string, limit = 5): Promise<ResolveResult> {
   const { urls, code: urlCode, barcode: urlBarcode, slugTokens } = parseProductUrl(text);
   const bareDigits = text.replace(URL_RE, ' ').replace(/\D+/g, '');
   const codeHint = urlCode ?? (bareDigits.length >= 6 ? bareDigits : null);

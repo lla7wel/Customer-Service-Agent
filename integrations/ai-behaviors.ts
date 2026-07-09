@@ -1,13 +1,14 @@
 /**
  * Canonical AI-behavior loader + prompt composer, shared by the admin app AND
- * the live webhook pipelines (and Cloudflare workers) so a customer reply in
- * production is built from EXACTLY the same behavior rows the admin tests in the
- * Playground / AI Control. Takes a Supabase client so it is framework-agnostic.
+ * the live webhook pipelines so a customer reply in production is built from
+ * EXACTLY the same behavior rows the admin tests in the Playground / AI
+ * Control. Takes a database handle so it is framework-agnostic.
  *
  * Behaviors come from the ai_behaviors table (one row per behavior_key). A
  * disabled row is treated as absent so callers fall back to provider defaults.
  */
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Kysely } from 'kysely';
+import type { DB } from './db/types';
 
 export interface AiBehaviorRow {
   behavior_key: string;
@@ -103,10 +104,18 @@ const TASK_TOOLS: Record<AiBehaviorTask, string[]> = {
 };
 
 /** Load all behaviors keyed by behavior_key. Returns {} on error/not-connected. */
-export async function loadBehaviorsWith(db: SupabaseClient): Promise<BehaviorMap> {
-  const { data } = await db.from('ai_behaviors').select('behavior_key, title, prompt, rules, memory, enabled, updated_at');
+export async function loadBehaviorsWith(db: Kysely<DB>): Promise<BehaviorMap> {
+  let rows: AiBehaviorRow[] = [];
+  try {
+    rows = await db
+      .selectFrom('ai_behaviors')
+      .select(['behavior_key', 'title', 'prompt', 'rules', 'memory', 'enabled', 'updated_at'])
+      .execute();
+  } catch {
+    return {};
+  }
   const map: BehaviorMap = {};
-  for (const b of (data ?? []) as AiBehaviorRow[]) map[b.behavior_key] = b;
+  for (const b of rows) map[b.behavior_key] = b;
   return map;
 }
 

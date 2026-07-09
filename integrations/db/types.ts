@@ -33,7 +33,7 @@ export type ImageMatchOutcome = "corrected" | "exact" | "multiple" | "none";
 
 export type ImportRunStatus = "completed" | "completed_with_errors" | "failed" | "running";
 
-export type Int8 = ColumnType<string, bigint | number | string, bigint | number | string>;
+export type Int8 = ColumnType<number, bigint | number | string, bigint | number | string>;
 
 export type IntegrationKind = "cloudflare" | "gemini" | "meta" | "supabase";
 
@@ -53,13 +53,13 @@ export type MessageDirection = "inbound" | "outbound";
 
 export type MessageSenderType = "ai" | "customer" | "human" | "system";
 
-export type Numeric = ColumnType<string, number | string, number | string>;
+export type Numeric = ColumnType<number, number | string, number | string>;
 
 export type OrderStatus = "cancelled" | "completed" | "issue_refund_exchange" | "waiting_for_customer_info" | "waiting_for_order_confirmation";
 
 export type ProductStatus = "active" | "archived" | "draft" | "out_of_stock";
 
-export type Timestamp = ColumnType<Date, Date | string, Date | string>;
+export type Timestamp = ColumnType<string, Date | string, Date | string>;
 
 export interface ActivityLogs {
   action: string;

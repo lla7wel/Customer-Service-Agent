@@ -16,7 +16,8 @@
  * ai_enabled=false. Outbound sends when Meta is configured and AI is still on for
  * the conversation.
  */
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Kysely } from 'kysely';
+import type { DB } from '../db/types';
 import { type MessengerEvent, sendMessage, sendImageMessage, isMetaConfigured, getUserProfile } from '../meta';
 import {
   isGeminiConfigured, generateContent, routerModel,
@@ -44,14 +45,19 @@ import {
 import { sanitizeCustomerTextDetailed } from '../util/customer-text';
 import {
   getCustomerMemory, updateCustomerMemory, buildMemoryContext,
-  toCandidate, PRODUCT_COLUMNS,
+  toCandidate,
   type ProductCandidate, type RecentProduct,
 } from '../tools';
+import { productSelect, activePriced } from '../tools/products';
+
+/** jsonb columns need explicit JSON encoding — node-pg would encode a JS array
+ *  as a Postgres array literal, not JSON. */
+const json = (v: unknown) => JSON.stringify(v ?? null);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export async function processMessengerEvents(
-  db: SupabaseClient,
+  db: Kysely<DB>,
   events: MessengerEvent[],
 ): Promise<{ pendingConversationIds: string[]; pending: { conversationId: string; messageId: string }[] }> {
   const latest = new Map<string, string>();
@@ -63,10 +69,10 @@ export async function processMessengerEvents(
       if (batching) latest.set(ing.conversationId, ing.messageId);
       else await runConversationTurn(db, ing.conversationId);
     } catch (e: any) {
-      await db.from('integration_logs').insert({
+      await db.insertInto('integration_logs').values({
         integration: 'meta', direction: 'inbound', ok: false,
-        error: e?.message ?? 'messenger_process_error', request: ev as any,
-      });
+        error: e?.message ?? 'messenger_process_error', request: json(ev),
+      }).execute();
     }
   }
   const pending = [...latest.entries()].map(([conversationId, messageId]) => ({ conversationId, messageId }));
@@ -79,7 +85,7 @@ export async function processMessengerEvents(
  * inbound (otherwise a newer message's own webhook handles the whole burst).
  */
 export async function runMessageBatchDebounce(
-  db: SupabaseClient,
+  db: Kysely<DB>,
   pending: { conversationId: string; messageId: string }[] | string[],
   windowMs = batchWindowMs(),
 ): Promise<void> {
@@ -96,38 +102,38 @@ export async function runMessageBatchDebounce(
   }
 }
 
-async function isLatestInbound(db: SupabaseClient, conversationId: string, messageId: string): Promise<boolean> {
-  const { data } = await db
-    .from('messages').select('id')
-    .eq('conversation_id', conversationId).eq('direction', 'inbound')
-    .order('created_at', { ascending: false }).limit(1).maybeSingle();
-  return !data || (data as any).id === messageId;
+async function isLatestInbound(db: Kysely<DB>, conversationId: string, messageId: string): Promise<boolean> {
+  const data = await db
+    .selectFrom('messages').select('id')
+    .where('conversation_id', '=', conversationId).where('direction', '=', 'inbound')
+    .orderBy('created_at', 'desc').limit(1).executeTakeFirst();
+  return !data || data.id === messageId;
 }
 
-async function ingestInbound(db: SupabaseClient, ev: MessengerEvent): Promise<{ conversationId: string; messageId: string } | null> {
+async function ingestInbound(db: Kysely<DB>, ev: MessengerEvent): Promise<{ conversationId: string; messageId: string } | null> {
   const psid = ev.sender?.id;
   if (!psid || !ev.message) return null;
 
-  const { data: customer } = await db
-    .from('customers')
-    .upsert({ channel: 'messenger', external_id: psid }, { onConflict: 'channel,external_id' })
-    .select('id, is_blocked, first_name')
-    .single();
+  const customer = await db
+    .insertInto('customers')
+    .values({ channel: 'messenger', external_id: psid })
+    .onConflict((oc) => oc.columns(['channel', 'external_id']).doUpdateSet({ external_id: (eb) => eb.ref('excluded.external_id') }))
+    .returning(['id', 'is_blocked', 'first_name'])
+    .executeTakeFirst();
   if (!customer || customer.is_blocked) return null;
   if (!customer.first_name) void fetchAndSaveCustomerProfile(db, customer.id, psid);
 
-  const terminal = ['resolved', 'completed', 'cancelled', 'spam', 'blocked'];
-  let { data: convo } = await db
-    .from('conversations').select('id')
-    .eq('customer_id', customer.id)
-    .not('status', 'in', `(${terminal.join(',')})`)
-    .order('last_message_at', { ascending: false }).limit(1).maybeSingle();
+  const terminal = ['resolved', 'completed', 'cancelled', 'spam', 'blocked'] as const;
+  let convo: { id: string } | undefined = await db
+    .selectFrom('conversations').select('id')
+    .where('customer_id', '=', customer.id)
+    .where('status', 'not in', [...terminal])
+    .orderBy('last_message_at', 'desc').limit(1).executeTakeFirst();
   if (!convo) {
-    const { data: created } = await db
-      .from('conversations')
-      .insert({ customer_id: customer.id, channel: 'messenger', status: 'new', ai_enabled: true })
-      .select('id').single();
-    convo = created;
+    convo = await db
+      .insertInto('conversations')
+      .values({ customer_id: customer.id, channel: 'messenger', status: 'new', ai_enabled: true })
+      .returning('id').executeTakeFirst();
   }
   if (!convo) return null;
 
@@ -141,45 +147,44 @@ async function ingestInbound(db: SupabaseClient, ev: MessengerEvent): Promise<{ 
   }
   const mid = ev.message.mid;
   if (mid) {
-    const { data: existing } = await db.from('messages').select('id').eq('external_id', mid).maybeSingle();
+    const existing = await db.selectFrom('messages').select('id').where('external_id', '=', mid).executeTakeFirst();
     if (existing) return null;
   }
-  const { data: inserted } = await db.from('messages').insert({
+  const inserted = await db.insertInto('messages').values({
     conversation_id: convo.id, direction: 'inbound', sender_type: 'customer',
-    body: text, attachments, external_id: mid,
-  }).select('id').single();
-  await db.from('conversations').update({
+    body: text, attachments: json(attachments), external_id: mid ?? null,
+  }).returning('id').executeTakeFirst();
+  await db.updateTable('conversations').set({
     last_message_at: new Date().toISOString(),
     last_customer_message_at: new Date().toISOString(),
     last_message_preview: (text || '[image]').slice(0, 120),
-  }).eq('id', convo.id);
+  }).where('id', '=', convo.id).execute();
   if (!inserted) return null;
   return { conversationId: convo.id, messageId: inserted.id };
 }
 
-export async function runConversationTurn(db: SupabaseClient, conversationId: string): Promise<void> {
-  const { data: convo } = await db
-    .from('conversations').select('id, ai_enabled, status, customer_id')
-    .eq('id', conversationId).maybeSingle();
+export async function runConversationTurn(db: Kysely<DB>, conversationId: string): Promise<void> {
+  const convo = await db
+    .selectFrom('conversations').select(['id', 'ai_enabled', 'status', 'customer_id'])
+    .where('id', '=', conversationId).executeTakeFirst();
   if (!convo) return;
   if (!convo.ai_enabled || !isGeminiConfigured()) return; // admin paused, or AI not configured
 
-  const { data: cust } = convo.customer_id
-    ? await db.from('customers').select('external_id, channel, first_name, last_name, phone, address, city').eq('id', convo.customer_id).maybeSingle()
-    : { data: null as any };
+  const cust = convo.customer_id
+    ? await db.selectFrom('customers').select(['external_id', 'channel', 'first_name', 'last_name', 'phone', 'address', 'city']).where('id', '=', convo.customer_id).executeTakeFirst()
+    : null;
   const psid: string | null = cust?.external_id ?? null;
 
   // Unanswered batch: inbound messages after the last outbound reply.
-  const { data: lastOut } = await db
-    .from('messages').select('created_at')
-    .eq('conversation_id', conversationId).eq('direction', 'outbound')
-    .order('created_at', { ascending: false }).limit(1).maybeSingle();
-  let q = db.from('messages').select('id, body, attachments, created_at')
-    .eq('conversation_id', conversationId).eq('direction', 'inbound')
-    .order('created_at', { ascending: true });
-  if (lastOut?.created_at) q = q.gt('created_at', lastOut.created_at);
-  const { data: batchRows } = await q.limit(20);
-  const batch = batchRows ?? [];
+  const lastOut = await db
+    .selectFrom('messages').select('created_at')
+    .where('conversation_id', '=', conversationId).where('direction', '=', 'outbound')
+    .orderBy('created_at', 'desc').limit(1).executeTakeFirst();
+  let q = db.selectFrom('messages').select(['id', 'body', 'attachments', 'created_at'])
+    .where('conversation_id', '=', conversationId).where('direction', '=', 'inbound')
+    .orderBy('created_at', 'asc');
+  if (lastOut?.created_at) q = q.where('created_at', '>', lastOut.created_at);
+  const batch = await q.limit(20).execute();
   if (batch.length === 0) return;
 
   const text = batch.map((m: any) => (m.body ? String(m.body).trim() : '')).filter(Boolean).join('\n').trim();
@@ -225,18 +230,18 @@ export async function runConversationTurn(db: SupabaseClient, conversationId: st
 }
 
 async function loadHistory(
-  db: SupabaseClient, conversationId: string, excludeMessageId: string | null, limit = 24,
+  db: Kysely<DB>, conversationId: string, excludeMessageId: string | null, limit = 24,
 ): Promise<{ role: 'customer' | 'assistant'; text: string }[]> {
-  const { data } = await db
-    .from('messages').select('id, direction, body, created_at')
-    .eq('conversation_id', conversationId).order('created_at', { ascending: false }).limit(limit + 2);
-  const rows = (data ?? []).filter((m: any) => m.id !== excludeMessageId && m.body && String(m.body).trim());
+  const data = await db
+    .selectFrom('messages').select(['id', 'direction', 'body', 'created_at'])
+    .where('conversation_id', '=', conversationId).orderBy('created_at', 'desc').limit(limit + 2).execute();
+  const rows = data.filter((m: any) => m.id !== excludeMessageId && m.body && String(m.body).trim());
   rows.reverse();
   return rows.slice(-limit).map((m: any) => ({ role: m.direction === 'inbound' ? 'customer' : 'assistant', text: String(m.body) }));
 }
 
 async function handleImageTurn(
-  db: SupabaseClient, conversationId: string, messageId: string | null, psid: string,
+  db: Kysely<DB>, conversationId: string, messageId: string | null, psid: string,
   imageUrl: string, extraText: string, memoryContext: string, behaviors: BehaviorMap,
 ): Promise<ProductCandidate[]> {
   const behavior = composeBehaviorContext(behaviors, 'image_matching');
@@ -294,17 +299,17 @@ async function handleImageTurn(
   if (delivery.superseded) return result.candidates;
 
   // Audit row for review (AI's own guess — NOT an admin-confirmed fingerprint).
-  await db.from('image_match_corrections').insert({
+  await db.insertInto('image_match_corrections').values({
     conversation_id: conversationId, message_id: messageId, customer_image_url: imageUrl,
     customer_image_hash: result.customerImageHash,
     ai_suggested_product_ids: result.candidates.map((c) => c.id),
     ai_top_score: result.candidates[0]?.confidence ?? null,
     outcome: result.candidates.length ? (result.outcome === 'none' ? 'multiple' : result.outcome) : 'none',
     corrected_product_id: result.exactProductId,
-  });
+  }).execute();
   await logAi(db, 'vision', conversationId, null, result.outcome, 0);
   if (result.candidates.length) {
-    await db.from('conversations').update({ status: 'ai_handling' }).eq('id', conversationId).eq('ai_enabled', true);
+    await db.updateTable('conversations').set({ status: 'ai_handling' }).where('id', '=', conversationId).where('ai_enabled', '=', true).execute();
   } else {
     await markNeedsHuman(db, conversationId, 'unsafe_image_match', 'Image match returned no safe product candidates.');
   }
@@ -312,7 +317,7 @@ async function handleImageTurn(
 }
 
 async function handleImageFollowUpTurn(
-  db: SupabaseClient, conversationId: string, messageId: string | null, psid: string,
+  db: Kysely<DB>, conversationId: string, messageId: string | null, psid: string,
   imageContext: LastImageContext, text: string, memoryContext: string, behaviors: BehaviorMap,
 ): Promise<ProductCandidate[]> {
   const behavior = composeBehaviorContext(behaviors, 'messenger');
@@ -367,13 +372,13 @@ async function handleImageFollowUpTurn(
   if (decision.needsHuman) {
     await markNeedsHuman(db, conversationId, decision.needsHumanReason ?? 'admin_follow_up_required', `Image follow-up needs human: ${decision.replyStrategy}`);
   } else {
-    await db.from('conversations').update({ status: 'ai_handling' }).eq('id', conversationId).eq('ai_enabled', true);
+    await db.updateTable('conversations').set({ status: 'ai_handling' }).where('id', '=', conversationId).where('ai_enabled', '=', true).execute();
   }
   return decision.candidates;
 }
 
 async function handleTextTurn(
-  db: SupabaseClient, conversationId: string, messageId: string | null, psid: string,
+  db: Kysely<DB>, conversationId: string, messageId: string | null, psid: string,
   text: string, memoryContext: string, behaviors: BehaviorMap,
 ): Promise<ProductCandidate[]> {
   const behavior = composeBehaviorContext(behaviors, 'messenger');
@@ -451,13 +456,13 @@ async function handleTextTurn(
   }), messageId, sendImages);
   if (delivery.superseded) return replyCandidates;
   await logAi(db, 'chat', conversationId, composed.model, null, 0);
-  await db.from('conversations').update({ status: 'ai_handling' }).eq('id', conversationId).eq('ai_enabled', true);
+  await db.updateTable('conversations').set({ status: 'ai_handling' }).where('id', '=', conversationId).where('ai_enabled', '=', true).execute();
   return replyCandidates;
 }
 
 /** Update per-customer memory after a turn: recent products, contact facts, summary. */
 async function updateMemoryAfterTurn(
-  db: SupabaseClient, customerId: string, cust: any, resolved: ProductCandidate[], conversationId: string, lastText: string,
+  db: Kysely<DB>, customerId: string, cust: any, resolved: ProductCandidate[], conversationId: string, lastText: string,
 ): Promise<void> {
   const top = resolved[0];
   const addRecentProduct: RecentProduct | undefined = top
@@ -485,11 +490,10 @@ async function updateMemoryAfterTurn(
   } catch { /* best-effort */ }
 }
 
-async function findRecentUnansweredImage(db: SupabaseClient, conversationId: string, currentMessageId: string | null): Promise<string | null> {
-  const { data } = await db
-    .from('messages').select('id, direction, attachments, created_at')
-    .eq('conversation_id', conversationId).order('created_at', { ascending: false }).limit(12);
-  const rows = data ?? [];
+async function findRecentUnansweredImage(db: Kysely<DB>, conversationId: string, currentMessageId: string | null): Promise<string | null> {
+  const rows = await db
+    .selectFrom('messages').select(['id', 'direction', 'attachments', 'created_at'])
+    .where('conversation_id', '=', conversationId).orderBy('created_at', 'desc').limit(12).execute();
   let lastOutboundAt: string | null = null;
   for (const m of rows) {
     if ((m as any).direction === 'outbound' && !lastOutboundAt) lastOutboundAt = (m as any).created_at;
@@ -504,13 +508,12 @@ async function findRecentUnansweredImage(db: SupabaseClient, conversationId: str
   return null;
 }
 
-async function findLastImageContext(db: SupabaseClient, conversationId: string, currentMessageId: string | null): Promise<LastImageContext | null> {
-  const { data } = await db
-    .from('messages').select('id, direction, attachments, ai_meta, created_at')
-    .eq('conversation_id', conversationId)
-    .order('created_at', { ascending: false })
-    .limit(40);
-  const rows = data ?? [];
+async function findLastImageContext(db: Kysely<DB>, conversationId: string, currentMessageId: string | null): Promise<LastImageContext | null> {
+  const rows = await db
+    .selectFrom('messages').select(['id', 'direction', 'attachments', 'ai_meta', 'created_at'])
+    .where('conversation_id', '=', conversationId)
+    .orderBy('created_at', 'desc')
+    .limit(40).execute();
   const olderImageUrl = (idx: number): string | null => {
     for (let j = idx + 1; j < rows.length; j++) {
       const atts = ((rows[j] as any).attachments ?? []) as { type?: string; url?: string }[];
@@ -554,7 +557,7 @@ async function findLastImageContext(db: SupabaseClient, conversationId: string, 
  * customer wants a photo but none is usable.
  */
 async function resolveTurnImages(
-  db: SupabaseClient, conversationId: string, messageId: string | null,
+  db: Kysely<DB>, conversationId: string, messageId: string | null,
   wanted: boolean, turnCandidates: ProductCandidate[],
 ): Promise<{ selection: SendableSelection | null; noImage: boolean }> {
   if (!wanted) return { selection: null, noImage: false };
@@ -568,12 +571,12 @@ async function resolveTurnImages(
 }
 
 /** Most recent product candidates carried by a prior reply (ai_meta). */
-async function findRecentCandidates(db: SupabaseClient, conversationId: string, currentMessageId: string | null): Promise<ProductCandidate[]> {
-  const { data } = await db
-    .from('messages').select('id, ai_meta, created_at')
-    .eq('conversation_id', conversationId)
-    .order('created_at', { ascending: false }).limit(20);
-  for (const m of data ?? []) {
+async function findRecentCandidates(db: Kysely<DB>, conversationId: string, currentMessageId: string | null): Promise<ProductCandidate[]> {
+  const data = await db
+    .selectFrom('messages').select(['id', 'ai_meta', 'created_at'])
+    .where('conversation_id', '=', conversationId)
+    .orderBy('created_at', 'desc').limit(20).execute();
+  for (const m of data) {
     if ((m as any).id === currentMessageId) continue;
     const meta = (m as any).ai_meta;
     if (!meta || typeof meta !== 'object') continue;
@@ -586,44 +589,42 @@ async function findRecentCandidates(db: SupabaseClient, conversationId: string, 
 }
 
 /** Active+priced products from the customer's recent memory (with catalog images). */
-async function recentMemoryProductCandidates(db: SupabaseClient, conversationId: string): Promise<ProductCandidate[]> {
-  const { data: convo } = await db.from('conversations').select('customer_id').eq('id', conversationId).maybeSingle();
+async function recentMemoryProductCandidates(db: Kysely<DB>, conversationId: string): Promise<ProductCandidate[]> {
+  const convo = await db.selectFrom('conversations').select('customer_id').where('id', '=', conversationId).executeTakeFirst();
   if (!convo?.customer_id) return [];
   const mem = await getCustomerMemory(db, convo.customer_id);
   const ids = (mem?.recent_products ?? []).map((r) => r.product_id).filter(Boolean).slice(0, 3);
   if (!ids.length) return [];
-  const { data } = await db.from('products').select(PRODUCT_COLUMNS)
-    .in('id', ids).eq('status', 'active').not('active_price', 'is', null);
-  const rows = (data ?? []) as any[];
+  const rows: any[] = await activePriced(productSelect(db)).where('products.id', 'in', ids).execute();
   // Preserve the memory's recency order.
   const byId = new Map(rows.map((p) => [p.id, p]));
   return ids.map((id) => byId.get(id)).filter(Boolean).map((p) => toCandidate(p, 0.6, 'attached product'));
 }
 
-async function markNeedsHuman(db: SupabaseClient, conversationId: string, reason: string, summary?: string): Promise<void> {
-  await db.from('conversations').update({
+async function markNeedsHuman(db: Kysely<DB>, conversationId: string, reason: string, summary?: string): Promise<void> {
+  await db.updateTable('conversations').set({
     status: 'needs_human',
     ai_enabled: false,
     detected_intent: reason,
-    context_summary: summary ? summary.slice(0, 240) : undefined,
-  }).eq('id', conversationId);
-  await db.from('activity_logs').insert({
+    ...(summary ? { context_summary: summary.slice(0, 240) } : {}),
+  }).where('id', '=', conversationId).execute();
+  await db.insertInto('activity_logs').values({
     actor_type: 'system',
     action: 'needs_human_marked',
     entity_type: 'conversation',
     entity_id: conversationId,
     summary: summary ?? reason,
-  });
+  }).execute();
 }
 
-async function fetchAndSaveCustomerProfile(db: SupabaseClient, customerId: string, psid: string) {
+async function fetchAndSaveCustomerProfile(db: Kysely<DB>, customerId: string, psid: string) {
   const profile = await getUserProfile(psid);
   if (profile?.first_name || profile?.last_name) {
-    await db.from('customers').update({
+    await db.updateTable('customers').set({
       first_name: profile.first_name ?? null,
       last_name: profile.last_name ?? null,
       display_name: [profile.first_name, profile.last_name].filter(Boolean).join(' ') || null,
-    }).eq('id', customerId);
+    }).where('id', '=', customerId).execute();
   }
 }
 
@@ -635,7 +636,7 @@ interface DeliveryResult {
 }
 
 async function deliverAndStore(
-  db: SupabaseClient, conversationId: string, psid: string, rawText: string,
+  db: Kysely<DB>, conversationId: string, psid: string, rawText: string,
   aiMeta: Record<string, unknown> = {}, triggerMessageId: string | null = null,
   images: { url: string; product_id?: string | null }[] = [],
 ): Promise<DeliveryResult> {
@@ -649,15 +650,15 @@ async function deliverAndStore(
   // Not storing an outbound is deliberate: it keeps the unanswered batch intact
   // for the superseding turn (an outbound row would split the batch).
   if (triggerMessageId) {
-    const { data: latest } = await db
-      .from('messages').select('id')
-      .eq('conversation_id', conversationId).eq('direction', 'inbound')
-      .order('created_at', { ascending: false }).limit(1).maybeSingle();
-    if (latest && (latest as any).id !== triggerMessageId) {
-      await db.from('ai_events').insert({
+    const latest = await db
+      .selectFrom('messages').select('id')
+      .where('conversation_id', '=', conversationId).where('direction', '=', 'inbound')
+      .orderBy('created_at', 'desc').limit(1).executeTakeFirst();
+    if (latest && latest.id !== triggerMessageId) {
+      await db.insertInto('ai_events').values({
         kind: 'chat', conversation_id: conversationId, model: null,
         detected_intent: 'superseded_by_newer_inbound', latency_ms: 0, success: true,
-      }).then(() => {}, () => {});
+      }).execute().then(() => {}, () => {});
       return { delivered: false, superseded: true };
     }
   }
@@ -668,7 +669,7 @@ async function deliverAndStore(
   const safetyMeta = clean.changed ? { sanitized: true, sanitized_removed: clean.removed } : {};
 
   // Re-read AI state at the last moment to close the handoff/pause race.
-  const { data: live } = await db.from('conversations').select('ai_enabled').eq('id', conversationId).maybeSingle();
+  const live = await db.selectFrom('conversations').select('ai_enabled').where('id', '=', conversationId).executeTakeFirst();
   const aiStillOn = live?.ai_enabled !== false;
 
   // Backend controls the actual image URLs; cap to MAX_AUTO_IMAGES (no spam).
@@ -688,7 +689,7 @@ async function deliverAndStore(
         textDelivered = true;
       } catch (e: any) {
         deliveryError = e?.message ?? 'send_failed';
-        await db.from('integration_logs').insert({ integration: 'meta', direction: 'outbound', ok: false, error: deliveryError });
+        await db.insertInto('integration_logs').values({ integration: 'meta', direction: 'outbound', ok: false, error: deliveryError }).execute();
       }
     }
     for (const img of toSend) {
@@ -698,7 +699,7 @@ async function deliverAndStore(
       } catch (e: any) {
         const err = e?.message ?? 'image_send_failed';
         failedImages.push({ url: img.url, error: err });
-        await db.from('integration_logs').insert({ integration: 'meta', direction: 'outbound', ok: false, error: `image_send: ${err}` });
+        await db.insertInto('integration_logs').values({ integration: 'meta', direction: 'outbound', ok: false, error: `image_send: ${err}` }).execute();
       }
     }
   }
@@ -724,20 +725,20 @@ async function deliverAndStore(
   // Delivery state recorded consistently with manual sends: delivered_at is set
   // only on a confirmed Meta send; a failure stores delivery_error so the inbox
   // can show "failed" (never imply a failed/unsent reply reached the customer).
-  await db.from('messages').insert({
+  await db.insertInto('messages').values({
     conversation_id: conversationId, direction: 'outbound', sender_type: 'ai', body: text,
-    attachments: sentImages,
-    ai_meta: { ...aiMeta, ...safetyMeta, ...imageMeta, delivered, ai_enabled_at_send: aiStillOn, ...(deliveryError ? { delivery_error: deliveryError } : {}) },
+    attachments: json(sentImages),
+    ai_meta: json({ ...aiMeta, ...safetyMeta, ...imageMeta, delivered, ai_enabled_at_send: aiStillOn, ...(deliveryError ? { delivery_error: deliveryError } : {}) }),
     is_internal_suggestion: !delivered,
     delivered_at: delivered ? new Date().toISOString() : null,
-  });
+  }).execute();
   return { delivered, superseded: false };
 }
 
-async function updateMessageMeta(db: SupabaseClient, messageId: string, aiMeta: Record<string, unknown>) {
-  await db.from('messages').update({ ai_meta: aiMeta }).eq('id', messageId);
+async function updateMessageMeta(db: Kysely<DB>, messageId: string, aiMeta: Record<string, unknown>) {
+  await db.updateTable('messages').set({ ai_meta: json(aiMeta) }).where('id', '=', messageId).execute();
 }
 
-async function logAi(db: SupabaseClient, kind: string, conversationId: string, model: string | null, intent: string | null, latencyMs: number) {
-  await db.from('ai_events').insert({ kind, conversation_id: conversationId, model, detected_intent: intent, latency_ms: latencyMs, success: true });
+async function logAi(db: Kysely<DB>, kind: string, conversationId: string, model: string | null, intent: string | null, latencyMs: number) {
+  await db.insertInto('ai_events').values({ kind, conversation_id: conversationId, model, detected_intent: intent, latency_ms: latencyMs, success: true }).execute();
 }

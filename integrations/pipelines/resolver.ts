@@ -16,7 +16,8 @@
  *   mode:'customer' → diagnostics stripped (never leak internals to a customer)
  *   mode:'admin'    → diagnostics + timing returned for the admin debug panels
  */
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Kysely } from 'kysely';
+import type { DB } from '../db/types';
 import type { ProductCandidate } from '../tools';
 import { resolveProductsFromText } from './product-resolve';
 import { matchCustomerImage } from './image-match';
@@ -56,7 +57,7 @@ export interface ResolveOutput {
  * Resolve products from any signal. Image wins when image bytes/url are present
  * (a photo is the strongest intent), otherwise the text engine runs.
  */
-export async function resolveProducts(db: SupabaseClient, input: ResolveInput): Promise<ResolveOutput> {
+export async function resolveProducts(db: Kysely<DB>, input: ResolveInput): Promise<ResolveOutput> {
   const mode: ResolveMode = input.mode ?? 'customer';
   const limit = input.limit ?? 5;
   const started = Date.now();

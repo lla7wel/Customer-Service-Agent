@@ -3,10 +3,11 @@
  * Lets the AI answer follow-ups naturally ("how much?", "same one", "other
  * colors?", "the one I sent before") and lets admins view/edit/clear it.
  *
- * Degrades gracefully: if the customer_memory table is not present yet (migration
- * 0009 not applied), reads return null and writes are no-ops — nothing breaks.
+ * Best-effort by design: reads return null and writes return ok:false (never
+ * throw) on failure — a memory hiccup must not break a customer turn.
  */
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Kysely } from 'kysely';
+import type { DB } from '../db/types';
 import type { ToolResult } from './types';
 
 export interface RecentProduct {
@@ -45,12 +46,15 @@ function normalize(row: any): CustomerMemory {
   };
 }
 
-/** Read a customer's memory. Returns null if none yet (or table absent). */
-export async function getCustomerMemory(db: SupabaseClient, customerId: string): Promise<CustomerMemory | null> {
+/** Read a customer's memory. Returns null if none yet (or on failure). */
+export async function getCustomerMemory(db: Kysely<DB>, customerId: string): Promise<CustomerMemory | null> {
   if (!customerId) return null;
-  const { data, error } = await db.from('customer_memory').select('*').eq('customer_id', customerId).maybeSingle();
-  if (error || !data) return null;
-  return normalize(data);
+  try {
+    const data = await db.selectFrom('customer_memory').selectAll().where('customer_id', '=', customerId).executeTakeFirst();
+    return data ? normalize(data) : null;
+  } catch {
+    return null;
+  }
 }
 
 export interface MemoryPatch {
@@ -67,7 +71,7 @@ export interface MemoryPatch {
 }
 
 /** Upsert a customer's memory. Best-effort: returns ok:false (never throws) on failure. */
-export async function updateCustomerMemory(db: SupabaseClient, customerId: string, patch: MemoryPatch): Promise<ToolResult<void>> {
+export async function updateCustomerMemory(db: Kysely<DB>, customerId: string, patch: MemoryPatch): Promise<ToolResult<void>> {
   if (!customerId) return { ok: false, reason: 'no_customer' };
   try {
     const existing = await getCustomerMemory(db, customerId);
@@ -81,17 +85,20 @@ export async function updateCustomerMemory(db: SupabaseClient, customerId: strin
     const row: Record<string, unknown> = {
       customer_id: customerId,
       updated_at: new Date().toISOString(),
-      recent_products: recent,
+      recent_products: JSON.stringify(recent),
     };
     if (patch.summary !== undefined) row.summary = patch.summary;
-    if (patch.preferences !== undefined) row.preferences = patch.preferences;
+    if (patch.preferences !== undefined) row.preferences = JSON.stringify(patch.preferences);
     if (patch.known_facts !== undefined) row.known_facts = patch.known_facts;
     if (patch.known_name !== undefined) row.known_name = patch.known_name;
     if (patch.known_phone !== undefined) row.known_phone = patch.known_phone;
     if (patch.known_address !== undefined) row.known_address = patch.known_address;
     if (patch.touchConversation) row.last_conversation_at = new Date().toISOString();
-    const { error } = await db.from('customer_memory').upsert(row, { onConflict: 'customer_id' });
-    if (error) return { ok: false, reason: error.message };
+    await db
+      .insertInto('customer_memory')
+      .values(row as any)
+      .onConflict((oc) => oc.column('customer_id').doUpdateSet(row as any))
+      .execute();
     return { ok: true, data: undefined };
   } catch (e: any) {
     return { ok: false, reason: e?.message ?? 'memory_update_failed' };
@@ -99,10 +106,13 @@ export async function updateCustomerMemory(db: SupabaseClient, customerId: strin
 }
 
 /** Clear (delete) a customer's memory. */
-export async function clearCustomerMemory(db: SupabaseClient, customerId: string): Promise<ToolResult<void>> {
-  const { error } = await db.from('customer_memory').delete().eq('customer_id', customerId);
-  if (error) return { ok: false, reason: error.message };
-  return { ok: true, data: undefined };
+export async function clearCustomerMemory(db: Kysely<DB>, customerId: string): Promise<ToolResult<void>> {
+  try {
+    await db.deleteFrom('customer_memory').where('customer_id', '=', customerId).execute();
+    return { ok: true, data: undefined };
+  } catch (e: any) {
+    return { ok: false, reason: e?.message ?? 'memory_clear_failed' };
+  }
 }
 
 /**

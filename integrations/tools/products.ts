@@ -8,12 +8,14 @@
  *   - the customer-facing name is customerProductName() (never source_name),
  *   - price is active_price (never invented).
  */
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { jsonArrayFrom } from 'kysely/helpers/postgres';
+import type { Kysely } from 'kysely';
+import type { DB } from '../db/types';
 import { normalizeCode, normalizeBarcode, tokenize } from '../catalog-match';
 import { customerProductName, originalProductName, primaryProductImageUrl } from '../util/product-display';
 import { embedText } from '../gemini/client';
 import { cosineSimilarity } from './vector-search';
-import { PRODUCT_COLUMNS, type ProductCandidate, type ToolResult, type RetrievalTrack } from './types';
+import { PRODUCT_COLUMNS, PRODUCT_IMAGE_COLUMNS, type ProductCandidate, type ToolResult, type RetrievalTrack } from './types';
 
 export function toCandidate(p: any, confidence = 0, reason: string | null = null, tracks: RetrievalTrack[] = []): ProductCandidate {
   return {
@@ -31,70 +33,90 @@ export function toCandidate(p: any, confidence = 0, reason: string | null = null
   };
 }
 
-/** PostgREST or()-filter safety: commas/parens/percent break the filter syntax. */
-function sanitizeTerm(t: string): string {
-  return t.replace(/[(),%*]/g, ' ').trim();
+/**
+ * Base product select: the shared columns plus each product's images embedded
+ * as a `product_images` array (same nested shape every tool has always used).
+ */
+export function productSelect(db: Kysely<DB>) {
+  return db
+    .selectFrom('products')
+    .select(PRODUCT_COLUMNS.map((c) => `products.${c}` as const))
+    .select((eb) => [
+      jsonArrayFrom(
+        eb
+          .selectFrom('product_images')
+          .select([...PRODUCT_IMAGE_COLUMNS])
+          .whereRef('product_images.product_id', '=', 'products.id')
+          .orderBy('position', 'asc'),
+      ).as('product_images'),
+    ]);
 }
 
-function activePriced(q: any) {
-  return q.eq('status', 'active').not('active_price', 'is', null);
+/** Only customer-quotable products: active AND priced. */
+export function activePriced(q: ReturnType<typeof productSelect>) {
+  return q.where('products.status', '=', 'active').where('products.active_price', 'is not', null);
 }
 
 /** Exact product-code lookup (deterministic identity). */
-export async function findProductByCode(db: SupabaseClient, code: string): Promise<ToolResult<ProductCandidate | null>> {
+export async function findProductByCode(db: Kysely<DB>, code: string): Promise<ToolResult<ProductCandidate | null>> {
   const norm = normalizeCode(code);
   if (!norm) return { ok: true, data: null };
-  const { data } = await activePriced(db.from('products').select(PRODUCT_COLUMNS)).eq('product_code', code).maybeSingle();
+  const data = await activePriced(productSelect(db)).where('products.product_code', '=', code).executeTakeFirst();
   if (data) return { ok: true, data: toCandidate(data, 0.97, 'exact product code', ['exact_code']) };
   // Fallback: normalized compare (handles zero-padding / separators).
-  const { data: rows } = await activePriced(db.from('products').select(PRODUCT_COLUMNS)).ilike('product_code', `%${norm}%`).limit(10);
-  const hit = (rows ?? []).find((p: any) => normalizeCode(p.product_code) === norm);
+  const rows = await activePriced(productSelect(db)).where('products.product_code', 'ilike', `%${norm}%`).limit(10).execute();
+  const hit = rows.find((p) => normalizeCode(p.product_code) === norm);
   return { ok: true, data: hit ? toCandidate(hit, 0.97, 'exact product code', ['exact_code']) : null };
 }
 
 /** Exact barcode lookup (deterministic identity). */
-export async function findProductByBarcode(db: SupabaseClient, barcode: string): Promise<ToolResult<ProductCandidate | null>> {
+export async function findProductByBarcode(db: Kysely<DB>, barcode: string): Promise<ToolResult<ProductCandidate | null>> {
   const norm = normalizeBarcode(barcode);
   if (!norm) return { ok: true, data: null };
-  const { data } = await activePriced(db.from('products').select(PRODUCT_COLUMNS)).eq('barcode', norm).limit(1).maybeSingle();
+  const data = await activePriced(productSelect(db)).where('products.barcode', '=', norm).executeTakeFirst();
   if (data) return { ok: true, data: toCandidate(data, 0.97, 'exact barcode', ['exact_barcode']) };
-  const { data: byRaw } = await activePriced(db.from('products').select(PRODUCT_COLUMNS)).eq('barcode', barcode).limit(1).maybeSingle();
+  const byRaw = await activePriced(productSelect(db)).where('products.barcode', '=', barcode).executeTakeFirst();
   return { ok: true, data: byRaw ? toCandidate(byRaw, 0.97, 'exact barcode', ['exact_barcode']) : null };
 }
 
-/** Exact website_url lookup, then a slug-tail ilike as a strong secondary signal. */
-export async function findProductByUrl(db: SupabaseClient, url: string): Promise<ToolResult<ProductCandidate | null>> {
+/** Exact website_url lookup, then a query/hash-stripped retry. */
+export async function findProductByUrl(db: Kysely<DB>, url: string): Promise<ToolResult<ProductCandidate | null>> {
   const clean = (url ?? '').trim();
   if (!/^https?:\/\//i.test(clean)) return { ok: true, data: null };
-  const { data } = await activePriced(db.from('products').select(PRODUCT_COLUMNS)).eq('website_url', clean).limit(1).maybeSingle();
+  const data = await activePriced(productSelect(db)).where('products.website_url', '=', clean).executeTakeFirst();
   if (data) return { ok: true, data: toCandidate(data, 0.96, 'exact product link', ['exact_url']) };
   // Strip query/hash and retry exact.
   let bare = clean;
   try { const u = new URL(clean); u.search = ''; u.hash = ''; bare = u.toString(); } catch { /* keep clean */ }
   if (bare !== clean) {
-    const { data: d2 } = await activePriced(db.from('products').select(PRODUCT_COLUMNS)).eq('website_url', bare).limit(1).maybeSingle();
+    const d2 = await activePriced(productSelect(db)).where('products.website_url', '=', bare).executeTakeFirst();
     if (d2) return { ok: true, data: toCandidate(d2, 0.96, 'exact product link', ['exact_url']) };
   }
   return { ok: true, data: null };
 }
 
+const TEXT_SEARCH_NAME_COLUMNS = [
+  'libyan_display_name', 'arabic_name', 'english_name', 'source_name', 'category',
+] as const;
+
 /** Wide text search across Arabic/English/Turkish names + keyword arrays, scored in code. */
-export async function searchProductsByText(db: SupabaseClient, terms: string[], limit = 20): Promise<ToolResult<ProductCandidate[]>> {
-  const clean = Array.from(new Set(terms.map(sanitizeTerm).filter((t) => t.length >= 2))).slice(0, 12);
+export async function searchProductsByText(db: Kysely<DB>, terms: string[], limit = 20): Promise<ToolResult<ProductCandidate[]>> {
+  const clean = Array.from(new Set(terms.map((t) => t.trim()).filter((t) => t.length >= 2))).slice(0, 12);
   if (!clean.length) return { ok: true, data: [] };
-  const ors: string[] = [];
-  for (const t of clean) {
-    ors.push(
-      `libyan_display_name.ilike.%${t}%`, `arabic_name.ilike.%${t}%`, `english_name.ilike.%${t}%`,
-      `source_name.ilike.%${t}%`, `category.ilike.%${t}%`,
-    );
-  }
-  const { data } = await activePriced(db.from('products').select(PRODUCT_COLUMNS)).or(ors.join(',')).limit(Math.max(limit * 6, 40));
-  const rows = (data ?? []) as any[];
+  const rows = await activePriced(productSelect(db))
+    .where((eb) =>
+      eb.or(
+        clean.flatMap((t) =>
+          TEXT_SEARCH_NAME_COLUMNS.map((col) => eb(`products.${col}`, 'ilike', `%${t}%`)),
+        ),
+      ),
+    )
+    .limit(Math.max(limit * 6, 40))
+    .execute();
   if (!rows.length) return { ok: true, data: [] };
   const queryTokens = new Set(clean.flatMap((t) => tokenize(t)));
   const scored = rows
-    .map((p: any) => {
+    .map((p) => {
       const nameTokens = new Set<string>([
         ...tokenize(p.libyan_display_name), ...tokenize(p.arabic_name), ...tokenize(p.english_name),
         ...tokenize(p.source_name), ...tokenize(p.category),
@@ -121,17 +143,18 @@ export async function searchProductsByText(db: SupabaseClient, terms: string[], 
  * rank active+priced products that have a stored text_embedding by cosine. Returns
  * [] (never fake results) when embeddings/key are unavailable.
  */
-export async function vectorSearchProductText(db: SupabaseClient, query: string, limit = 10): Promise<ToolResult<ProductCandidate[]>> {
+export async function vectorSearchProductText(db: Kysely<DB>, query: string, limit = 10): Promise<ToolResult<ProductCandidate[]>> {
   const emb = await embedText(query, 'RETRIEVAL_QUERY');
   if (!emb.values) return { ok: true, data: [] };
   // Pull candidate embeddings (bounded scan, consistent with the dHash scan).
-  const { data } = await activePriced(db.from('products').select(`${PRODUCT_COLUMNS}, text_embedding`))
-    .not('text_embedding', 'is', null)
-    .limit(5000);
-  const rows = (data ?? []) as any[];
+  const rows = await activePriced(productSelect(db))
+    .select('products.text_embedding')
+    .where('products.text_embedding', 'is not', null)
+    .limit(5000)
+    .execute();
   if (!rows.length) return { ok: true, data: [] };
   const scored = rows
-    .map((p: any) => {
+    .map((p) => {
       const vec = Array.isArray(p.text_embedding) ? (p.text_embedding as number[]) : null;
       const sim = vec ? cosineSimilarity(emb.values as number[], vec) : 0;
       return { p, sim };
@@ -143,27 +166,28 @@ export async function vectorSearchProductText(db: SupabaseClient, query: string,
 }
 
 /** Price of one product (active_price = campaign-adjusted truth). */
-export async function getProductPrice(db: SupabaseClient, productId: string): Promise<ToolResult<{ price: number | null; name: string } | null>> {
-  const { data } = await db.from('products').select(PRODUCT_COLUMNS).eq('id', productId).maybeSingle();
+export async function getProductPrice(db: Kysely<DB>, productId: string): Promise<ToolResult<{ price: number | null; name: string } | null>> {
+  const data = await productSelect(db).where('products.id', '=', productId).executeTakeFirst();
   if (!data) return { ok: true, data: null };
-  return { ok: true, data: { price: (data as any).active_price ?? null, name: customerProductName(data as any) } };
+  return { ok: true, data: { price: data.active_price ?? null, name: customerProductName(data) } };
 }
 
 /** Sibling products in the same code family (simple "other options" — no variant graph). */
-export async function getProductOptions(db: SupabaseClient, productId: string, limit = 5): Promise<ToolResult<ProductCandidate[]>> {
-  const { data: base } = await db.from('products').select('product_code, category').eq('id', productId).maybeSingle();
-  const code = (base as any)?.product_code as string | undefined;
+export async function getProductOptions(db: Kysely<DB>, productId: string, limit = 5): Promise<ToolResult<ProductCandidate[]>> {
+  const base = await db.selectFrom('products').select(['product_code', 'category']).where('id', '=', productId).executeTakeFirst();
+  const code = base?.product_code ?? undefined;
   const family = code ? normalizeCode(code).slice(0, 6) : '';
   if (family.length >= 4) {
-    const { data } = await activePriced(db.from('products').select(PRODUCT_COLUMNS)).ilike('product_code', `%${family}%`).neq('id', productId).limit(limit);
-    const rows = (data ?? []).filter((p: any) => normalizeCode(p.product_code).startsWith(family));
-    if (rows.length) return { ok: true, data: rows.map((p: any) => toCandidate(p, 0.5, 'same product family')) };
+    const rows = (
+      await activePriced(productSelect(db)).where('products.product_code', 'ilike', `%${family}%`).where('products.id', '!=', productId).limit(limit).execute()
+    ).filter((p) => normalizeCode(p.product_code).startsWith(family));
+    if (rows.length) return { ok: true, data: rows.map((p) => toCandidate(p, 0.5, 'same product family')) };
   }
   // Fallback: same category.
-  const cat = (base as any)?.category as string | undefined;
+  const cat = base?.category ?? undefined;
   if (cat) {
-    const { data } = await activePriced(db.from('products').select(PRODUCT_COLUMNS)).eq('category', cat).neq('id', productId).limit(limit);
-    return { ok: true, data: (data ?? []).map((p: any) => toCandidate(p, 0.4, 'same category')) };
+    const rows = await activePriced(productSelect(db)).where('products.category', '=', cat).where('products.id', '!=', productId).limit(limit).execute();
+    return { ok: true, data: rows.map((p) => toCandidate(p, 0.4, 'same category')) };
   }
   return { ok: true, data: [] };
 }

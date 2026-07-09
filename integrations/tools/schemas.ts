@@ -3,7 +3,8 @@
  * that runs them against the DB. Only safe read tools are exposed — write tools
  * (memory/correction updates) are called by the pipeline, never by the model.
  */
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Kysely } from 'kysely';
+import type { DB } from '../db/types';
 import type { GeminiFunctionDeclaration, ToolExecutor } from '../gemini/client';
 import {
   findProductByCode, findProductByBarcode, findProductByUrl,
@@ -60,7 +61,7 @@ function slim(c: ProductCandidate) {
 }
 
 /** Build the executor that runs the READ tools against the DB for this turn. */
-export function buildProductToolExecutor(db: SupabaseClient): ToolExecutor {
+export function buildProductToolExecutor(db: Kysely<DB>): ToolExecutor {
   return async (name, args) => {
     switch (name) {
       case 'findProductByCode': {

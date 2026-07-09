@@ -16,7 +16,8 @@
  * Hard safety: only active, priced products are surfaced; Turkish source_name is
  * never customer-facing; no invented prices.
  */
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Kysely } from 'kysely';
+import type { DB } from '../db/types';
 import {
   describeProductImage,
   matchProductFromImage,
@@ -32,8 +33,9 @@ import { dhashFromBytes, hammingHex, hammingSimilarity, NEAR_DUPLICATE_MAX, SIMI
 import { customerProductName } from '../util/product-display';
 import {
   findProductByCode, findProductByBarcode, vectorSearchProductText, toCandidate,
-  PRODUCT_COLUMNS, type ProductCandidate,
+  type ProductCandidate,
 } from '../tools';
+import { productSelect, activePriced } from '../tools/products';
 
 /** Back-compat alias — the canonical candidate shape now lives in the tools layer. */
 export type ImageMatchCandidate = ProductCandidate;
@@ -81,18 +83,16 @@ function bestHashDistance(p: any, customerHash: string | null): number {
   return best;
 }
 
-async function findById(db: SupabaseClient, id: string): Promise<any | null> {
-  const { data } = await db.from('products').select(PRODUCT_COLUMNS)
-    .eq('id', id).eq('status', 'active').not('active_price', 'is', null).maybeSingle();
+async function findById(db: Kysely<DB>, id: string): Promise<any | null> {
+  const data = await activePriced(productSelect(db)).where('products.id', '=', id).executeTakeFirst();
   return data ?? null;
 }
 
-async function findByExactImageUrl(db: SupabaseClient, imageUrl: string): Promise<any | null> {
+async function findByExactImageUrl(db: Kysely<DB>, imageUrl: string): Promise<any | null> {
   for (const url of Array.from(new Set([imageUrl, withoutQuery(imageUrl)]))) {
-    const { data: img } = await db.from('product_images').select('product_id').eq('public_url', url).limit(1).maybeSingle();
-    const pid = (img as any)?.product_id;
-    if (!pid) continue;
-    const product = await findById(db, pid);
+    const img = await db.selectFrom('product_images').select('product_id').where('public_url', '=', url).limit(1).executeTakeFirst();
+    if (!img?.product_id) continue;
+    const product = await findById(db, img.product_id);
     if (product) return product;
   }
   return null;
@@ -103,27 +103,28 @@ async function findByExactImageUrl(db: SupabaseClient, imageUrl: string): Promis
  * product, across BOTH the legacy corrections table and the product_fingerprints
  * learning store. Returns the product if within SIMILAR_MAX.
  */
-async function findByLearnedFingerprint(db: SupabaseClient, customerHash: string): Promise<{ product: any | null; distance: number }> {
+async function findByLearnedFingerprint(db: Kysely<DB>, customerHash: string): Promise<{ product: any | null; distance: number }> {
   let bestId: string | null = null;
   let bestDist = 999;
-  const { data: corr } = await db
-    .from('image_match_corrections')
-    .select('customer_image_hash, corrected_product_id')
-    .not('corrected_product_id', 'is', null)
-    .not('customer_image_hash', 'is', null)
-    .order('created_at', { ascending: false })
-    .limit(1000);
-  for (const r of (corr ?? []) as any[]) {
+  const corr = await db
+    .selectFrom('image_match_corrections')
+    .select(['customer_image_hash', 'corrected_product_id'])
+    .where('corrected_product_id', 'is not', null)
+    .where('customer_image_hash', 'is not', null)
+    .orderBy('created_at', 'desc')
+    .limit(1000)
+    .execute();
+  for (const r of corr) {
     const d = hammingHex(customerHash, r.customer_image_hash);
     if (d < bestDist) { bestDist = d; bestId = r.corrected_product_id; }
   }
-  // product_fingerprints (migration 0009). Absent table → query errors silently.
-  const { data: fp } = await db
-    .from('product_fingerprints')
-    .select('hash_hex, product_id')
-    .order('created_at', { ascending: false })
-    .limit(2000);
-  for (const r of (fp ?? []) as any[]) {
+  const fp = await db
+    .selectFrom('product_fingerprints')
+    .select(['hash_hex', 'product_id'])
+    .orderBy('created_at', 'desc')
+    .limit(2000)
+    .execute();
+  for (const r of fp) {
     const d = hammingHex(customerHash, r.hash_hex);
     if (d < bestDist) { bestDist = d; bestId = r.product_id; }
   }
@@ -132,16 +133,18 @@ async function findByLearnedFingerprint(db: SupabaseClient, customerHash: string
 }
 
 /** Scan active+priced product image fingerprints; per-product best distance, ascending. */
-async function scanProductImageHashes(db: SupabaseClient, customerHash: string): Promise<{ product_id: string; distance: number }[]> {
-  const { data } = await db
-    .from('product_images')
-    .select('product_id, perceptual_hash, products!inner(status,active_price)')
-    .not('perceptual_hash', 'is', null)
-    .eq('products.status', 'active')
-    .not('products.active_price', 'is', null)
-    .limit(8000);
+async function scanProductImageHashes(db: Kysely<DB>, customerHash: string): Promise<{ product_id: string; distance: number }[]> {
+  const data = await db
+    .selectFrom('product_images')
+    .innerJoin('products', 'products.id', 'product_images.product_id')
+    .select(['product_images.product_id', 'product_images.perceptual_hash'])
+    .where('product_images.perceptual_hash', 'is not', null)
+    .where('products.status', '=', 'active')
+    .where('products.active_price', 'is not', null)
+    .limit(8000)
+    .execute();
   const best = new Map<string, number>();
-  for (const r of (data ?? []) as any[]) {
+  for (const r of data) {
     const d = hammingHex(customerHash, r.perceptual_hash);
     const cur = best.get(r.product_id);
     if (cur === undefined || d < cur) best.set(r.product_id, d);
@@ -149,26 +152,25 @@ async function scanProductImageHashes(db: SupabaseClient, customerHash: string):
   return [...best.entries()].map(([product_id, distance]) => ({ product_id, distance })).sort((a, b) => a.distance - b.distance);
 }
 
-async function findSimilarByImage(db: SupabaseClient, customerHash: string, maxDist: number, limit: number): Promise<any[]> {
+async function findSimilarByImage(db: Kysely<DB>, customerHash: string, maxDist: number, limit: number): Promise<any[]> {
   const ranked = (await scanProductImageHashes(db, customerHash)).filter((r) => r.distance <= maxDist).slice(0, limit);
   const out: any[] = [];
   for (const r of ranked) { const p = await findById(db, r.product_id); if (p) out.push(p); }
   return out;
 }
 
-/** Keyword catalog search over active+priced products. */
-async function searchCatalog(db: SupabaseClient, keywords: string[], limit: number): Promise<any[]> {
+/** Keyword catalog search over active+priced products (raw rows for hashing). */
+async function searchCatalog(db: Kysely<DB>, keywords: string[], limit: number): Promise<any[]> {
   const terms = Array.from(new Set(keywords.map(sanitizeKeyword).filter((k) => k.length >= 2))).slice(0, 10);
   if (terms.length === 0) return [];
-  const or = terms.flatMap((t) => [
-    `libyan_display_name.ilike.%${t}%`, `arabic_name.ilike.%${t}%`, `english_name.ilike.%${t}%`, `category.ilike.%${t}%`,
-  ]).join(',');
-  const { data } = await db.from('products').select(PRODUCT_COLUMNS)
-    .eq('status', 'active').not('active_price', 'is', null).or(or).limit(limit);
-  return data ?? [];
+  const cols = ['libyan_display_name', 'arabic_name', 'english_name', 'category'] as const;
+  return activePriced(productSelect(db))
+    .where((eb) => eb.or(terms.flatMap((t) => cols.map((c) => eb(`products.${c}`, 'ilike', `%${t}%`)))))
+    .limit(limit)
+    .execute();
 }
 
-export async function matchCustomerImage(db: SupabaseClient, opts: MatchCustomerImageOpts): Promise<ImageMatchResult> {
+export async function matchCustomerImage(db: Kysely<DB>, opts: MatchCustomerImageOpts): Promise<ImageMatchResult> {
   const searchLimit = opts.searchLimit ?? 50;
   let customerHash: string | null = null;
   const diagnostics: Record<string, unknown> = {
