@@ -5,6 +5,13 @@
   "description": "EH-SYSTEM1 — root for the shared integrations/ provider layer (Supabase/Gemini/Meta). The admin-app, scripts/ and workers/ each have their own package.json; this one declares the dependency that the framework-agnostic integrations/ modules import so type resolution works from every consumer.",
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
-    "jimp": "^0.22.12"
+    "jimp": "^0.22.12",
+    "kysely": "^0.29.3",
+    "pg": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.20.0",
+    "kysely-codegen": "^0.20.0",
+    "typescript": "^7.0.2"
   }
 }
