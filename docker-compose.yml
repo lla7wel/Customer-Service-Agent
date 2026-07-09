@@ -1,0 +1,73 @@
+# English Home Libya platform — the whole system on one VPS.
+#   cp .env.example .env   (fill in values)
+#   docker compose up -d
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-eh_system}
+      POSTGRES_USER: ${POSTGRES_USER:-eh}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-eh} -d ${POSTGRES_DB:-eh_system}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-eh}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-eh_system}
+      MEDIA_ROOT: /srv/eh-media
+      PUBLIC_MEDIA_BASE_URL: ${PUBLIC_MEDIA_BASE_URL:?e.g. https://media.example.com}
+      APP_BASE_URL: ${APP_BASE_URL:?e.g. https://app.example.com}
+      SESSION_SECRET: ${SESSION_SECRET:?openssl rand -hex 32}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?admin sign-in email}
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:?bcrypt hash of the admin password}
+      CRON_SECRET: ${CRON_SECRET:?shared secret for the scheduler tick}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_TEXT_MODEL: ${GEMINI_TEXT_MODEL:-gemini-2.5-flash}
+      GEMINI_ROUTER_MODEL: ${GEMINI_ROUTER_MODEL:-gemini-2.5-flash-lite}
+      GEMINI_VISION_MODEL: ${GEMINI_VISION_MODEL:-gemini-2.5-flash}
+      GEMINI_IMAGE_MODEL: ${GEMINI_IMAGE_MODEL:-gemini-3-pro-image-preview}
+      GEMINI_IMAGE_FALLBACK_MODEL: ${GEMINI_IMAGE_FALLBACK_MODEL:-gemini-3.1-flash-image-preview}
+      GEMINI_IMAGE_LAST_FALLBACK_MODEL: ${GEMINI_IMAGE_LAST_FALLBACK_MODEL:-gemini-2.5-flash-image}
+      GEMINI_EMBEDDING_MODEL: ${GEMINI_EMBEDDING_MODEL:-gemini-embedding-001}
+      META_PAGE_ID: ${META_PAGE_ID:-}
+      META_PAGE_ACCESS_TOKEN: ${META_PAGE_ACCESS_TOKEN:-}
+      META_VERIFY_TOKEN: ${META_VERIFY_TOKEN:-}
+      META_APP_SECRET: ${META_APP_SECRET:-}
+    volumes:
+      - media:/srv/eh-media
+    expose:
+      - '3000'
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?e.g. app.example.com}
+      MEDIA_DOMAIN: ${MEDIA_DOMAIN:?e.g. media.example.com}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - media:/srv/eh-media:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  media:
+  caddy_data:
+  caddy_config:

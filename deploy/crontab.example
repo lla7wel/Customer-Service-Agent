@@ -1,0 +1,8 @@
+# Host crontab for the English Home Libya platform (crontab -e on the VPS).
+# Replace /srv/eh-platform with the actual checkout path and set CRON_SECRET.
+
+# Campaign scheduler: refresh cached pricing + publish due scheduled posts.
+*/5 * * * * curl -fsS -m 30 -X POST -H "Authorization: Bearer ${CRON_SECRET}" http://127.0.0.1:3000/api/cron/campaign-scheduler >> /var/log/eh-cron.log 2>&1
+
+# Nightly database backup (02:30).
+30 2 * * * /srv/eh-platform/deploy/backup.sh >> /var/log/eh-backup.log 2>&1

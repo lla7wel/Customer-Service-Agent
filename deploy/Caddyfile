@@ -1,0 +1,15 @@
+# Reverse proxy for the English Home Libya platform.
+# Caddy provisions and renews Let's Encrypt certificates automatically —
+# Meta requires the webhook and every product image URL to be public HTTPS.
+
+{$APP_DOMAIN} {
+	encode gzip
+	reverse_proxy app:3000
+}
+
+{$MEDIA_DOMAIN} {
+	root * /srv/eh-media
+	file_server
+	header Cache-Control "public, max-age=31536000, immutable"
+	header Access-Control-Allow-Origin "*"
+}
