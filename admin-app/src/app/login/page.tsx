@@ -3,25 +3,38 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { LogIn, ShieldAlert, Sparkles } from 'lucide-react';
-import { getBrowserSupabase } from '@/lib/supabase/browser';
 
 export default function LoginPage() {
   const router = useRouter();
-  const supabase = getBrowserSupabase();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [notConfigured, setNotConfigured] = useState(false);
 
   async function signIn(e: React.FormEvent) {
     e.preventDefault();
-    if (!supabase) return;
     setBusy(true);
     setErr(null);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    setBusy(false);
-    if (error) setErr(error.message);
-    else router.push('/dashboard');
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        router.push('/dashboard');
+        router.refresh();
+        return;
+      }
+      if (data?.error === 'auth_not_configured') setNotConfigured(true);
+      else setErr(data?.error === 'invalid_credentials' ? 'Invalid email or password.' : data?.error || 'Sign-in failed.');
+    } catch {
+      setErr('Network error — try again.');
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -35,13 +48,13 @@ export default function LoginPage() {
         </div>
 
         <div className="command-surface p-6">
-          {!supabase ? (
+          {notConfigured ? (
             <div className="rounded-lg border border-warning/30 bg-warning/10 p-4 text-sm text-warning">
-              <p className="flex items-center gap-2 font-medium"><ShieldAlert size={16} /> Supabase not connected</p>
+              <p className="flex items-center gap-2 font-medium"><ShieldAlert size={16} /> Auth not configured</p>
               <p className="mt-2 text-xs text-muted">
-                Set <span className="font-mono text-fg">NEXT_PUBLIC_SUPABASE_URL</span> and{' '}
-                <span className="font-mono text-fg">NEXT_PUBLIC_SUPABASE_ANON_KEY</span>, run{' '}
-                <span className="font-mono text-fg">database/schema.sql</span>, create an admin user (docs/SETUP.md). You can still{' '}
+                Set <span className="font-mono text-fg">ADMIN_EMAIL</span>,{' '}
+                <span className="font-mono text-fg">ADMIN_PASSWORD_HASH</span> and{' '}
+                <span className="font-mono text-fg">SESSION_SECRET</span> in the server environment. You can still{' '}
                 <a className="text-accent underline" href="/dashboard">open the dashboard</a>.
               </p>
             </div>

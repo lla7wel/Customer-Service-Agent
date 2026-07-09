@@ -1,25 +1,26 @@
 /**
  * Central auth gate for the admin control center.
  *
- * Every dashboard page and every API route requires a signed-in Supabase user,
+ * Every dashboard page and every API route requires a signed-in admin session,
  * EXCEPT a small explicit allowlist:
- *   - /api/meta/webhook          (Meta's callback; verified by signature/verify-token internally)
- *   - /api/health                (status probe, safe to expose)
- *   - /api/cron/campaign-scheduler (protected by CLOUDFLARE_WEBHOOK_SECRET internally)
- *   - /login                     (the sign-in page itself)
+ *   - /api/meta/webhook            (Meta's callback; verified by signature/verify-token internally)
+ *   - /api/health                  (status probe, safe to expose)
+ *   - /api/cron/campaign-scheduler (protected by CRON_SECRET internally)
+ *   - /api/auth/                   (the login/logout endpoints themselves)
+ *   - /login                       (the sign-in page itself)
  *
- * The app reads data through the service-role key (see lib/supabase/db.ts), which
- * bypasses RLS — so without this gate any unauthenticated HTTP caller could read
- * and mutate the whole database. This middleware is that gate.
+ * The app talks to Postgres directly (no row-level auth), so without this gate
+ * any unauthenticated HTTP caller could read and mutate the whole database.
+ * This middleware is that gate.
  *
- * If Supabase auth env is not configured (local/unconfigured dev), the gate is a
- * no-op so the app still runs; in production both public env vars are always set.
+ * If SESSION_SECRET is not configured (local/unconfigured dev), the gate is a
+ * no-op so the app still runs; in production it is always set.
  */
-import { createServerClient } from '@supabase/ssr';
 import { NextRequest, NextResponse } from 'next/server';
+import { SESSION_COOKIE, verifySessionToken } from '@/lib/auth';
 
 /** API routes that must stay reachable without an admin session. */
-const PUBLIC_API_PREFIXES = ['/api/meta/webhook', '/api/health', '/api/cron/'];
+const PUBLIC_API_PREFIXES = ['/api/meta/webhook', '/api/health', '/api/cron/', '/api/auth/'];
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -29,39 +30,18 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   // Auth not configured → cannot gate; allow through (degraded local dev only).
-  if (!url || !anon) return NextResponse.next();
+  if (!process.env.SESSION_SECRET) return NextResponse.next();
 
-  let res = NextResponse.next({ request: { headers: req.headers } });
+  const email = await verifySessionToken(req.cookies.get(SESSION_COOKIE)?.value);
 
-  const supabase = createServerClient(url, anon, {
-    cookies: {
-      getAll() {
-        return req.cookies.getAll();
-      },
-      setAll(cookiesToSet: { name: string; value: string; options?: Record<string, unknown> }[]) {
-        cookiesToSet.forEach(({ name, value }) => req.cookies.set(name, value));
-        res = NextResponse.next({ request: { headers: req.headers } });
-        cookiesToSet.forEach(({ name, value, options }) =>
-          res.cookies.set(name, value, options as any),
-        );
-      },
-    },
-  });
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
+  if (!email) {
     // Unauthenticated API calls → 401 JSON (never an HTML redirect).
     if (pathname.startsWith('/api/')) {
       return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
     }
     // The login page itself stays reachable.
-    if (pathname === '/login') return res;
+    if (pathname === '/login') return NextResponse.next();
     // Everything else → redirect to sign in.
     const redirectUrl = req.nextUrl.clone();
     redirectUrl.pathname = '/login';
@@ -77,7 +57,7 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  return res;
+  return NextResponse.next();
 }
 
 export const config = {

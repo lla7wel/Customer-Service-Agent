@@ -3,7 +3,8 @@ import Topbar from '@/components/Topbar';
 import { getLocale } from '@/lib/i18n/server';
 import { getTheme } from '@/lib/theme-server';
 import { allIntegrationStatuses } from '@integrations/status';
-import { getServerSupabase } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
+import { SESSION_COOKIE, verifySessionToken } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,16 +13,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const theme = getTheme();
   const statuses = allIntegrationStatuses();
 
-  let userEmail: string | null = null;
-  const supabase = getServerSupabase();
-  if (supabase) {
-    try {
-      const { data } = await supabase.auth.getUser();
-      userEmail = data.user?.email ?? null;
-    } catch {
-      /* not signed in / not reachable — fine */
-    }
-  }
+  const userEmail = await verifySessionToken(cookies().get(SESSION_COOKIE)?.value);
 
   return (
     <div className="premium-shell flex h-dvh overflow-hidden">

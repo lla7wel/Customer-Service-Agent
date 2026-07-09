@@ -11,16 +11,18 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@supabase/ssr": "^0.5.2",
+    "bcryptjs": "^3.0.3",
     "jimp": "^0.22.12",
+    "jose": "^6.2.3",
+    "kysely": "^0.29.3",
     "lucide-react": "^0.456.0",
     "next": "14.2.35",
+    "pg": "^8.22.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "kysely": "^0.29.3",
-    "pg": "^8.22.0"
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20.16.10",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.0",
