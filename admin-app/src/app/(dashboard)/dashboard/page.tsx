@@ -21,7 +21,7 @@ export const dynamic = 'force-dynamic';
 const NEEDS_ACTION = ['needs_human', 'waiting_for_order_confirmation', 'issue_refund_exchange', 'human_active'];
 
 export default async function DashboardPage() {
-  const { t, locale } = getT();
+  const { t, locale } = await getT();
   const ar = locale === 'ar';
   const statuses = allIntegrationStatuses();
   const sConnected = databaseStatus().configured;

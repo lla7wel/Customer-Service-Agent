@@ -45,8 +45,9 @@ function toItem(r: Row): ReviewItem {
   };
 }
 
-export default async function PriceReviewPage({ searchParams }: { searchParams: { page?: string } }) {
-  const { locale } = getT();
+export default async function PriceReviewPage(props: { searchParams: Promise<{ page?: string }> }) {
+  const searchParams = await props.searchParams;
+  const { locale } = await getT();
   const ar = locale === 'ar';
   const status = databaseStatus();
   const page = Math.max(0, parseInt(searchParams.page ?? '0', 10) || 0);

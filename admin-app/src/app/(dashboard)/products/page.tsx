@@ -36,12 +36,13 @@ function primaryUrl(r: Row): string | null {
   return p?.public_url ?? null;
 }
 
-export default async function ProductsPage({
-  searchParams,
-}: {
-  searchParams: { q?: string; category?: string; page?: string; view?: string; status?: string; images?: string };
-}) {
-  const { t, locale } = getT();
+export default async function ProductsPage(
+  props: {
+    searchParams: Promise<{ q?: string; category?: string; page?: string; view?: string; status?: string; images?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
+  const { t, locale } = await getT();
   const ar = locale === 'ar';
   const status = databaseStatus();
   const view = searchParams.view === 'list' ? 'list' : 'grid';

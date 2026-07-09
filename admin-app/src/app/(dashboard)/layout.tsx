@@ -9,11 +9,11 @@ import { SESSION_COOKIE, verifySessionToken } from '@/lib/auth';
 export const dynamic = 'force-dynamic';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const locale = getLocale();
-  const theme = getTheme();
+  const locale = await getLocale();
+  const theme = await getTheme();
   const statuses = allIntegrationStatuses();
 
-  const userEmail = await verifySessionToken(cookies().get(SESSION_COOKIE)?.value);
+  const userEmail = await verifySessionToken((await cookies()).get(SESSION_COOKIE)?.value);
 
   return (
     <div className="premium-shell flex h-dvh overflow-hidden">

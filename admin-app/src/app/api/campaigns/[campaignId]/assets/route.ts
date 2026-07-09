@@ -10,7 +10,8 @@ export const runtime = 'nodejs';
  * and link them as campaign_assets. Saves/links to the DB so the campaign owns
  * its assets even before posting.
  */
-export async function POST(req: NextRequest, { params }: { params: { campaignId: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ campaignId: string }> }) {
+  const params = await props.params;
   const db = getDb();
   if (!db) {
     return NextResponse.json({ error: 'integration_not_configured', missing: databaseStatus().missing }, { status: 503 });

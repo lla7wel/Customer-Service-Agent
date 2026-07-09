@@ -11,7 +11,7 @@ import { countRows } from '@/lib/data';
 export const dynamic = 'force-dynamic';
 
 export default async function AnalyticsPage() {
-  const { t, locale } = getT();
+  const { t, locale } = await getT();
   const ar = locale === 'ar';
   const status = databaseStatus();
 

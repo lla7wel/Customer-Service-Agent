@@ -17,8 +17,9 @@ export const dynamic = 'force-dynamic';
 interface Asset { id: string; kind: string; public_url: string | null; position: number; approved?: boolean; source_asset_id?: string | null }
 interface Post { id: string; type: string; status: string; asset_ids: string[]; fb_post_id: string | null; permalink_url: string | null; scheduled_for: string | null; error: string | null }
 
-export default async function CampaignDetailPage({ params }: { params: { campaignId: string } }) {
-  const { locale } = getT();
+export default async function CampaignDetailPage(props: { params: Promise<{ campaignId: string }> }) {
+  const params = await props.params;
+  const { locale } = await getT();
   const ar = locale === 'ar';
   const status = databaseStatus();
   if (!status.configured) return (<div><Back ar={ar} /><NotConnected status={status} /></div>);
@@ -55,11 +56,9 @@ export default async function CampaignDetailPage({ params }: { params: { campaig
         </div>
         <Badge tone={campaignTone(campaign.status)} dot>{humanize(campaign.status)}</Badge>
       </div>
-
       {!metaStatus().configured && (
         <div className="mb-4"><Notice tone="warn">{ar ? 'Meta غير مربوط — يمكنك تجهيز الحملة والمنشورات، لكن النشر يحتاج إعداد Meta.' : 'Meta not connected — you can prepare everything, but publishing needs Meta configured.'}</Notice></div>
       )}
-
       <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
         {/* builder */}
         <div className="space-y-5">
@@ -95,7 +94,7 @@ export default async function CampaignDetailPage({ params }: { params: { campaig
               <div className="aspect-square bg-bg">
                 {previewImg ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={previewImg} alt="" className="h-full w-full object-cover" />
+                  (<img src={previewImg} alt="" className="h-full w-full object-cover" />)
                 ) : (
                   <div className="flex h-full flex-col items-center justify-center text-faint">
                     <ImageOff size={26} />

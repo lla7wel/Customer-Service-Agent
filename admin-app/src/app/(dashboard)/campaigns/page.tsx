@@ -22,7 +22,7 @@ interface Row {
 }
 
 export default async function CampaignsPage() {
-  const { t, locale } = getT();
+  const { t, locale } = await getT();
   const ar = locale === 'ar';
   const status = databaseStatus();
   const supabase = getDb();

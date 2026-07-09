@@ -22,7 +22,8 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 /** Live thread fetch for polling (no manual refresh needed in the Inbox). */
-export async function GET(_req: NextRequest, { params }: { params: { conversationId: string } }) {
+export async function GET(_req: NextRequest, props: { params: Promise<{ conversationId: string }> }) {
+  const params = await props.params;
   const db = getDb();
   if (!db) return NextResponse.json({ error: 'integration_not_configured' }, { status: 503 });
   const id = params.conversationId;
@@ -48,7 +49,8 @@ export async function GET(_req: NextRequest, { params }: { params: { conversatio
  *   send_human_message | suggest_reply | pause_ai | resume_ai | mark_resolved
  * Every action degrades to 503 { error, missing } when its integration is off.
  */
-export async function POST(req: NextRequest, { params }: { params: { conversationId: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ conversationId: string }> }) {
+  const params = await props.params;
   const id = params.conversationId;
   const body = await req.json().catch(() => ({}));
   const action = body?.action as string;

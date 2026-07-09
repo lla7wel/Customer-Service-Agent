@@ -12,8 +12,9 @@ import ProductEditor from '@/components/products/ProductEditor';
 
 export const dynamic = 'force-dynamic';
 
-export default async function ProductDetailPage({ params }: { params: { productId: string } }) {
-  const { locale } = getT();
+export default async function ProductDetailPage(props: { params: Promise<{ productId: string }> }) {
+  const params = await props.params;
+  const { locale } = await getT();
   const ar = locale === 'ar';
   const status = databaseStatus();
 

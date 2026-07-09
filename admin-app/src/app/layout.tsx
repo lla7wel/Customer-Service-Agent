@@ -9,9 +9,9 @@ export const metadata: Metadata = {
   description: 'Retail operations command center for English Home Libya.',
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  const locale = getLocale();
-  const theme = getTheme();
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const locale = await getLocale();
+  const theme = await getTheme();
   return (
     <html lang={locale} dir={dir(locale)} className={theme === 'dark' ? 'dark' : ''}>
       <body>{children}</body>

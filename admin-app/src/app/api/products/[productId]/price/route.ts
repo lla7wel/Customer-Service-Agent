@@ -19,7 +19,8 @@ export const runtime = 'nodejs';
  *
  * The admin app is the source of truth — a later scraper sync never overwrites these.
  */
-export async function POST(req: NextRequest, { params }: { params: { productId: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ productId: string }> }) {
+  const params = await props.params;
   const db = getDb();
   if (!db) {
     return NextResponse.json(

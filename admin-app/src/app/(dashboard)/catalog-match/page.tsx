@@ -8,8 +8,8 @@ import { databaseStatus } from '@integrations/status';
 
 export const dynamic = 'force-dynamic';
 
-export default function CatalogMatchPage() {
-  const { locale } = getT();
+export default async function CatalogMatchPage() {
+  const { locale } = await getT();
   const ar = locale === 'ar';
   const status = databaseStatus();
 

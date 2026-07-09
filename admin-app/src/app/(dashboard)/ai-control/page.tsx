@@ -11,7 +11,7 @@ import AiBehaviors from '@/components/ai/AiBehaviors';
 export const dynamic = 'force-dynamic';
 
 export default async function AiControlPage() {
-  const { t, locale } = getT();
+  const { t, locale } = await getT();
   const ar = locale === 'ar';
   const sStatus = databaseStatus();
   const gStatus = geminiStatus();

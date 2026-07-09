@@ -27,7 +27,7 @@ const ICON: Record<string, any> = {
 };
 
 export default async function LogsPage() {
-  const { t, locale } = getT();
+  const { t, locale } = await getT();
   const ar = locale === 'ar';
   const status = databaseStatus();
   const { connected, rows, error } = await fetchRows<ActivityLog>('activity_logs', (q) => q.orderBy('created_at', 'desc').limit(150));

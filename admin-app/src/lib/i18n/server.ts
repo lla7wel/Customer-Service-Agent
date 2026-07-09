@@ -3,18 +3,18 @@ import { LOCALE_COOKIE, normalizeLocale, dir, type Locale } from './config';
 import { translate } from './dictionaries';
 
 /** Read the admin's chosen locale from the cookie (server components/routes). */
-export function getLocale(): Locale {
-  const c = cookies().get(LOCALE_COOKIE)?.value;
+export async function getLocale(): Promise<Locale> {
+  const c = (await cookies()).get(LOCALE_COOKIE)?.value;
   return normalizeLocale(c);
 }
 
 /** Server-side translation bundle for a request. */
-export function getT(): {
+export async function getT(): Promise<{
   locale: Locale;
   dir: 'rtl' | 'ltr';
   t: (key: string) => string;
-} {
-  const locale = getLocale();
+}> {
+  const locale = await getLocale();
   return {
     locale,
     dir: dir(locale),

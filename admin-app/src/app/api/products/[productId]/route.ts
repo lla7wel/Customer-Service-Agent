@@ -11,7 +11,8 @@ const EDITABLE = [
 ];
 
 /** Edit a product. Admin can fully edit the product database. */
-export async function PATCH(req: NextRequest, { params }: { params: { productId: string } }) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ productId: string }> }) {
+  const params = await props.params;
   const db = getDb();
   if (!db) {
     return NextResponse.json(

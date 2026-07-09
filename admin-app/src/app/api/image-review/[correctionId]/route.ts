@@ -14,7 +14,8 @@ import { saveImageCorrection } from '@integrations/tools';
 
 export const runtime = 'nodejs';
 
-export async function POST(req: NextRequest, { params }: { params: { correctionId: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ correctionId: string }> }) {
+  const params = await props.params;
   const db = getDb();
   if (!db) {
     return NextResponse.json(

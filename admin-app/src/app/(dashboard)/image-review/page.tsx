@@ -21,7 +21,7 @@ interface Correction {
 }
 
 export default async function ImageReviewPage() {
-  const { t, locale } = getT();
+  const { t, locale } = await getT();
   const ar = locale === 'ar';
   const status = databaseStatus();
   const { connected, rows, error } = await fetchRows<Correction>('image_match_corrections', (q) => q.orderBy('created_at', 'desc').limit(60));

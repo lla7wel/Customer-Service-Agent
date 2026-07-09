@@ -35,8 +35,9 @@ interface Row {
   customers?: { display_name: string | null } | null;
 }
 
-export default async function InboxPage({ searchParams }: { searchParams: { filter?: string } }) {
-  const { t, locale } = getT();
+export default async function InboxPage(props: { searchParams: Promise<{ filter?: string }> }) {
+  const searchParams = await props.searchParams;
+  const { t, locale } = await getT();
   const ar = locale === 'ar';
   const status = databaseStatus();
   const filter = searchParams.filter ?? 'all';

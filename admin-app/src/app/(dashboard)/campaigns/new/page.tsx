@@ -8,8 +8,8 @@ import CampaignBuilder from '@/components/campaigns/CampaignBuilder';
 
 export const dynamic = 'force-dynamic';
 
-export default function NewCampaignPage() {
-  const { locale } = getT();
+export default async function NewCampaignPage() {
+  const { locale } = await getT();
   const ar = locale === 'ar';
   const status = databaseStatus();
 

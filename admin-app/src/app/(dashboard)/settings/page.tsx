@@ -20,9 +20,9 @@ const META: Record<string, { icon: any; action: { en: string; ar: string } }> = 
 };
 
 export default async function SettingsPage() {
-  const { t, locale } = getT();
+  const { t, locale } = await getT();
   const ar = locale === 'ar';
-  const theme = getTheme();
+  const theme = await getTheme();
   const statuses = allIntegrationStatuses();
   const connectedCount = statuses.filter((s) => s.configured).length;
   const readiness = await getReadiness();

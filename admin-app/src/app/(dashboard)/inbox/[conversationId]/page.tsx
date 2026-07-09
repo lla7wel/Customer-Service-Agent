@@ -18,8 +18,9 @@ import { hydrateMessagesWithCandidates, hydrateUiCandidates, type UiCandidate } 
 
 export const dynamic = 'force-dynamic';
 
-export default async function ConversationPage({ params }: { params: { conversationId: string } }) {
-  const { locale } = getT();
+export default async function ConversationPage(props: { params: Promise<{ conversationId: string }> }) {
+  const params = await props.params;
+  const { locale } = await getT();
   const ar = locale === 'ar';
   const status = databaseStatus();
   const id = params.conversationId;

@@ -7,8 +7,8 @@ import Playground from '@/components/ai/Playground';
 
 export const dynamic = 'force-dynamic';
 
-export default function AiPlaygroundPage() {
-  const { t, locale } = getT();
+export default async function AiPlaygroundPage() {
+  const { t, locale } = await getT();
   const ar = locale === 'ar';
   const status = geminiStatus();
 

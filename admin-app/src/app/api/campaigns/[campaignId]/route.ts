@@ -58,7 +58,8 @@ async function uploadImageBytes(campaignId: string, base64: string, mime: string
  *   delete_asset{assetId} | prepare_posts{mode,scheduledFor} | publish_post{postId}
  *   publish (legacy one-shot) | update{fields}
  */
-export async function POST(req: NextRequest, { params }: { params: { campaignId: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ campaignId: string }> }) {
+  const params = await props.params;
   const db = getDb();
   if (!db) {
     return NextResponse.json({ error: 'integration_not_configured', missing: databaseStatus().missing }, { status: 503 });
