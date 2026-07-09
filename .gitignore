@@ -1,0 +1,36 @@
+# --- Secrets / env ---
+.env
+.env.*
+!.env.example
+admin-app/.env.local
+admin-app/.env*.local
+
+# --- Node ---
+node_modules/
+.pnp
+.pnp.js
+
+# --- Next.js ---
+admin-app/.next/
+admin-app/out/
+admin-app/build/
+admin-app/next-env.d.ts
+*.tsbuildinfo
+
+# --- Cloudflare Workers ---
+workers/**/.wrangler/
+workers/**/dist/
+
+# --- Logs / OS ---
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# --- Scripts build output ---
+scripts/dist/
+.import-cache/
+
+# --- IMPORTANT: the scraper is a SEPARATE project. It is NOT part of this repo.
+# ../english-home-tr-scraper is intentionally untouched and not tracked here.
+.vercel

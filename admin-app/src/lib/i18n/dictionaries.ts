@@ -1,0 +1,145 @@
+import type { Locale } from './config';
+
+/**
+ * Lightweight in-house dictionary (no i18n library). Covers the admin UI chrome,
+ * navigation, and page headings. Customer-facing AI text is always Libyan Arabic
+ * and is NOT in here.
+ */
+export type Dict = Record<string, string>;
+
+const en: Dict = {
+  app_name: 'EH-SYSTEM1',
+  app_subtitle: 'English Home Libya',
+  app_tag: 'Operations Command Center',
+  // nav groups
+  group_overview: 'Overview',
+  group_inbox: 'Customer Service',
+  group_catalog: 'Catalog',
+  group_marketing: 'Marketing',
+  group_ai: 'AI',
+  group_system: 'System',
+  // nav items
+  nav_dashboard: 'Dashboard',
+  nav_inbox: 'Inbox',
+  nav_orders: 'Orders',
+  nav_products: 'Products',
+  nav_catalog_review: 'Catalog Review',
+  nav_price_review: 'Price Review',
+  nav_catalog_match: 'Catalog Match',
+  nav_image_review: 'Image Review',
+  nav_campaigns: 'Campaigns',
+  nav_ai_control: 'AI Control',
+  nav_ai_playground: 'AI Playground',
+  nav_analytics: 'Analytics',
+  nav_logs: 'Activity Logs',
+  nav_settings: 'Settings',
+  // common
+  not_connected: 'Not connected',
+  setup_required: 'Setup required',
+  connected: 'Connected',
+  no_data_yet: 'No data yet',
+  loading: 'Loading…',
+  save: 'Save',
+  cancel: 'Cancel',
+  search: 'Search',
+  search_ph: 'Search products, conversations, customers, campaigns…',
+  filter: 'Filter',
+  all: 'All',
+  refresh: 'Refresh',
+  language: 'Language',
+  theme: 'Theme',
+  sign_out: 'Sign out',
+  view_all: 'View all',
+  open: 'Open',
+  none: 'None',
+  // dashboard
+  dashboard_title: 'Command Center',
+  dashboard_subtitle: 'What needs your attention right now',
+  needs_action: 'Needs action',
+  action_queue: 'Action queue',
+  today_overview: 'Today',
+  week_overview: 'This week',
+  system_status: 'Connected systems',
+  ai_status: 'AI status',
+  campaign_schedule: 'Campaign schedule',
+  comments_need_reply: 'Comments needing reply',
+  conversations_need_admin: 'Conversations needing admin',
+  orders_summary: 'Orders summary',
+  recent_activity: 'Recent activity',
+  import_status: 'Product database',
+  all_clear: 'All clear',
+  all_clear_hint: 'Nothing needs action right now.',
+  supabase_not_connected_help: 'Add your Supabase keys and run database/schema.sql. See docs/SETUP.md.',
+};
+
+const ar: Dict = {
+  app_name: 'EH-SYSTEM1',
+  app_subtitle: 'إنجلش هوم ليبيا',
+  app_tag: 'مركز إدارة العمليات',
+  group_overview: 'نظرة عامة',
+  group_inbox: 'خدمة العملاء',
+  group_catalog: 'الكتالوج',
+  group_marketing: 'التسويق',
+  group_ai: 'الذكاء الاصطناعي',
+  group_system: 'النظام',
+  nav_dashboard: 'الرئيسية',
+  nav_inbox: 'الرسائل',
+  nav_orders: 'الطلبات',
+  nav_products: 'المنتجات',
+  nav_catalog_review: 'مركز مراجعة الكتالوج',
+  nav_price_review: 'مراجعة الأسعار',
+  nav_catalog_match: 'مطابقة الصور',
+  nav_image_review: 'مراجعة الصور',
+  nav_campaigns: 'الحملات',
+  nav_ai_control: 'تحكّم الذكاء',
+  nav_ai_playground: 'مختبر الذكاء',
+  nav_analytics: 'التحليلات',
+  nav_logs: 'سجل النشاط',
+  nav_settings: 'الإعدادات',
+  not_connected: 'غير مربوط',
+  setup_required: 'يحتاج إعداد',
+  connected: 'مربوط',
+  no_data_yet: 'لا توجد بيانات بعد',
+  loading: 'جارٍ التحميل…',
+  save: 'حفظ',
+  cancel: 'إلغاء',
+  search: 'بحث',
+  search_ph: 'ابحث عن منتجات، محادثات، عملاء، حملات…',
+  filter: 'تصفية',
+  all: 'الكل',
+  refresh: 'تحديث',
+  language: 'اللغة',
+  theme: 'المظهر',
+  sign_out: 'تسجيل الخروج',
+  view_all: 'عرض الكل',
+  open: 'فتح',
+  none: 'لا شيء',
+  dashboard_title: 'مركز التحكّم',
+  dashboard_subtitle: 'ما الذي يحتاج انتباهك الآن',
+  needs_action: 'يحتاج إجراء',
+  action_queue: 'قائمة الإجراءات',
+  today_overview: 'اليوم',
+  week_overview: 'هذا الأسبوع',
+  system_status: 'الأنظمة المربوطة',
+  ai_status: 'حالة الذكاء',
+  campaign_schedule: 'جدول الحملات',
+  comments_need_reply: 'تعليقات تنتظر الرد',
+  conversations_need_admin: 'محادثات تحتاج تدخّلك',
+  orders_summary: 'ملخص الطلبات',
+  recent_activity: 'النشاط الأخير',
+  import_status: 'قاعدة بيانات المنتجات',
+  all_clear: 'كل شيء تمام',
+  all_clear_hint: 'لا يوجد ما يحتاج إجراءً الآن.',
+  supabase_not_connected_help: 'أضف مفاتيح Supabase وشغّل database/schema.sql. راجع docs/SETUP.md.',
+};
+
+export const dictionaries: Record<Locale, Dict> = { en, ar };
+
+export function getDictionary(locale: Locale): Dict {
+  return dictionaries[locale] ?? en;
+}
+
+export function translate(locale: Locale, key: string): string {
+  const d = getDictionary(locale);
+  return d[key] ?? dictionaries.en[key] ?? key;
+}

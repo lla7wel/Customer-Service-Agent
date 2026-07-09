@@ -1,0 +1,30 @@
+{
+  "name": "eh-system1-scripts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Import the existing scraper's output into Supabase. Read-only on the scraper.",
+  "scripts": {
+    "validate": "tsx validate-import.ts",
+    "catalog:csv": "tsx import-csv-catalog.ts",
+    "import:products": "tsx import-scraper-products.ts",
+    "upload:images": "tsx upload-product-images.ts",
+    "match:images": "tsx catalog-image-match.ts",
+    "fingerprints": "tsx generate-image-fingerprints.ts",
+    "embeddings": "tsx generate-embeddings.ts",
+    "enrich": "tsx enrich-catalog.ts",
+    "test:ai-control": "tsx ai-control-behavior-test.ts",
+    "test": "tsx upgrade-tests.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "dotenv": "^16.4.5",
+    "jimp": "^0.22.12"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.10",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2"
+  }
+}

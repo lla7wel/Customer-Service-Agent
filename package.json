@@ -1,0 +1,10 @@
+{
+  "name": "eh-system1",
+  "version": "0.1.0",
+  "private": true,
+  "description": "EH-SYSTEM1 — root for the shared integrations/ provider layer (Supabase/Gemini/Meta). The admin-app, scripts/ and workers/ each have their own package.json; this one declares the dependency that the framework-agnostic integrations/ modules import so type resolution works from every consumer.",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "jimp": "^0.22.12"
+  }
+}
