@@ -1,0 +1,96 @@
+<svg viewBox="0 0 960 620" xmlns="http://www.w3.org/2000/svg" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <defs>
+    <marker id="fa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#64748b"/>
+    </marker>
+    <linearGradient id="acc2" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#818cf8"/>
+    </linearGradient>
+  </defs>
+  <style>
+    .step { fill:#0f172a; stroke:#334155; stroke-width:1.2; }
+    .hot { fill:#0f172a; stroke:url(#acc2); stroke-width:1.6; }
+    .t { fill:#e2e8f0; font-size:13.5px; font-weight:600; }
+    .s { fill:#94a3b8; font-size:11px; }
+    .lbl { fill:#64748b; font-size:10.5px; }
+    .e { stroke:#64748b; stroke-width:1.4; fill:none; marker-end:url(#fa); }
+  </style>
+  <rect width="960" height="620" fill="#020617"/>
+  <text x="30" y="38" fill="#f8fafc" font-size="19" font-weight="700">A customer message, end to end</text>
+  <text x="30" y="58" class="s">Every guard exists because of a real production incident</text>
+
+  <rect x="30" y="90" width="270" height="58" rx="12" class="step"/>
+  <text x="48" y="114" class="t">1 · Webhook receipt</text>
+  <text x="48" y="132" class="s">X-Hub-Signature-256 verified, mid-deduped</text>
+
+  <rect x="30" y="178" width="270" height="58" rx="12" class="step"/>
+  <text x="48" y="202" class="t">2 · Ingest</text>
+  <text x="48" y="220" class="s">upsert customer + conversation, store message</text>
+
+  <rect x="30" y="266" width="270" height="58" rx="12" class="hot"/>
+  <text x="48" y="290" class="t">3 · Burst batching (5s)</text>
+  <text x="48" y="308" class="s">only the newest message owns the merged turn</text>
+
+  <rect x="30" y="354" width="270" height="72" rx="12" class="step"/>
+  <text x="48" y="378" class="t">4 · Context load</text>
+  <text x="48" y="396" class="s">live-editable AI behaviors (DB prompts)</text>
+  <text x="48" y="411" class="s">+ per-customer memory</text>
+
+  <!-- branch -->
+  <rect x="360" y="90" width="270" height="100" rx="12" class="hot"/>
+  <text x="378" y="114" class="t">5a · Image turn</text>
+  <text x="378" y="132" class="s">8-step hybrid matcher: exact URL → dHash →</text>
+  <text x="378" y="147" class="s">learned corrections → fingerprints → vision</text>
+  <text x="378" y="162" class="s">describe → code/barcode → keyword+vector</text>
+  <text x="378" y="177" class="s">→ visual re-rank</text>
+
+  <rect x="360" y="220" width="270" height="72" rx="12" class="step"/>
+  <text x="378" y="244" class="t">5b · Text turn</text>
+  <text x="378" y="262" class="s">URL/code/barcode/keyword/vector resolver;</text>
+  <text x="378" y="277" class="s">order/refund → warm human handoff</text>
+
+  <rect x="360" y="322" width="270" height="86" rx="12" class="hot"/>
+  <text x="378" y="346" class="t">6 · Compose (Gemini)</text>
+  <text x="378" y="364" class="s">function-calling over read-only catalog tools</text>
+  <text x="378" y="379" class="s">(≤3 rounds) · replies in Libyan Arabic ·</text>
+  <text x="378" y="394" class="s">prices only from active_price — never invented</text>
+
+  <rect x="690" y="90" width="240" height="318" rx="12" class="hot"/>
+  <text x="708" y="114" class="t">7 · deliverAndStore</text>
+  <text x="708" y="140" class="s">◆ supersede guard: newer inbound</text>
+  <text x="722" y="155" class="s">arrived mid-turn → abandon reply</text>
+  <text x="708" y="178" class="s">◆ sanitizer gate: strips any leaked</text>
+  <text x="722" y="193" class="s">tool/JSON/system text</text>
+  <text x="708" y="216" class="s">◆ ai_enabled re-check closes the</text>
+  <text x="722" y="231" class="s">admin-pause race</text>
+  <text x="708" y="254" class="s">◆ caption first, then ≤3 real catalog</text>
+  <text x="722" y="269" class="s">photos (public HTTPS only)</text>
+  <text x="708" y="292" class="s">◆ honest delivery: delivered_at only</text>
+  <text x="722" y="307" class="s">on a confirmed Meta send</text>
+  <text x="708" y="330" class="s">◆ failures logged, never shown as</text>
+  <text x="722" y="345" class="s">sent in the inbox</text>
+  <text x="708" y="375" class="s">→ outbound message stored with</text>
+  <text x="722" y="390" class="s">full diagnostics in ai_meta</text>
+
+  <rect x="360" y="450" width="270" height="58" rx="12" class="step"/>
+  <text x="378" y="474" class="t">8 · Memory update</text>
+  <text x="378" y="492" class="s">recent products + rolling summary (cheap model)</text>
+
+  <rect x="690" y="450" width="240" height="58" rx="12" class="step"/>
+  <text x="708" y="474" class="t">Learning loop</text>
+  <text x="708" y="492" class="s">admin corrections → dHash fingerprints</text>
+
+  <path class="e" d="M165 148 L165 178"/>
+  <path class="e" d="M165 236 L165 266"/>
+  <path class="e" d="M165 324 L165 354"/>
+  <path class="e" d="M300 390 C 330 390, 330 150, 360 140"/>
+  <text x="308" y="360" class="lbl">image</text>
+  <path class="e" d="M300 398 C 335 398, 335 262, 360 256"/>
+  <text x="308" y="420" class="lbl">text</text>
+  <path class="e" d="M495 190 L495 220"/>
+  <path class="e" d="M495 292 L495 322"/>
+  <path class="e" d="M630 365 L690 365"/>
+  <path class="e" d="M495 408 L495 450"/>
+  <path class="e" d="M810 408 L810 450"/>
+  <text x="820" y="432" class="lbl">admin reviews mismatches</text>
+</svg>

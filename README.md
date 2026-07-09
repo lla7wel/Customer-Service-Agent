@@ -1,91 +1,137 @@
-# EH-SYSTEM1 — English Home Libya Command Center
+# English Home Libya — AI Customer-Service Platform
 
-A production admin and customer-service control center for **English Home Libya**.
+A production AI agent that runs customer service for a real retail franchise's
+Facebook page (~250k reach), answering in **Libyan Arabic**, recognizing
+products from **customer photos**, and quoting prices only from the live
+catalog — wrapped in a bilingual (AR/EN, RTL-first) admin command center.
 
-The core is a Messenger AI agent that answers customers in Libyan Arabic using the real Libya catalog and prices. The admin app wraps that agent with inbox management, a product database, image matching, marketing campaigns, and AI configuration — all in one interface operated by one person.
+Built for and operated by the English Home Libya franchise. The whole system
+runs on **one ~€5/month VPS** with exactly two external dependencies: the
+Gemini API and Meta's Graph API.
 
-**Production:** https://admin-app-red-one.vercel.app
-
----
+![Architecture](docs/diagrams/architecture.svg)
 
 ## What it does
 
-- Answers Messenger DMs and Facebook story replies automatically in Libyan Arabic.
-- Quotes prices only from the Libya catalog — never invents or estimates.
-- Recognizes product photos via fingerprint, embedding, keyword, and Gemini vision.
-- **Sends real product photos** when a customer asks to see them (max 3 per turn, no spam).
-- Lets the admin manage the inbox: read, reply, pause/resume AI, attach products, send product photos, correct image matches.
-- Builds and publishes Facebook marketing campaigns.
+- **Answers Messenger DMs and story replies automatically** in Libyan dialect,
+  grounded in the real catalog — the model can call read-only product tools
+  (code/barcode/URL/keyword/semantic lookup) but can never invent a price.
+- **Recognizes products from photos** with an 8-step hybrid matcher:
+  exact-URL → perceptual dHash → learned admin corrections → fingerprint
+  near-duplicates → Gemini vision description → visible code/barcode →
+  keyword + embedding retrieval → visual re-rank. Admin corrections feed
+  fingerprints back, so the same mistake gets less likely over time.
+- **Sends real catalog photos** when a customer asks to see a product
+  (max 3, de-duplicated, public HTTPS only, honest delivery accounting).
+- **Hands off gracefully**: order/refund/complaint intents get a warm
+  human-handoff reply and pause the AI for that conversation.
+- **Admin command center**: inbox with AI pause/resume and suggested drafts,
+  4,700-product catalog with image-match review queues, campaign builder with
+  AI captions and image editing, live-editable AI behavior prompts, and a
+  playground that runs the exact production pipeline.
 
-## What it is not (removed / not included)
+## Production hardening (the interesting bits)
 
-- **No ordering / checkout.** Not connected to the Turkey website. Order data is not stored.
-- **No Catalog Sync web UI / no in-app scraper.** The scraper (`../english-home-tr-scraper`) is a separate, offline-only tool — this app never runs it. Catalog import is local-only (`scripts/`).
-- **No Facebook comment auto-reply.** Only Messenger DMs and story replies.
-- These features were intentionally removed and must not be reintroduced. See [`docs/CHANGELOG.md`](docs/CHANGELOG.md).
+![Message flow](docs/diagrams/message-flow.svg)
 
----
+Every guard in the pipeline exists because of a real incident:
 
-## Modules
+| Guard | Incident it prevents |
+|---|---|
+| **Burst batching** (5s window, newest-message-wins) | three rapid messages → three disjoint AI replies |
+| **Supersede guard** in `deliverAndStore` | image + "how much?" arriving together → double reply to one burst |
+| **`ai_enabled` re-check at send time** | AI reply landing seconds after an admin took over |
+| **Output sanitizer gate** | the model echoing `catalog_search(...)` or system text into customer chat |
+| **Honest delivery** (`delivered_at` only on confirmed send) | inbox showing failed sends as delivered |
+| **Model router + fallback chain** | image generation dying when the strong model is rate-limited |
 
-| Page | Purpose |
-|------|---------|
-| Dashboard | Operational overview and integration status |
-| Inbox | Customer conversations — read, reply, pause AI, attach products |
-| Products | Full product catalog with manual add/edit |
-| Catalog Review | Catalog matching, image review, price activation |
-| Campaigns | Facebook campaign builder — draft, images, caption, publish |
-| AI Control | Live-editable Gemini behavior configuration |
-| AI Playground | Test the exact Messenger pipeline before going live |
-| Settings | Integration health, webhook URL, theme, language |
+## Architecture
 
----
+```
+├── admin-app/        Next.js 16 App Router — UI + API routes (jose session auth)
+├── integrations/     Framework-agnostic core, shared by app + scripts
+│   ├── db/           Kysely + pg (typed queries; codegen'd schema types)
+│   ├── gemini/       central model router — per-task models, fallback chains
+│   ├── meta/         Graph API client + webhook signature verification
+│   ├── pipelines/    messenger turn engine, hybrid image matcher, campaigns
+│   ├── tools/        the AI's ONLY database access (read-only, price-safe)
+│   └── storage/      media on disk, served by Caddy at media.<domain>
+├── database/         plain-SQL schema + 13 idempotent migrations
+├── scripts/          local catalog import/enrich CLIs (scraper → Postgres)
+├── deploy/           Caddyfile, backup cron, VPS runbook
+└── docs/             architecture, operations, AI pipeline deep-dives
+```
 
-## Local setup
+Companion repository: [english-home-catalog-scraper](../english-home-tr-scraper)
+— a resumable Playwright-over-CDP scraper (real-Chrome Cloudflare bypass) that
+builds the product/image database this platform imports.
+
+## Engineering decisions
+
+- **Self-hosted over serverless** — the platform previously ran on
+  Supabase + Vercel + Cloudflare; a free-tier pause took production down.
+  Everything now runs in one `docker compose up`: Postgres 16, the Next.js
+  standalone server, and Caddy (auto-HTTPS). Backups are a nightly `pg_dump`
+  with offsite copy — the database is the only non-rebuildable state.
+- **Kysely over an ORM** — the schema lives in plain SQL migrations;
+  `kysely-codegen` derives types from the live database, so queries are fully
+  typed without a second schema definition. pg type parsers keep row shapes
+  identical to what the app was written against (ISO-string timestamps,
+  numeric → number).
+- **Embeddings in JSONB, cosine in code** — at 4,700 products a bounded scan
+  is milliseconds; pgvector + HNSW is an upgrade path, not a day-one need.
+- **One reply composer** — the live webhook, the inbox "suggest" button and
+  the playground all call the same `composeCustomerReply()`, so what the admin
+  tests is exactly what customers get.
+- **Arabic-first** — the UI is RTL-first with full AR/EN dictionaries; the
+  agent replies in Libyan dialect regardless of input language.
+
+## Run it locally
 
 ```bash
-cd admin-app
-cp ../.env.example .env.local      # fill in Supabase + Gemini + Meta values
-npm install
-npm run dev                        # http://localhost:3000
+createdb eh_system
+psql -d eh_system -f database/bootstrap.sql
+psql -d eh_system -f database/schema.sql
+for f in database/migrations/0*.sql; do psql -d eh_system -v ON_ERROR_STOP=1 -f "$f"; done
+
+cp .env.example .env        # set DATABASE_URL + ADMIN_* + SESSION_SECRET
+cd admin-app && npm install && npm run dev
 ```
 
-The app runs with zero credentials — every integration shows **Not connected** until you fill the env vars. See [`DEPLOYMENT.md`](DEPLOYMENT.md) for the full setup.
+The app runs with integrations unconfigured — each shows a clear
+"not connected" card instead of faking data.
 
----
+**Production** is one command on a VPS: `docker compose up -d --build` —
+see [deploy/setup-vps.md](deploy/setup-vps.md) for the zero-to-production
+runbook (domain, TLS, Meta webhook, backups, smoke tests).
 
-## Repository layout
+## Tests
 
+```bash
+cd scripts
+npx tsx upgrade-tests.ts             # 34 pure-logic assertions (sanitizer, policy, hashing)
+npx tsx ai-control-behavior-test.ts  # behavior composition
 ```
-EH-SYSTEM1/
-├── admin-app/          Next.js 14 App Router — UI + API routes
-├── integrations/       Framework-agnostic runtime: Gemini, Meta, Supabase, Messenger pipeline
-├── database/           Supabase schema, migrations (0001–0012), seed
-├── scripts/            Local-only catalog import tools (never deployed)
-├── workers/            Optional Cloudflare Worker for campaign-scheduler cron
-└── docs/               All documentation
-```
-
----
-
-## Production safety
-
-- `SUPABASE_SERVICE_ROLE_KEY` must **never** have a `NEXT_PUBLIC_` prefix and must never reach the browser.
-- The `middleware.ts` auth gate is the security boundary for all admin routes — do not remove it. All `/dashboard/*` and `/api/*` routes require a signed-in admin, except the Meta webhook, health check, and cron route.
-- The Meta webhook is protected by `X-Hub-Signature-256` signature verification.
-- The cron route is protected by `CLOUDFLARE_WEBHOOK_SECRET`.
-- AI **never invents prices** (reads `active_price` only) and **never confirms orders** alone (hands off to a human).
-- Product photos sent to customers are public HTTPS URLs only — no local paths, no broken URLs.
-- This repository contains **no secrets**; env vars are documented by name only in [`DEPLOYMENT.md`](DEPLOYMENT.md). Never commit `.env` or `.env.local`.
-
----
-
-## Screenshots
-
-_Add screenshots of the Dashboard, Inbox, and AI Playground here when publishing._
-
----
 
 ## Documentation
 
-See [`docs/README.md`](docs/README.md) for the full documentation index.
+| Doc | Covers |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | system design, folder ownership, invariants |
+| [docs/AI_AND_MESSENGER.md](docs/AI_AND_MESSENGER.md) | the conversation pipeline + image matcher, step by step |
+| [docs/CATALOG_AND_PRODUCTS.md](docs/CATALOG_AND_PRODUCTS.md) | price truth, import flow, matching, admin locks |
+| [docs/CAMPAIGNS.md](docs/CAMPAIGNS.md) | campaign builder, AI creative generation, scheduler |
+| [docs/DATABASE.md](docs/DATABASE.md) | data model + migration history |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | day-to-day admin workflow |
+| [deploy/setup-vps.md](deploy/setup-vps.md) | production deployment runbook |
+
+## Security posture
+
+- The middleware session gate (jose HS256, httpOnly cookie) is the security
+  boundary — every page and API route except the webhook, health check, cron
+  tick and auth endpoints requires it.
+- Meta webhook posts are verified with `X-Hub-Signature-256` (timing-safe).
+- The cron endpoint requires a bearer secret; it returns 503 rather than
+  running unprotected if the secret is unset.
+- No secrets in the repository — configuration is env-only, documented in
+  [.env.example](.env.example).

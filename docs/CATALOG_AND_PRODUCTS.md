@@ -57,7 +57,7 @@ Run from `EH-SYSTEM1/scripts/`. None of these are deployed or triggered from the
 |---------|-------------|
 | `npm run catalog:csv` | **Main catalog import.** Imports the Libya CSV as active, priced products. Fills `english_name`, `arabic_name`, `arabic_keywords`, `base_price`, `active_price`. Respects `admin_locked_fields` — never overwrites an admin-set price. |
 | `npm run import:products` | Scraper sync. New scraped products → inserted as `draft`. Existing products → source metadata + images updated only. Never overwrites price, status, names, barcode, or category. |
-| `npm run upload:images` | Uploads local scraper images to Supabase Storage (`eh-media` bucket), fills `product_images.public_url`. |
+| `npm run upload:images` | Copies local scraper images into `MEDIA_ROOT` (served by Caddy), fills `product_images.public_url`. |
 | `npm run embeddings` | Generates semantic vector embeddings for all products and stores in `products.text_embedding`. Run after catalog imports. |
 | `npm run match:images` | Dry-run: suggests scraper images for catalog products missing images. Use `--apply --yes` to attach. |
 | `npm run validate` | Dry run of product import — shows what would happen without writing. |

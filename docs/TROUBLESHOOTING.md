@@ -11,11 +11,11 @@
 **Causes and fixes:**
 
 1. **Meta not configured** — one or more of `META_PAGE_ID`, `META_PAGE_ACCESS_TOKEN`, `META_VERIFY_TOKEN`, `META_APP_SECRET` is missing from env.
-   - Check Vercel env vars. Add missing vars and redeploy.
+   - Check the server env (`.env` on the VPS). Add missing vars and `docker compose up -d`.
 
 2. **Page access token expired** — Meta Page access tokens expire after 60 days without a Business account.
    - Go to developers.facebook.com → your App → Messenger → Generate token.
-   - Update `META_PAGE_ACCESS_TOKEN` in Vercel and redeploy.
+   - Update `META_PAGE_ACCESS_TOKEN` in `.env` and restart the app container.
 
 3. **AI paused on conversation** — `conversations.ai_enabled = false`.
    - Check the AI Controls toggle in the conversation. Resume if needed.
@@ -82,13 +82,13 @@ LIMIT 20;
 
 ---
 
-## Supabase connection error
+## Database connection error
 
-**Symptom:** Dashboard shows "Not connected" for Supabase, or API routes return 503.
+**Symptom:** Dashboard shows "Not connected" for Database, or API routes return 503.
 
 **Check:**
-- Vercel env vars: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` all set?
-- Supabase project paused? (Free tier projects pause after 1 week of inactivity.)
+- Is `DATABASE_URL` set and reachable? (`docker compose exec postgres pg_isready`)
+- Did the postgres container restart with a wrong password? Check `docker compose logs postgres`.
 
 ---
 
@@ -97,7 +97,7 @@ LIMIT 20;
 **Symptom:** Customer asks about a product by name/code and AI replies asking a clarifying question, or says it can't find it.
 
 **Check:**
-1. Is the product in Supabase? `SELECT * FROM products WHERE product_code = '...' OR english_name ILIKE '%...%';`
+1. Is the product in the database? `SELECT * FROM products WHERE product_code = '...' OR english_name ILIKE '%...%';`
 2. Is it active and priced? `WHERE status = 'active' AND active_price IS NOT NULL`
 3. Does it have an Arabic name? `arabic_name IS NOT NULL`
 4. Is the embedding populated? `text_embedding IS NOT NULL` — if not, run `cd scripts && npm run embeddings`.
@@ -119,7 +119,7 @@ LIMIT 20;
    ```
    If `public_url` is null and `storage_path` is set, run `cd scripts && npm run upload:images`. If both are null, upload an image from the product page.
 
-2. **Image URL not HTTPS / not public.** Meta fetches the URL server-side; `http://`, localhost, and local file paths are rejected by `isMetaSafeImageUrl()`. Confirm the storage bucket is public and `NEXT_PUBLIC_SUPABASE_URL` is set.
+2. **Image URL not HTTPS / not public.** Meta fetches the URL server-side; `http://`, localhost, and local file paths are rejected by `isMetaSafeImageUrl()`. Confirm `PUBLIC_MEDIA_BASE_URL` is the public https media host and the file exists under `MEDIA_ROOT`.
 
 3. **Image send failed at Meta.** Check the diagnostics:
    ```sql
@@ -175,9 +175,9 @@ If duplicate pairs still appear: check `messages.external_id` — two rows with 
 **Symptom:** `/login` form submits but you are not logged in.
 
 **Check:**
-1. Does the user exist in Supabase Auth? Supabase → Authentication → Users.
-2. Does the user have a row in `admin_users` with the correct `id` (Supabase Auth UUID)?
-3. Is `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` correct in the deployed app?
+1. Do `ADMIN_EMAIL` / `ADMIN_PASSWORD_HASH` / `SESSION_SECRET` exist in the server env?
+2. Was the hash generated with bcrypt? `node -e "require('bcryptjs').hash(process.argv[1],12).then(console.log)" 'your-password'`
+3. Locked out? Update the env hash and restart the app container.
 
 ```sql
 SELECT id, email, role FROM admin_users;
@@ -185,18 +185,18 @@ SELECT id, email, role FROM admin_users;
 
 ---
 
-## Vercel env missing / build failed
+## Build failed
 
-**Symptom:** Vercel build fails with "cannot find module '@integrations/...'" or similar.
+**Symptom:** `docker compose build` fails with "cannot find module '@integrations/...'" or similar.
 
 **Check:**
-- Vercel Project Settings → General → Root Directory = `admin-app`.
+- The Docker build context must be the repo root (admin-app imports ../integrations).
 - "Include source files outside of the Root Directory in the Build Step" = enabled.
 
 **Symptom:** App deploys but shows "Not connected" for everything.
 
 **Check:**
-- All required env vars are set in Vercel → Settings → Environment Variables (Production scope).
+- All required env vars are set in `.env` (compose validates the critical ones at startup).
 - `APP_BASE_URL` matches the actual production domain.
 
 ---
@@ -264,7 +264,7 @@ FROM campaigns
 WHERE status = 'failed'
 ORDER BY updated_at DESC;
 
--- Supabase integration logs (last 30 minutes)
+-- Integration logs (last 30 minutes)
 SELECT integration, direction, ok, error_code, created_at
 FROM integration_logs
 WHERE created_at > now() - interval '30 minutes'

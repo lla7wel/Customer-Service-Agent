@@ -6,7 +6,7 @@ Day-to-day operator guide for the English Home Libya command center.
 
 ## Daily workflow
 
-1. Open **Dashboard** — check integration status (Supabase / Gemini / Meta) and the "Needs action" count.
+1. Open **Dashboard** — check integration status (Database / Gemini / Meta) and the "Needs action" count.
 2. Open **Inbox** — the "Needs action" filter surfaces conversations that require human attention (`status = needs_human` or AI paused). Work through them.
 3. Check **Campaigns** — any scheduled campaigns near their publish time?
 4. Check **Catalog Review → Matches** — approve pending catalog matches so products get images.
@@ -113,7 +113,7 @@ Use this to verify AI behavior before live deployment and to reproduce issues re
 | AI replies show "AI · Internal" (inbox badge) | No customer message was sent. Check `integration_logs` for Meta send errors. See `TROUBLESHOOTING.md`. |
 | No AI reply at all | Check if AI is paused on the conversation. Check `ai_events` for errors. |
 | Wrong product matched from image | Go to Image Review, correct the match. Fingerprint is saved for future. |
-| Dashboard shows "Not connected" | An env var is missing. Check Vercel env vars and redeploy. |
+| Dashboard shows "Not connected" | An env var is missing. Check `.env` on the VPS and `docker compose up -d`. |
 | Campaign not publishing | Check `activity_logs` and `integration_logs` for the campaign scheduler run. Verify Meta credentials. |
-| Customer gets a price quote that is wrong | Check `products.active_price` for that product in Supabase. The AI reads this column directly — if it is wrong, the catalog is wrong. |
+| Customer gets a price quote that is wrong | Check `products.active_price` for that product. The AI reads this column directly — if it is wrong, the catalog is wrong. |
 | AI didn't send a photo when asked | The product likely has no public image. Check `product_images.public_url`; upload an image from the product page. Verify the URL is HTTPS. |

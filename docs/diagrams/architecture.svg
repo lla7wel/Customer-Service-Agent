@@ -1,0 +1,114 @@
+<svg viewBox="0 0 960 560" xmlns="http://www.w3.org/2000/svg" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <defs>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#818cf8"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#64748b"/>
+    </marker>
+  </defs>
+  <style>
+    .box { fill:#0f172a; stroke:#334155; stroke-width:1.2; rx:12; }
+    .boxlight { fill:#1e293b; stroke:#475569; stroke-width:1; }
+    .t { fill:#e2e8f0; font-size:14px; font-weight:600; }
+    .s { fill:#94a3b8; font-size:11px; }
+    .lbl { fill:#64748b; font-size:10.5px; }
+    .edge { stroke:#64748b; stroke-width:1.4; fill:none; marker-end:url(#arrow); }
+    .edged { stroke:#64748b; stroke-width:1.4; fill:none; marker-end:url(#arrow); stroke-dasharray:5 4; }
+  </style>
+  <rect width="960" height="560" fill="#020617"/>
+  <text x="30" y="38" fill="#f8fafc" font-size="19" font-weight="700">English Home Libya — system architecture</text>
+  <text x="30" y="58" class="s">One owned VPS · external dependencies: Gemini API + Meta Graph only</text>
+
+  <!-- External actors -->
+  <rect x="30" y="110" width="170" height="64" rx="12" class="box"/>
+  <text x="48" y="138" class="t">Customer</text>
+  <text x="48" y="156" class="s">Facebook Messenger</text>
+
+  <rect x="30" y="210" width="170" height="64" rx="12" class="box"/>
+  <text x="48" y="238" class="t">Meta Graph API</text>
+  <text x="48" y="256" class="s">webhooks · send · publish</text>
+
+  <rect x="30" y="310" width="170" height="64" rx="12" class="box"/>
+  <text x="48" y="338" class="t">Gemini API</text>
+  <text x="48" y="356" class="s">text · vision · embeddings</text>
+
+  <rect x="30" y="410" width="170" height="64" rx="12" class="box"/>
+  <text x="48" y="438" class="t">Admin</text>
+  <text x="48" y="456" class="s">browser (AR/EN, RTL)</text>
+
+  <!-- VPS boundary -->
+  <rect x="280" y="90" width="650" height="440" rx="16" fill="none" stroke="url(#accent)" stroke-width="1.6" stroke-dasharray="7 5"/>
+  <text x="300" y="116" fill="#22d3ee" font-size="12" font-weight="700" letter-spacing="1">VPS · DOCKER COMPOSE</text>
+
+  <!-- Caddy -->
+  <rect x="310" y="140" width="180" height="96" rx="12" class="box"/>
+  <text x="328" y="168" class="t">Caddy</text>
+  <text x="328" y="186" class="s">auto-HTTPS (Let's Encrypt)</text>
+  <text x="328" y="202" class="s">app.domain → Next.js</text>
+  <text x="328" y="218" class="s">media.domain → /srv/eh-media</text>
+
+  <!-- Next.js app -->
+  <rect x="540" y="140" width="360" height="230" rx="12" class="box"/>
+  <text x="558" y="168" class="t">Next.js 16 (standalone)</text>
+  <text x="558" y="186" class="s">admin UI · API routes · jose session auth</text>
+
+  <rect x="558" y="200" width="156" height="72" rx="9" class="boxlight"/>
+  <text x="570" y="222" fill="#e2e8f0" font-size="12" font-weight="600">Messenger pipeline</text>
+  <text x="570" y="238" class="lbl">burst batching · supersede</text>
+  <text x="570" y="252" class="lbl">guard · Libyan-Arabic replies</text>
+
+  <rect x="726" y="200" width="156" height="72" rx="9" class="boxlight"/>
+  <text x="738" y="222" fill="#e2e8f0" font-size="12" font-weight="600">Image matcher</text>
+  <text x="738" y="238" class="lbl">dHash → learned corrections</text>
+  <text x="738" y="252" class="lbl">→ vision → vector re-rank</text>
+
+  <rect x="558" y="284" width="156" height="70" rx="9" class="boxlight"/>
+  <text x="570" y="306" fill="#e2e8f0" font-size="12" font-weight="600">Gemini router</text>
+  <text x="570" y="322" class="lbl">per-task models</text>
+  <text x="570" y="336" class="lbl">rate-limit fallback chain</text>
+
+  <rect x="726" y="284" width="156" height="70" rx="9" class="boxlight"/>
+  <text x="738" y="306" fill="#e2e8f0" font-size="12" font-weight="600">Campaign engine</text>
+  <text x="738" y="322" class="lbl">assets · captions · scheduler</text>
+  <text x="738" y="336" class="lbl">SQL pricing truth</text>
+
+  <!-- Postgres -->
+  <rect x="540" y="400" width="220" height="100" rx="12" class="box"/>
+  <text x="558" y="428" class="t">PostgreSQL 16</text>
+  <text x="558" y="446" class="s">Kysely (typed SQL) · 23 tables</text>
+  <text x="558" y="462" class="s">catalog · conversations · memory</text>
+  <text x="558" y="478" class="s">JSONB embeddings · dHash prints</text>
+
+  <!-- Media volume -->
+  <rect x="790" y="400" width="110" height="100" rx="12" class="box"/>
+  <text x="806" y="428" class="t">Media</text>
+  <text x="806" y="446" class="s">/srv/eh-media</text>
+  <text x="806" y="462" class="s">product +</text>
+  <text x="806" y="478" class="s">campaign imgs</text>
+
+  <!-- Cron -->
+  <rect x="310" y="400" width="180" height="100" rx="12" class="box"/>
+  <text x="328" y="428" class="t">Host cron</text>
+  <text x="328" y="446" class="s">*/5 scheduler tick</text>
+  <text x="328" y="462" class="s">nightly pg_dump</text>
+  <text x="328" y="478" class="s">→ offsite backup</text>
+
+  <!-- Edges -->
+  <path class="edge" d="M200 142 C 250 142, 240 200, 200 226"/>
+  <text x="212" y="150" class="lbl">DM</text>
+  <path class="edge" d="M200 242 L 310 200"/>
+  <text x="228" y="212" class="lbl">webhook POST</text>
+  <path class="edge" d="M490 188 L 540 188"/>
+  <path class="edged" d="M540 250 C 480 260, 300 260, 205 250"/>
+  <text x="330" y="248" class="lbl">send replies · publish posts</text>
+  <path class="edged" d="M636 284 C 600 330, 400 345, 205 345"/>
+  <text x="330" y="330" class="lbl">generateContent · embeddings</text>
+  <path class="edge" d="M200 442 C 240 442, 260 210, 310 200"/>
+  <text x="212" y="425" class="lbl">HTTPS</text>
+  <path class="edge" d="M660 370 L 660 400"/>
+  <path class="edge" d="M840 370 L 845 400"/>
+  <path class="edge" d="M400 400 C 430 380, 500 375, 540 360"/>
+  <text x="410" y="385" class="lbl">tick</text>
+  <path class="edged" d="M490 210 C 520 260, 700 380, 790 420"/>
+</svg>

@@ -93,4 +93,4 @@ To refresh campaign pricing without publishing:
 select fn_refresh_product_pricing();
 ```
 
-Or trigger the campaign scheduler: `POST /api/cron/campaign-scheduler` with `Authorization: Bearer <CLOUDFLARE_WEBHOOK_SECRET>`.
+Or trigger the campaign scheduler: `POST /api/cron/campaign-scheduler` with `Authorization: Bearer <CRON_SECRET>` (the host crontab does this every 5 minutes).

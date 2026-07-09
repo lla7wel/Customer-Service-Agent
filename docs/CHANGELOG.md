@@ -4,6 +4,30 @@ Major system changes in reverse chronological order.
 
 ---
 
+## 2026-07 — Full infrastructure ownership (Supabase/Vercel/Cloudflare → one VPS)
+
+The platform went down when its free-tier database provider paused the
+project. Rather than paying to restore a rented stack, the entire system was
+migrated to owned infrastructure:
+
+- **Database:** supabase-js/PostgREST → PostgreSQL 16 + Kysely with
+  codegen'd types (typed queries end-to-end; the `(row as any)` casts at the
+  DB boundary are gone). Schema stays plain SQL; migration 0013 drops the
+  Supabase-era RLS/policies.
+- **Auth:** Supabase Auth → env credentials + jose HS256 session cookie
+  (single admin), verified in edge middleware.
+- **Storage:** Supabase Storage → files on the VPS served by Caddy at
+  `media.<domain>` with immutable caching; same `storage_path` keys.
+- **Hosting:** Vercel → Next.js standalone in Docker behind Caddy
+  (auto-HTTPS). Upgraded Next 14 → 16 (Turbopack), React 19, Tailwind 4.
+- **Cron:** Cloudflare Worker → host crontab hitting the same route.
+- **Backups:** nightly `pg_dump` + prune + optional offsite (rclone) —
+  the database is the only non-rebuildable state.
+
+External dependencies after the migration: Gemini API and Meta Graph. Verified
+with the existing 34-assertion suite, 8 new DB behavioral smoke tests, and a
+full authenticated page sweep against the standalone build.
+
 ## 2026-06-13 — Product image sending
 
 - **The Messenger AI can now send real catalog product photos** when a customer asks to see them (`ابعثلي صورته`, `وريني الألوان`, `نبي نشوفهم`, `عندك صور للحمام؟`). New module `integrations/pipelines/product-image.ts` + `sendImageMessage()` in `integrations/meta/index.ts`.

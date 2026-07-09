@@ -1,21 +1,23 @@
-# EH-SYSTEM1 — Architecture
+# Architecture
 
 ## 1. System overview
+
+![Architecture](diagrams/architecture.svg)
 
 ```
                       ┌──────────────────────────────────┐
    Admin browser ────▶│  Next.js admin-app (App Router)  │
-   (AR/EN, RTL)       │  • 8 UI pages                    │
-                      │  • API routes (webhooks, AI)      │
+   (AR/EN, RTL)       │  • dashboard UI pages            │
+                      │  • API routes (webhooks, AI)     │
                       └──────────────┬───────────────────┘
-                                     │ server-only (service role)
+                                     │ server-only
                ┌─────────────────────┼──────────────────────┐
                ▼                     ▼                      ▼
        ┌──────────────┐     ┌──────────────┐     ┌──────────────────┐
-       │  Supabase    │     │   Gemini     │     │   Meta Graph API │
-       │  Postgres +  │     │  chat, tools,│     │  Messenger DMs + │
-       │  Auth +      │     │  vision,     │     │  story replies + │
-       │  Storage     │     │  embeddings, │     │  page posts      │
+       │  PostgreSQL  │     │   Gemini     │     │   Meta Graph API │
+       │  (Kysely) +  │     │  chat, tools,│     │  Messenger DMs + │
+       │  media on    │     │  vision,     │     │  story replies + │
+       │  disk (Caddy)│     │  embeddings, │     │  page posts      │
        └──────────────┘     │  image gen   │     └──────────────────┘
                ▲            └──────────────┘
                │ read-only import (scripts only, never deployed)
@@ -30,10 +32,10 @@
 | Path | Owns |
 |------|------|
 | `admin-app/` | Next.js app: UI pages, API route handlers, middleware. Nothing here calls vendor SDKs directly. |
-| `integrations/` | Framework-agnostic runtime layer: Gemini, Meta, Supabase clients, Messenger pipeline, image matching, campaign pipeline, product tools, AI behaviors. Both the Next.js app and Cloudflare workers import from here. |
-| `database/` | Supabase/Postgres schema, ordered migrations (0001–0012), seed data. |
+| `integrations/` | Framework-agnostic runtime layer: database (Kysely), Gemini, Meta, media storage, Messenger pipeline, image matching, campaign pipeline, product tools, AI behaviors. Imported by the app and the local scripts. |
+| `database/` | Postgres schema, ordered migrations (0001–0013), bootstrap + cutover helpers. |
 | `scripts/` | **Local-only** catalog import tools (`catalog:csv`, `import:products`, `upload:images`, `embeddings`). Never imported by the deployed app. |
-| `workers/` | Optional Cloudflare Worker for campaign-scheduler cron. Shares the same `integrations/` code. |
+| `deploy/` | Docker/Caddy/cron/backup configuration + the VPS runbook. |
 | `docs/` | All documentation. |
 
 ## 3. Runtime flow
@@ -54,14 +56,14 @@ POST /api/meta/webhook
       → updateMemoryAfterTurn()
 ```
 
-**Admin page load:** Next.js server component reads Supabase via service-role client (bypasses RLS). The middleware gate enforces that the user is authenticated before any server component or API handler runs.
+**Admin page load:** Next.js server component queries Postgres through Kysely. The middleware session gate (jose HS256 cookie) enforces that the admin is authenticated before any server component or API handler runs.
 
-**Admin action (e.g. manual reply):** Client component → `fetch /api/inbox/[id]` → service-role write → Meta send (for outbound messages).
+**Admin action (e.g. manual reply):** Client component → `fetch /api/inbox/[id]` → Kysely write → Meta send (for outbound messages).
 
 ## 4. What is production runtime
 
 These run on every request / Messenger event:
-- `admin-app/` (deployed to Vercel)
+- `admin-app/` (Docker on the VPS, behind Caddy)
 - `integrations/pipelines/` — Messenger, image-match, compose-reply, product-resolve, context-followup, agent-policy
 - `integrations/gemini/`, `integrations/meta/`, `integrations/tools/`
 - `integrations/ai-behaviors.ts`, `integrations/flags.ts`, `integrations/product-locks.ts`
@@ -98,16 +100,16 @@ Never deployed; run manually on a developer's machine:
 | `admin-app/src/app/api/products/[productId]/price/route.ts` | Activates products into the live catalog; wrong logic makes unready products customer-visible |
 | `admin-app/src/app/api/campaigns/[campaignId]/route.ts` | Campaign publish; calls Meta Graph API |
 | `admin-app/src/app/api/cron/campaign-scheduler/route.ts` | Pricing refresh + auto-publish; has auth check — do not remove it |
-| `integrations/supabase/admin-client.ts` | Service-role client — never import into a client component |
+| `integrations/db/client.ts` | The database handle — never import into a client component |
 | `integrations/util/customer-text.ts` | Outbound safety sanitizer; weakening it leaks system text to customers |
 
 ## 8. Security invariants
 
 These must not be changed:
-- `SUPABASE_SERVICE_ROLE_KEY` must never have a `NEXT_PUBLIC_` prefix and must never reach the browser.
+- `DATABASE_URL` and `SESSION_SECRET` must never have a `NEXT_PUBLIC_` prefix and must never reach the browser.
 - `admin-app/src/middleware.ts` gates all `/dashboard/*` and `/api/*` routes (except `/api/meta/webhook`, `/api/health`, `/api/cron/campaign-scheduler`, `/login`). This is the only security boundary — RLS is not relied on for admin-app security.
 - The Meta webhook verifies `X-Hub-Signature-256` on every POST. Do not weaken this.
-- The cron route verifies `CLOUDFLARE_WEBHOOK_SECRET`. Do not remove this check.
+- The cron route verifies `CRON_SECRET`. Do not remove this check.
 
 ## 9. The "not connected" contract
 

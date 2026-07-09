@@ -165,7 +165,7 @@ A price/availability question alone (`بكم؟`, `وين موجود`) never trig
 - **Backend controls the URLs.** Gemini composes the caption only; it never chooses an image URL.
 - **Max 3 images** auto-sent per turn (`MAX_AUTO_IMAGES`) — no spam.
 - **Only public HTTPS URLs** are sent (`isMetaSafeImageUrl()`): no local file paths, no localhost, no `http://`, no broken URLs.
-- **Image source priority:** `product_images.public_url`, preferring `is_primary` then lowest `position` (via `primaryProductImageUrl()`); falls back to the public Supabase Storage URL of `storage_path`.
+- **Image source priority:** `product_images.public_url`, preferring `is_primary` then lowest `position` (via `primaryProductImageUrl()`); falls back to `PUBLIC_MEDIA_BASE_URL/<storage_path>`.
 - **Only active + priced products** reach this path. A draft/unpriced product is not auto-sent (the AI mentions it and says the price will be confirmed).
 - **No usable image →** Gemini replies naturally that the photo isn't available and offers to help; no broken image, no placeholder.
 - **Meta send failure →** logged to `integration_logs`, recorded in `ai_meta.image_send.failed`; only successfully-sent images go into `messages.attachments`, so the inbox never shows a failed image as delivered. `delivered_at` is set only on a confirmed send.

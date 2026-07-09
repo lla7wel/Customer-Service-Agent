@@ -7,7 +7,7 @@ Run after every production deployment.
 ## 1. Deploy smoke test
 
 ```bash
-HOST=https://admin-app-red-one.vercel.app
+HOST=https://app.<your-domain>
 
 # Health check — must return 200 with integration statuses
 curl -s $HOST/api/health | jq
@@ -43,7 +43,7 @@ curl -I $HOST/products
 ## 3. Login
 
 - [ ] Visit `/login` in the browser.
-- [ ] Sign in with the admin user (created in Supabase Auth + `admin_users` table).
+- [ ] Sign in with the env-configured admin credentials (ADMIN_EMAIL / ADMIN_PASSWORD_HASH).
 - [ ] Successfully redirected to `/dashboard`.
 - [ ] Sign out → redirected to `/login`.
 
@@ -52,7 +52,7 @@ curl -I $HOST/products
 ## 4. Dashboard
 
 - [ ] Dashboard loads without errors.
-- [ ] Integration status shows Supabase / Gemini / Meta correctly (Connected or Not connected based on env vars).
+- [ ] Integration status shows Database / Gemini / Meta correctly (Connected or Not connected based on env vars).
 - [ ] "Needs action" count reflects `needs_human` conversations.
 - [ ] No reference to Orders or Catalog Sync anywhere on the page.
 
@@ -184,6 +184,6 @@ Repeat with a ~12-second delay (after image turn starts Gemini but before it del
 
 ## 17. Settings
 
-- [ ] `/settings` shows correct integration health for Supabase / Gemini / Meta.
+- [ ] `/settings` shows correct integration health for Database / Gemini / Meta.
 - [ ] Webhook URL is displayed correctly (uses `APP_BASE_URL`).
 - [ ] No "Catalog Sync" section or sync-status display.
