@@ -97,7 +97,7 @@ export function StatCard({
 }) {
   const inner = (
     <div className="card group relative overflow-hidden p-4 transition hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-glow">
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-accent/40 to-transparent opacity-0 transition group-hover:opacity-100" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-linear-to-r from-transparent via-accent/40 to-transparent opacity-0 transition group-hover:opacity-100" />
       <div className="flex items-start justify-between">
         <p className="text-xs font-medium uppercase tracking-wide text-muted">{label}</p>
         {Icon && (

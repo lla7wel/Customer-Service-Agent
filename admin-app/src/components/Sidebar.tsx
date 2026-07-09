@@ -62,7 +62,7 @@ export default function Sidebar({
                       }`}
                     >
                       {active && (
-                        <span className="absolute inset-y-1.5 start-0 w-0.5 rounded-full bg-accent shadow-glow" />
+                        <span className="absolute inset-y-1.5 inset-s-0 w-0.5 rounded-full bg-accent shadow-glow" />
                       )}
                       <Icon size={17} className={active ? 'text-accent' : 'text-faint group-hover:text-fg'} />
                       <span>{t(item.labelKey)}</span>

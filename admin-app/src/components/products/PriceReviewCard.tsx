@@ -69,7 +69,7 @@ export default function PriceReviewCard({ item, ar }: { item: ReviewItem; ar: bo
         )}
         <Link
           href={`/products/${item.id}`}
-          className="absolute end-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-lg bg-black/50 text-white transition hover:bg-black/70"
+          className="absolute inset-e-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-lg bg-black/50 text-white transition hover:bg-black/70"
           title={ar ? 'فتح المنتج' : 'Open product'}
         >
           <ArrowUpRight size={14} />
@@ -126,7 +126,7 @@ export default function PriceReviewCard({ item, ar }: { item: ReviewItem; ar: bo
                 className="input pe-10"
                 disabled={done}
               />
-              <span className="pointer-events-none absolute inset-y-0 end-3 flex items-center text-xs text-faint">LYD</span>
+              <span className="pointer-events-none absolute inset-y-0 inset-e-3 flex items-center text-xs text-faint">LYD</span>
             </div>
             <button onClick={save} disabled={saving || done} className="btn-primary shrink-0">
               {done ? <Check size={15} /> : null}

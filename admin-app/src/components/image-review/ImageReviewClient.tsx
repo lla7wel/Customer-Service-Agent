@@ -95,7 +95,7 @@ export default function ImageReviewClient({
             onClick={() => setSelected(c)}
             className="group overflow-hidden rounded-lg border border-line bg-surface text-start transition hover:border-accent/50 hover:bg-elevated"
           >
-            <div className="aspect-[4/3] bg-surface2">
+            <div className="aspect-4/3 bg-surface2">
               <ReviewImage url={c.customer_image_url} ar={ar} mode="thumb" />
             </div>
             <div className="space-y-2 p-3">
@@ -114,7 +114,7 @@ export default function ImageReviewClient({
       </div>
 
       {selected && (
-        <div className="fixed inset-0 z-50 bg-black/70 p-3 backdrop-blur-sm sm:p-6">
+        <div className="fixed inset-0 z-50 bg-black/70 p-3 backdrop-blur-xs sm:p-6">
           <div className="mx-auto grid h-full max-w-6xl overflow-hidden rounded-lg border border-line bg-bg shadow-2xl lg:grid-cols-[minmax(0,1.25fr)_420px]">
             <div className="scroll-thin min-h-0 overflow-auto bg-black/25 p-4">
               <div className="mb-3 flex items-center justify-between gap-3">
@@ -153,7 +153,7 @@ export default function ImageReviewClient({
               <div className="mt-5">
                 <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-faint">{ar ? 'بحث يدوي' : 'Manual search'}</label>
                 <div className="relative">
-                  <Search size={14} className="pointer-events-none absolute inset-y-0 start-3 my-auto text-faint" />
+                  <Search size={14} className="pointer-events-none absolute inset-y-0 inset-s-3 my-auto text-faint" />
                   <input
                     value={query}
                     onChange={(e) => searchProducts(e.target.value)}
@@ -208,7 +208,7 @@ function ProductChoice({ p, ar, busy, onSave }: { p: ProductRow; ar: boolean; bu
         )}
       </span>
       <div className="min-w-0 flex-1">
-        <p className="break-words text-sm font-semibold leading-snug text-fg" dir="auto">{p.name}</p>
+        <p className="wrap-break-word text-sm font-semibold leading-snug text-fg" dir="auto">{p.name}</p>
         {p.original_name && <p className="mt-0.5 truncate text-[11px] text-muted" title={p.original_name}>{p.original_name}</p>}
         <p className="mt-1 text-xs text-faint">
           {p.code || p.product_code ? <span className="font-mono">{p.code ?? p.product_code}</span> : null}

@@ -274,12 +274,12 @@ export default function ConversationWorkspace({
               <div key={c.id} className="tilt-card flex min-w-0 items-start gap-3 rounded-lg border border-line bg-surface p-2.5 transition hover:border-accent/40">
                 <Thumb url={c.image} />
                 <div className="min-w-0 flex-1">
-                  <a href={`/products/${c.id}`} className="block break-words text-sm font-semibold leading-snug text-fg hover:text-accent" dir="auto">{c.name}</a>
+                  <a href={`/products/${c.id}`} className="block wrap-break-word text-sm font-semibold leading-snug text-fg hover:text-accent" dir="auto">{c.name}</a>
                   {c.original_name && <p className="mt-0.5 truncate text-[11px] text-muted" title={c.original_name}>{c.original_name}</p>}
                   <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-faint">
                     {c.product_code && <span className="font-mono">{c.product_code}</span>}
                     <span className="ltr-nums text-success">{c.price != null ? `${c.price} د.ل` : (ar ? 'بدون سعر' : 'no price')}</span>
-                    {typeof c.confidence === 'number' && <span className="rounded bg-surface2 px-1.5 py-0.5">{Math.round(c.confidence * 100)}%</span>}
+                    {typeof c.confidence === 'number' && <span className="rounded-sm bg-surface2 px-1.5 py-0.5">{Math.round(c.confidence * 100)}%</span>}
                   </div>
                   {c.reason && <p className="mt-1 line-clamp-2 text-[10px] text-faint" title={c.reason}>{c.reason}</p>}
                 </div>
@@ -321,11 +321,11 @@ export default function ConversationWorkspace({
                 <div key={c.id} className="tilt-card flex min-w-0 items-start gap-3 rounded-lg border border-line bg-surface p-2.5 transition hover:border-accent/40">
                   <Thumb url={c.image} />
                   <div className="min-w-0 flex-1">
-                    <a href={`/products/${c.id}`} className="block break-words text-sm font-semibold leading-snug text-fg hover:text-accent" dir="auto">{c.name}</a>
+                    <a href={`/products/${c.id}`} className="block wrap-break-word text-sm font-semibold leading-snug text-fg hover:text-accent" dir="auto">{c.name}</a>
                     <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-faint">
                       {c.product_code && <span className="font-mono">{c.product_code}</span>}
                       <span className="ltr-nums text-success">{c.price != null ? `${c.price} د.ل` : (ar ? 'بدون سعر' : 'no price')}</span>
-                      {typeof c.confidence === 'number' && <span className="rounded bg-surface2 px-1.5 py-0.5">{Math.round(c.confidence * 100)}%</span>}
+                      {typeof c.confidence === 'number' && <span className="rounded-sm bg-surface2 px-1.5 py-0.5">{Math.round(c.confidence * 100)}%</span>}
                     </div>
                     {c.reason && <p className="mt-1 line-clamp-2 text-[10px] text-faint" title={c.reason}>{c.reason}</p>}
                   </div>
@@ -429,7 +429,7 @@ function Bubble({ m, ar }: { m: Msg; ar: boolean }) {
         </div>
       )}
       {(m.body || images.length === 0) && (
-        <div className={`max-w-full whitespace-pre-wrap break-words rounded-xl px-3.5 py-2 text-sm leading-relaxed shadow-card sm:max-w-[78%] ${
+        <div className={`max-w-full whitespace-pre-wrap wrap-break-word rounded-xl px-3.5 py-2 text-sm leading-relaxed shadow-card sm:max-w-[78%] ${
           customer
             ? 'rounded-ss-sm border border-line bg-surface2 text-fg'
             : m.is_internal_suggestion
@@ -464,7 +464,7 @@ function ProductSearch({ ar, onPick, onClose }: { ar: boolean; onPick: (p: Found
     <div className="border-t border-line bg-surface2/60 p-3">
       <div className="mb-2 flex items-center gap-2">
         <div className="relative flex-1">
-          <Search size={14} className="pointer-events-none absolute inset-y-0 my-auto start-3 text-faint" />
+          <Search size={14} className="pointer-events-none absolute inset-y-0 my-auto inset-s-3 text-faint" />
           <input
             autoFocus value={q}
             onChange={(e) => { setQ(e.target.value); run(e.target.value); }}
@@ -484,7 +484,7 @@ function ProductSearch({ ar, onPick, onClose }: { ar: boolean; onPick: (p: Found
             <button key={p.id} onClick={() => onPick(p)} className="flex w-full items-center gap-2.5 rounded-lg border border-line bg-surface p-2 text-start transition hover:border-accent/40">
               <Thumb url={p.image} />
               <span className="min-w-0 flex-1">
-                <span className="block break-words text-sm font-medium text-fg" dir="auto">{p.name}</span>
+                <span className="block wrap-break-word text-sm font-medium text-fg" dir="auto">{p.name}</span>
                 {p.original_name && <span className="block truncate text-[11px] text-muted" title={p.original_name}>{p.original_name}</span>}
                 <span className="ltr-nums block text-xs text-faint">{p.price != null ? `${p.price} د.ل` : '—'}</span>
               </span>

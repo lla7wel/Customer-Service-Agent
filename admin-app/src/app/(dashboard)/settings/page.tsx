@@ -187,7 +187,7 @@ function IntegrationCard({ s, ar }: { s: IntegrationStatus; ar: boolean }) {
           {s.missing.length > 0 && (
             <ul className="mt-2 flex flex-wrap gap-1">
               {s.missing.map((v) => (
-                <li key={v} className="rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-[10px] text-warning">{v}</li>
+                <li key={v} className="rounded-sm border border-line bg-surface px-1.5 py-0.5 font-mono text-[10px] text-warning">{v}</li>
               ))}
             </ul>
           )}

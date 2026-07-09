@@ -201,12 +201,12 @@ function Thumb({ url, size = 'card' }: { url: string | null; size?: 'card' | 'ro
 function ProductName({ r, ar, compact }: { r: Row; ar: boolean; compact?: boolean }) {
   const { name, kind } = resolveProductName(r);
   if (kind === 'catalog') {
-    return <p className={`${compact ? '' : 'line-clamp-2 min-h-[2.5rem]'} text-sm font-medium text-fg`} dir="auto">{name}</p>;
+    return <p className={`${compact ? '' : 'line-clamp-2 min-h-10'} text-sm font-medium text-fg`} dir="auto">{name}</p>;
   }
   return (
-    <div className={compact ? '' : 'min-h-[2.5rem]'}>
+    <div className={compact ? '' : 'min-h-10'}>
       <p className="line-clamp-2 text-sm font-medium text-faint" dir="auto" title={name}>{name}</p>
-      <span className="mt-0.5 inline-flex items-center gap-1 rounded bg-warning/10 px-1.5 py-0.5 text-[10px] font-medium text-warning">
+      <span className="mt-0.5 inline-flex items-center gap-1 rounded-sm bg-warning/10 px-1.5 py-0.5 text-[10px] font-medium text-warning">
         {ar ? 'اسم تركي — للمراجعة' : 'TR source — needs review'}
       </span>
     </div>
@@ -220,15 +220,15 @@ function ProductCard({ r, ar }: { r: Row; ar: boolean }) {
     <Link href={`/products/${r.id}`} className="card tilt-card group overflow-hidden p-0 transition hover:border-accent/40 hover:shadow-glow">
       <div className="relative overflow-hidden">
         <Thumb url={primaryUrl(r)} />
-        <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/75 to-transparent p-2 opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100">
-          <span className="rounded bg-black/50 px-1.5 py-0.5 font-mono text-[10px] text-white">{r.product_code.slice(-8)}</span>
-          <span className="rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white">{imageCount} {ar ? 'صور' : 'img'}</span>
+        <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-linear-to-t from-black/75 to-transparent p-2 opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100">
+          <span className="rounded-sm bg-black/50 px-1.5 py-0.5 font-mono text-[10px] text-white">{r.product_code.slice(-8)}</span>
+          <span className="rounded-sm bg-black/50 px-1.5 py-0.5 text-[10px] text-white">{imageCount} {ar ? 'صور' : 'img'}</span>
         </div>
         {r.campaign_price != null && r.campaign_price !== r.base_price && (
-          <span className="absolute start-2 top-2 rounded-full bg-success px-2 py-0.5 text-[10px] font-bold text-black">{ar ? 'عرض' : 'SALE'}</span>
+          <span className="absolute inset-s-2 top-2 rounded-full bg-success px-2 py-0.5 text-[10px] font-bold text-black">{ar ? 'عرض' : 'SALE'}</span>
         )}
         {!hasImage && (
-          <span className="absolute end-2 top-2 rounded-full bg-warning px-2 py-0.5 text-[10px] font-bold text-black">{ar ? 'صورة' : 'IMAGE'}</span>
+          <span className="absolute inset-e-2 top-2 rounded-full bg-warning px-2 py-0.5 text-[10px] font-bold text-black">{ar ? 'صورة' : 'IMAGE'}</span>
         )}
       </div>
       <div className="p-3">

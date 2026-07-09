@@ -90,7 +90,7 @@ export default function SearchBar({ placeholder, ar = false }: { placeholder: st
       }}
       className="relative hidden w-full max-w-lg md:block"
     >
-      <Search size={15} className="pointer-events-none absolute inset-y-0 my-auto start-3 text-faint" />
+      <Search size={15} className="pointer-events-none absolute inset-y-0 my-auto inset-s-3 text-faint" />
       <input
         value={q}
         onChange={(e) => { setQ(e.target.value); setOpen(true); }}
@@ -100,7 +100,7 @@ export default function SearchBar({ placeholder, ar = false }: { placeholder: st
         dir="auto"
         className="input ps-9 h-9"
       />
-      {loading && <Loader2 size={14} className="absolute end-3 top-2.5 animate-spin text-faint" />}
+      {loading && <Loader2 size={14} className="absolute inset-e-3 top-2.5 animate-spin text-faint" />}
       {open && q.trim().length >= 2 && (
         <div className="absolute top-11 z-50 w-full overflow-hidden rounded-lg border border-line bg-elevated shadow-2xl">
           {error ? (

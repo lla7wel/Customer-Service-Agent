@@ -25,7 +25,7 @@ export default function LanguageSwitcher({ locale }: { locale: Locale }) {
           onClick={() => setLocale(l)}
           disabled={pending}
           className={`h-8 rounded-md px-2.5 font-medium transition ${
-            locale === l ? 'bg-surface2 text-fg shadow-sm' : 'text-muted hover:text-fg'
+            locale === l ? 'bg-surface2 text-fg shadow-xs' : 'text-muted hover:text-fg'
           }`}
         >
           {l === 'ar' ? 'ع' : 'EN'}

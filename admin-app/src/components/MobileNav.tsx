@@ -47,9 +47,9 @@ export default function MobileNav({ locale }: { locale: Locale }) {
       {open && (
         <div className="fixed inset-0 z-50">
           {/* backdrop */}
-          <div className="absolute inset-0 bg-black/55 backdrop-blur-sm" onClick={() => setOpen(false)} />
+          <div className="absolute inset-0 bg-black/55 backdrop-blur-xs" onClick={() => setOpen(false)} />
           {/* drawer */}
-          <div className="safe-b absolute inset-y-0 start-0 flex w-72 max-w-[86%] animate-fade-in flex-col border-e border-line bg-surface/95 shadow-xl backdrop-blur-xl">
+          <div className="safe-b absolute inset-y-0 inset-s-0 flex w-72 max-w-[86%] animate-fade-in flex-col border-e border-line bg-surface/95 shadow-xl backdrop-blur-xl">
             <div className="safe-t flex h-16 items-center justify-between border-b border-line/70 px-4">
               <span className="flex items-center gap-2">
                 <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-accent-grad text-xs font-bold text-black">EH</span>

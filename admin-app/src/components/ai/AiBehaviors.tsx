@@ -200,7 +200,7 @@ function BehaviorCard({ behavior, ar, geminiConnected }: { behavior: AiBehavior;
             {testErr && <p className="mt-2 text-xs text-danger" dir="auto">{testErr}</p>}
             {testOut && (
               <div className="mt-2">
-                <pre className="whitespace-pre-wrap break-words rounded-lg bg-surface2 p-2.5 text-xs text-fg" dir="auto">{testOut}</pre>
+                <pre className="whitespace-pre-wrap wrap-break-word rounded-lg bg-surface2 p-2.5 text-xs text-fg" dir="auto">{testOut}</pre>
               </div>
             )}
           </>

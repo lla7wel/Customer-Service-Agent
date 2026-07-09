@@ -342,19 +342,19 @@ function CommandVisual({
   return (
     <div className="command-visual relative hidden min-h-[220px] overflow-hidden rounded-xl border border-line/70 bg-surface2/60 p-5 lg:block">
       <div className="command-plane absolute inset-x-8 bottom-[-82px] h-56 rounded-xl border border-line/70 shadow-glow" />
-      <div className="floating-tile absolute end-8 top-7 w-36 rounded-xl border border-accent/25 bg-surface/95 p-3 shadow-card">
+      <div className="floating-tile absolute inset-e-8 top-7 w-36 rounded-xl border border-accent/25 bg-surface/95 p-3 shadow-card">
         <p className="text-[10px] uppercase tracking-wide text-faint">{ar ? 'AI' : 'AI'}</p>
         <p className="mt-1 text-xl font-semibold text-fg">{aiSuccessRate != null ? `${aiSuccessRate}%` : '—'}</p>
         <div className="mt-2 h-1.5 rounded-full bg-surface2">
           <div className="h-full rounded-full bg-success" style={{ width: `${aiSuccessRate ?? 0}%` }} />
         </div>
       </div>
-      <div className="floating-tile absolute start-8 top-20 w-40 rounded-xl border border-warning/25 bg-surface/95 p-3 shadow-card">
+      <div className="floating-tile absolute inset-s-8 top-20 w-40 rounded-xl border border-warning/25 bg-surface/95 p-3 shadow-card">
         <p className="text-[10px] uppercase tracking-wide text-faint">{ar ? 'الإجراءات' : 'Action queue'}</p>
         <p className="mt-1 text-2xl font-semibold text-warning">{actionCount.toLocaleString()}</p>
         <p className="mt-1 text-xs text-muted">{ar ? 'محادثات تحتاج متابعة' : 'conversations need follow-up'}</p>
       </div>
-      <div className="floating-tile absolute bottom-6 end-16 w-32 rounded-xl border border-info/25 bg-surface/95 p-3 shadow-card">
+      <div className="floating-tile absolute bottom-6 inset-e-16 w-32 rounded-xl border border-info/25 bg-surface/95 p-3 shadow-card">
         <p className="text-[10px] uppercase tracking-wide text-faint">{ar ? 'القنوات' : 'Channels'}</p>
         <div className="mt-2 flex gap-1.5">
           <span className="h-2 w-8 rounded-full bg-success" />

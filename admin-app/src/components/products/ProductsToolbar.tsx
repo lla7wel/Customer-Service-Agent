@@ -63,7 +63,7 @@ export default function ProductsToolbar({
     <div className="mb-4 space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-[220px] flex-1">
-          <Search size={15} className="pointer-events-none absolute inset-y-0 my-auto start-3 text-faint" />
+          <Search size={15} className="pointer-events-none absolute inset-y-0 my-auto inset-s-3 text-faint" />
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
@@ -72,7 +72,7 @@ export default function ProductsToolbar({
             className="input ps-9"
           />
           {q && (
-            <button onClick={() => setQ('')} className="absolute inset-y-0 my-auto end-2 text-faint hover:text-fg">
+            <button onClick={() => setQ('')} className="absolute inset-y-0 my-auto inset-e-2 text-faint hover:text-fg">
               <X size={15} />
             </button>
           )}

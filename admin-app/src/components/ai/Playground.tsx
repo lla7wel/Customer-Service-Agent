@@ -108,7 +108,7 @@ export default function Playground({ locale }: { locale: Locale }) {
               <div className="relative inline-block">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={image.preview} alt="" className="h-24 w-24 rounded-lg border border-line object-cover" />
-                <button onClick={() => setImage(null)} className="absolute -end-2 -top-2 inline-flex h-6 w-6 items-center justify-center rounded-full bg-danger text-white"><X size={13} /></button>
+                <button onClick={() => setImage(null)} className="absolute -inset-e-2 -top-2 inline-flex h-6 w-6 items-center justify-center rounded-full bg-danger text-white"><X size={13} /></button>
               </div>
             ) : (
               <label className="btn-ghost cursor-pointer">
@@ -151,7 +151,7 @@ export default function Playground({ locale }: { locale: Locale }) {
           {reply == null && !outImage ? (
             <p className="py-8 text-center text-sm text-faint">{ar ? 'الرد يظهر هنا.' : 'The reply appears here.'}</p>
           ) : reply ? (
-            <div className="whitespace-pre-wrap break-words rounded-xl border border-accent/30 bg-accent/10 px-3.5 py-2.5 text-sm leading-relaxed text-fg shadow-card" dir="auto">{reply}</div>
+            <div className="whitespace-pre-wrap wrap-break-word rounded-xl border border-accent/30 bg-accent/10 px-3.5 py-2.5 text-sm leading-relaxed text-fg shadow-card" dir="auto">{reply}</div>
           ) : null}
           {debug?.outcome && (
             <p className="mt-3 text-[11px] text-faint">
@@ -176,11 +176,11 @@ export default function Playground({ locale }: { locale: Locale }) {
                   <p className="mb-1 font-semibold text-muted">{ar ? 'مرشحو القاعدة' : 'Database candidates'}{debug.retrieval.outcome ? ` · ${debug.retrieval.outcome}` : ''}</p>
                   <div className="space-y-1">
                     {(debug.retrieval.candidates ?? []).slice(0, 8).map((c: any) => (
-                      <div key={c.id} className="flex items-center justify-between gap-2 rounded border border-line bg-surface2 px-2 py-1">
+                      <div key={c.id} className="flex items-center justify-between gap-2 rounded-sm border border-line bg-surface2 px-2 py-1">
                         <span className="min-w-0 truncate text-fg" dir="auto">{c.name}</span>
                         <span className="flex shrink-0 items-center gap-1.5 text-faint">
                           {typeof c.confidence === 'number' && <span>{Math.round(c.confidence * 100)}%</span>}
-                          {(c.retrieval_tracks ?? []).length > 0 && <span className="rounded bg-surface px-1 text-[9px]">{c.retrieval_tracks.join(',')}</span>}
+                          {(c.retrieval_tracks ?? []).length > 0 && <span className="rounded-sm bg-surface px-1 text-[9px]">{c.retrieval_tracks.join(',')}</span>}
                         </span>
                       </div>
                     ))}
@@ -209,7 +209,7 @@ function Section({ title, obj, collapsed }: { title: string; obj: unknown; colla
       <button onClick={() => setOpen((v) => !v)} className="mb-1 flex w-full items-center justify-between font-semibold text-muted">
         <span>{title}</span><span className="text-faint">{open ? '−' : '+'}</span>
       </button>
-      {open && <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-surface2 p-2 text-[10px] text-fg" dir="ltr">{JSON.stringify(obj, null, 2)}</pre>}
+      {open && <pre className="max-h-56 overflow-auto whitespace-pre-wrap wrap-break-word rounded-lg bg-surface2 p-2 text-[10px] text-fg" dir="ltr">{JSON.stringify(obj, null, 2)}</pre>}
     </div>
   );
 }

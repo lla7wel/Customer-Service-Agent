@@ -196,7 +196,7 @@ function AssetSection({ title, count, children }: { title: string; count: number
     <section>
       <div className="mb-2 flex items-center gap-2">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-faint">{title}</h3>
-        <span className="rounded bg-surface2 px-1.5 py-0.5 text-[10px] text-muted">{count}</span>
+        <span className="rounded-sm bg-surface2 px-1.5 py-0.5 text-[10px] text-muted">{count}</span>
       </div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-5">{children}</div>
     </section>
@@ -231,7 +231,7 @@ function AssetTile({
       ) : (
         <div className="flex h-full items-center justify-center text-[10px] text-faint">{asset.kind}</div>
       )}
-      <span className={`absolute start-1 top-1 rounded px-1.5 py-0.5 text-[9px] font-semibold ${asset.approved ? 'bg-success text-black' : 'bg-black/65 text-white'}`}>
+      <span className={`absolute inset-s-1 top-1 rounded-sm px-1.5 py-0.5 text-[9px] font-semibold ${asset.approved ? 'bg-success text-black' : 'bg-black/65 text-white'}`}>
         {edited ? (asset.approved ? (ar ? 'معتمدة' : 'Approved') : (ar ? 'معدّلة' : 'Edited')) : (ar ? 'أصلية' : 'Original')}
       </span>
       {edited ? (
@@ -243,7 +243,7 @@ function AssetTile({
           {onReject && <button onClick={() => onReject(asset.id)} disabled={busy} title={ar ? 'رفض' : 'Reject'} className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-black/65 text-white hover:bg-danger"><Trash2 size={13} /></button>}
         </div>
       ) : (
-        onRemove && <button onClick={() => onRemove(asset.id)} className="absolute end-1 top-1 inline-flex h-7 w-7 items-center justify-center rounded-md bg-black/65 text-white opacity-0 transition hover:bg-danger group-hover:opacity-100">
+        onRemove && <button onClick={() => onRemove(asset.id)} className="absolute inset-e-1 top-1 inline-flex h-7 w-7 items-center justify-center rounded-md bg-black/65 text-white opacity-0 transition hover:bg-danger group-hover:opacity-100">
           <Trash2 size={13} />
         </button>
       )}
@@ -280,7 +280,7 @@ function ProductPicker({ ar, onConfirm, onClose }: { ar: boolean; onConfirm: (id
     <div className="mb-3 rounded-xl border border-line bg-surface2/60 p-3">
       <div className="mb-2 flex items-center gap-2">
         <div className="relative flex-1">
-          <Search size={14} className="pointer-events-none absolute inset-y-0 my-auto start-3 text-faint" />
+          <Search size={14} className="pointer-events-none absolute inset-y-0 my-auto inset-s-3 text-faint" />
           <input autoFocus value={q} onChange={(e) => { setQ(e.target.value); run(e.target.value); }} placeholder={ar ? 'ابحث عن منتجات…' : 'Search products…'} dir="auto" className="input ps-9 h-9" />
         </div>
         <button onClick={onClose} className="btn-subtle h-9 w-9 p-0"><X size={15} /></button>

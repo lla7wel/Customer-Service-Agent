@@ -106,7 +106,7 @@ function Detail({ icon: Icon, value }: { icon: typeof Phone; value: string }) {
   return (
     <div className="flex items-start gap-2 text-fg">
       <Icon size={14} className="mt-0.5 shrink-0 text-faint" />
-      <span className="min-w-0 break-words" dir="auto">{value}</span>
+      <span className="min-w-0 wrap-break-word" dir="auto">{value}</span>
     </div>
   );
 }

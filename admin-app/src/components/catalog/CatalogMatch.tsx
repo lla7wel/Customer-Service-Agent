@@ -472,12 +472,12 @@ function CatalogImageSearch({ ar, onClose }: { ar: boolean; onClose: () => void 
                   {c.image ? <img src={c.image} alt="" className="h-full w-full object-cover" /> : <ImageOff size={16} className="m-auto mt-5 text-faint" />}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <Link href={`/products/${c.id}`} className="block break-words text-sm font-semibold leading-snug text-fg hover:text-accent" dir="auto">{c.name}</Link>
+                  <Link href={`/products/${c.id}`} className="block wrap-break-word text-sm font-semibold leading-snug text-fg hover:text-accent" dir="auto">{c.name}</Link>
                   <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-faint">
                     {c.product_code && <span className="font-mono">{c.product_code}</span>}
                     {c.barcode && <span className="font-mono">{c.barcode}</span>}
                     <span className="ltr-nums text-success">{c.price != null ? `${c.price} د.ل` : (ar ? 'بدون سعر' : 'no price')}</span>
-                    {typeof c.confidence === 'number' && <span className="rounded bg-surface2 px-1.5 py-0.5">{Math.round(c.confidence * 100)}%</span>}
+                    {typeof c.confidence === 'number' && <span className="rounded-sm bg-surface2 px-1.5 py-0.5">{Math.round(c.confidence * 100)}%</span>}
                   </div>
                   {c.reason && <p className="mt-1 line-clamp-2 text-[10px] text-faint" title={c.reason}>{c.reason}</p>}
                 </div>

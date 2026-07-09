@@ -84,15 +84,15 @@ export default async function CampaignsPage() {
             const cover = c.campaign_assets?.find((a) => a.public_url)?.public_url ?? null;
             return (
               <Link key={c.id} href={`/campaigns/${c.id}`} className="card tilt-card group overflow-hidden p-0 transition hover:border-accent/40 hover:shadow-glow">
-                <div className="relative aspect-[16/9] bg-surface2">
+                <div className="relative aspect-video bg-surface2">
                   {cover ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={cover} alt="" className="h-full w-full object-cover transition group-hover:scale-[1.03]" />
                   ) : (
                     <div className="flex h-full items-center justify-center text-faint"><ImageOff size={26} /></div>
                   )}
-                  <span className="absolute end-2 top-2"><Badge tone={campaignTone(c.status)}>{humanize(c.status)}</Badge></span>
-                  <span className="absolute start-2 bottom-2 inline-flex items-center gap-1 rounded bg-black/55 px-2 py-1 text-[10px] text-white">
+                  <span className="absolute inset-e-2 top-2"><Badge tone={campaignTone(c.status)}>{humanize(c.status)}</Badge></span>
+                  <span className="absolute inset-s-2 bottom-2 inline-flex items-center gap-1 rounded-sm bg-black/55 px-2 py-1 text-[10px] text-white">
                     <Images size={11} /> {(c.campaign_assets ?? []).filter((a) => a.public_url).length}
                   </span>
                 </div>

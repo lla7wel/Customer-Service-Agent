@@ -97,7 +97,7 @@ export default function CustomerMemoryPanel({ conversationId, memory, locale }: 
               <p className="mb-1 text-faint">{ar ? 'منتجات سابقة' : 'Recent products'}</p>
               <ul className="space-y-0.5">
                 {memory.recent_products.slice(0, 5).map((p, i) => (
-                  <li key={i} className="flex items-center justify-between gap-2 rounded border border-line bg-surface2 px-2 py-1">
+                  <li key={i} className="flex items-center justify-between gap-2 rounded-sm border border-line bg-surface2 px-2 py-1">
                     <span className="min-w-0 truncate text-fg" dir="auto">{p.name}</span>
                     <span className="shrink-0 text-success">{p.price != null ? `${p.price} د.ل` : '—'}</span>
                   </li>
@@ -118,7 +118,7 @@ function Row({ label, value }: { label: string; value: string }) {
   return (
     <p className="grid gap-0.5 sm:grid-cols-[70px_1fr]">
       <span className="text-faint">{label}</span>
-      <span className="break-words text-fg" dir="auto">{value}</span>
+      <span className="wrap-break-word text-fg" dir="auto">{value}</span>
     </p>
   );
 }

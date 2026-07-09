@@ -125,7 +125,7 @@ export default async function InboxPage(props: { searchParams: Promise<{ filter?
               <Link key={c.id} href={`/inbox/${c.id}`} className="group flex items-center gap-3 px-4 py-3 transition hover:bg-surface2/50">
                 <span className="relative inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-line bg-surface2 text-sm font-semibold text-fg shadow-card">
                   {(name[0] || '#').toUpperCase()}
-                  {needsAction && <span className="absolute -end-0.5 -top-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-warning text-black"><AlertTriangle size={9} /></span>}
+                  {needsAction && <span className="absolute -inset-e-0.5 -top-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-warning text-black"><AlertTriangle size={9} /></span>}
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
