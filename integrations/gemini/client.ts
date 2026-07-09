@@ -13,7 +13,7 @@ const BASE = 'https://generativelanguage.googleapis.com/v1beta';
 export class GeminiNotConfiguredError extends Error {
   missing: string[];
   constructor() {
-    super('Gemini is not configured. Missing GEMINI_API_KEY. See docs/ENV.md.');
+    super('Gemini is not configured. Missing GEMINI_API_KEY. Set GEMINI_API_KEY.');
     this.name = 'GeminiNotConfiguredError';
     this.missing = ['GEMINI_API_KEY'];
   }
@@ -23,14 +23,14 @@ export function isGeminiConfigured(): boolean {
   return geminiStatus().configured;
 }
 
-/* -------------------------------------------------------------------------- */
-/* CENTRAL MODEL ROUTER                                                        */
-/* The ONLY place model names are chosen. Every Gemini call routes through one */
-/* of these accessors BY TASK, so the strong/expensive image model is never    */
-/* used for text/classification/captions, and the embedding model is never     */
-/* used for generation. All defaults below are verified available on the       */
-/* project GEMINI_API_KEY (see docs/AI_BRAIN.md "Model routing").              */
-/* -------------------------------------------------------------------------- */
+/*
+ * Central model router — the ONLY place model names are chosen. Every Gemini
+ * call routes through one of these accessors BY TASK, so the strong/expensive
+ * image model is never used for text/classification/captions, and the
+ * embedding model is never used for generation.
+ */
+
+const DEFAULT_IMAGE_MODEL = 'gemini-3-pro-image-preview';
 
 /** Fast, affordable text model: customer replies, order wording, store/delivery
  *  info, product Q&A after tools retrieve data. Never the image model. */
@@ -60,15 +60,15 @@ export function visionModel(): string {
 /* ---- Image generation / editing (strongest available) -------------------- */
 /** Strongest available image model — actual image GENERATION only. */
 export function imageModel(): string {
-  return envAny('GEMINI_IMAGE_MODEL') || 'gemini-3-pro-image-preview';
+  return envAny('GEMINI_IMAGE_MODEL') || DEFAULT_IMAGE_MODEL;
 }
 /** Image EDITING model (defaults to the generation model). */
 export function imageEditModel(): string {
-  return envAny('GEMINI_IMAGE_EDIT_MODEL', 'GEMINI_IMAGE_MODEL') || 'gemini-3-pro-image-preview';
+  return envAny('GEMINI_IMAGE_EDIT_MODEL', 'GEMINI_IMAGE_MODEL') || DEFAULT_IMAGE_MODEL;
 }
 /** Campaign/final creative image model (defaults to the generation model). */
 export function campaignImageModel(): string {
-  return envAny('GEMINI_CAMPAIGN_IMAGE_MODEL', 'GEMINI_IMAGE_MODEL') || 'gemini-3-pro-image-preview';
+  return envAny('GEMINI_CAMPAIGN_IMAGE_MODEL', 'GEMINI_IMAGE_MODEL') || DEFAULT_IMAGE_MODEL;
 }
 /**
  * Ordered image-model fallback chain: preferred → fallback → last fallback.

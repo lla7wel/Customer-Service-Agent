@@ -1,4 +1,4 @@
-import { getDb } from './supabase/db';
+import { getDb } from './db';
 import type { DB } from '@integrations/db/client';
 
 /**

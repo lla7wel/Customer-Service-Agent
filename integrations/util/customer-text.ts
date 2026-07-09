@@ -1,6 +1,6 @@
 /**
  * Final safety gate for ANY text about to be sent to a customer (Messenger
- * replies, Facebook comment replies, admin-sent messages, option lists).
+ * replies, admin-sent messages, campaign captions).
  *
  * It is intentionally conservative: it removes things that must NEVER reach a
  * customer (internal tool/debug/prompt/system text) without mangling normal

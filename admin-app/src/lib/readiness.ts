@@ -4,7 +4,7 @@
  * Called by: dashboard page. Must not: write to the DB or trigger mutations.
  */
 import 'server-only';
-import { getDb } from './supabase/db';
+import { getDb } from './db';
 import { getCatalogStats } from './catalog';
 import { databaseStatus, geminiStatus, metaStatus, appBaseUrl } from '@integrations/status';
 

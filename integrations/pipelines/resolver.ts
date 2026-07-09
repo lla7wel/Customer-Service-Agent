@@ -1,8 +1,8 @@
 /**
- * CANONICAL product resolver — the ONE entry point every surface uses to turn an
- * admin/customer signal (text, code, barcode, URL, or image) into ranked catalog
- * candidates. It does not re-implement matching: it composes the two proven
- * canonical engines so there is no weaker per-page logic:
+ * Unified product resolver for ADMIN surfaces — turns an admin signal (text,
+ * code, barcode, URL, or image) into ranked catalog candidates. It does not
+ * re-implement matching: it composes the two canonical engines so there is no
+ * weaker per-page logic:
  *
  *   • text / code / barcode / URL / keyword / vector → resolveProductsFromText()
  *   • image (bytes or url) → matchCustomerImage()  (dHash + vision + vector)

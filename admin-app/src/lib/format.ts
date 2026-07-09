@@ -90,7 +90,6 @@ const ACTION_LABELS: Record<string, { en: string; ar: string }> = {
   order_draft_ai_filled: { en: 'Order draft filled', ar: 'تعبئة مسودة طلب' },
   order_confirmed: { en: 'Order confirmed', ar: 'تأكيد طلب' },
   fb_post: { en: 'Facebook post', ar: 'منشور فيسبوك' },
-  fb_comment_reply: { en: 'Facebook comment reply', ar: 'رد تعليق فيسبوك' },
 };
 
 export function activityLabel(action: string | null | undefined, locale: Locale = 'en'): string {

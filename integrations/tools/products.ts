@@ -99,11 +99,15 @@ const TEXT_SEARCH_NAME_COLUMNS = [
   'libyan_display_name', 'arabic_name', 'english_name', 'source_name', 'category',
 ] as const;
 
-/** Wide text search across Arabic/English/Turkish names + keyword arrays, scored in code. */
-export async function searchProductsByText(db: Kysely<DB>, terms: string[], limit = 20): Promise<ToolResult<ProductCandidate[]>> {
-  const clean = Array.from(new Set(terms.map((t) => t.trim()).filter((t) => t.length >= 2))).slice(0, 12);
-  if (!clean.length) return { ok: true, data: [] };
-  const rows = await activePriced(productSelect(db))
+/**
+ * Keyword ILIKE search over active+priced products, returning raw rows (with
+ * embedded images). Shared by the text tool below and the image-match pipeline,
+ * which needs the raw rows for perceptual-hash scoring.
+ */
+export async function searchProductRows(db: Kysely<DB>, terms: string[], limit: number, maxTerms = 12) {
+  const clean = Array.from(new Set(terms.map((t) => t.trim()).filter((t) => t.length >= 2))).slice(0, maxTerms);
+  if (!clean.length) return [];
+  return activePriced(productSelect(db))
     .where((eb) =>
       eb.or(
         clean.flatMap((t) =>
@@ -111,8 +115,15 @@ export async function searchProductsByText(db: Kysely<DB>, terms: string[], limi
         ),
       ),
     )
-    .limit(Math.max(limit * 6, 40))
+    .limit(limit)
     .execute();
+}
+
+/** Wide text search across Arabic/English/Turkish names + keyword arrays, scored in code. */
+export async function searchProductsByText(db: Kysely<DB>, terms: string[], limit = 20): Promise<ToolResult<ProductCandidate[]>> {
+  const clean = Array.from(new Set(terms.map((t) => t.trim()).filter((t) => t.length >= 2))).slice(0, 12);
+  if (!clean.length) return { ok: true, data: [] };
+  const rows = await searchProductRows(db, clean, Math.max(limit * 6, 40));
   if (!rows.length) return { ok: true, data: [] };
   const queryTokens = new Set(clean.flatMap((t) => tokenize(t)));
   const scored = rows

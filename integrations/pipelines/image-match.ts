@@ -35,7 +35,7 @@ import {
   findProductByCode, findProductByBarcode, vectorSearchProductText, toCandidate,
   type ProductCandidate,
 } from '../tools';
-import { productSelect, activePriced } from '../tools/products';
+import { productSelect, activePriced, searchProductRows } from '../tools/products';
 
 /** Back-compat alias — the canonical candidate shape now lives in the tools layer. */
 export type ImageMatchCandidate = ProductCandidate;
@@ -67,10 +67,6 @@ function host(url?: string | null): string | null {
 function withoutQuery(url: string): string {
   try { const u = new URL(url); u.search = ''; u.hash = ''; return u.toString(); } catch { return url; }
 }
-function sanitizeKeyword(k: string): string {
-  return k.replace(/[(),%*]/g, ' ').trim();
-}
-
 /** Smallest Hamming distance between a customer hash and any of a product's image hashes. */
 function bestHashDistance(p: any, customerHash: string | null): number {
   if (!customerHash) return 999;
@@ -157,17 +153,6 @@ async function findSimilarByImage(db: Kysely<DB>, customerHash: string, maxDist:
   const out: any[] = [];
   for (const r of ranked) { const p = await findById(db, r.product_id); if (p) out.push(p); }
   return out;
-}
-
-/** Keyword catalog search over active+priced products (raw rows for hashing). */
-async function searchCatalog(db: Kysely<DB>, keywords: string[], limit: number): Promise<any[]> {
-  const terms = Array.from(new Set(keywords.map(sanitizeKeyword).filter((k) => k.length >= 2))).slice(0, 10);
-  if (terms.length === 0) return [];
-  const cols = ['libyan_display_name', 'arabic_name', 'english_name', 'category'] as const;
-  return activePriced(productSelect(db))
-    .where((eb) => eb.or(terms.flatMap((t) => cols.map((c) => eb(`products.${c}`, 'ilike', `%${t}%`)))))
-    .limit(limit)
-    .execute();
 }
 
 export async function matchCustomerImage(db: Kysely<DB>, opts: MatchCustomerImageOpts): Promise<ImageMatchResult> {
@@ -315,7 +300,7 @@ export async function matchCustomerImage(db: Kysely<DB>, opts: MatchCustomerImag
   // keyword search is empty — that produced confident-looking but random matches.
   // If no real signal yields candidates, we return outcome 'none' and the caller
   // asks one natural clarifying question instead.
-  const pool = await searchCatalog(db, keywords, searchLimit);
+  const pool: any[] = await searchProductRows(db, keywords, searchLimit, 10);
   const haveIds = new Set(pool.map((p: any) => p.id));
   // Semantic vector candidates from the vision description.
   if (descriptionText.trim().length >= 3) {

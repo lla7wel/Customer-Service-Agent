@@ -8,7 +8,7 @@ import PriceReviewCard, { type ReviewItem } from '@/components/products/PriceRev
 import { getT } from '@/lib/i18n/server';
 import { databaseStatus } from '@integrations/status';
 import { jsonArrayFrom } from 'kysely/helpers/postgres';
-import { getDb } from '@/lib/supabase/db';
+import { getDb } from '@/lib/db';
 import { getCatalogStats } from '@/lib/catalog';
 
 export const dynamic = 'force-dynamic';

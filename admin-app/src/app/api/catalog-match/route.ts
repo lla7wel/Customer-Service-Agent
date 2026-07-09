@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { unstable_noStore as noStore } from 'next/cache';
 import { jsonArrayFrom } from 'kysely/helpers/postgres';
-import { getDb } from '@/lib/supabase/db';
+import { getDb } from '@/lib/db';
 import { databaseStatus } from '@integrations/status';
 import { countByState } from '@/lib/catalog-match-store';
 import type { CatalogMatchState } from '@integrations/db/rows';

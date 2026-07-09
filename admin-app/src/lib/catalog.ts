@@ -6,7 +6,7 @@
  * Must not: write to the DB or trigger any mutations.
  */
 import 'server-only';
-import { getDb } from './supabase/db';
+import { getDb } from './db';
 
 export interface CatalogStats {
   connected: boolean;

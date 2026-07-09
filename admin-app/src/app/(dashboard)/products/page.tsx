@@ -7,7 +7,7 @@ import AddProductButton from '@/components/products/AddProductButton';
 import { getT } from '@/lib/i18n/server';
 import { databaseStatus } from '@integrations/status';
 import { jsonArrayFrom } from 'kysely/helpers/postgres';
-import { getDb } from '@/lib/supabase/db';
+import { getDb } from '@/lib/db';
 import { formatPrice, humanize, resolveProductName } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';

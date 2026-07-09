@@ -6,7 +6,7 @@ import AutoRefresh from '@/components/AutoRefresh';
 import { getT } from '@/lib/i18n/server';
 import { databaseStatus } from '@integrations/status';
 import { jsonObjectFrom } from 'kysely/helpers/postgres';
-import { getDb } from '@/lib/supabase/db';
+import { getDb } from '@/lib/db';
 import { conversationTone } from '@/lib/status-tone';
 import { humanize, timeAgo } from '@/lib/format';
 

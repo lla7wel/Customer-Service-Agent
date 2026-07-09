@@ -1,7 +1,7 @@
 /**
- * Gemini provider layer — the single, centralized place for ALL AI in EH-SYSTEM1.
- * Customer chat, intent classification, image→product matching, caption
- * generation, comment replies, and campaign image editing all live here.
+ * Gemini provider layer — the single, centralized place for ALL AI in the
+ * platform. Customer chat, intent classification, image→product matching,
+ * caption generation, and campaign image editing all live here.
  *
  * Design rules:
  *  - Customer-facing text is ALWAYS produced in Libyan Arabic (enforced via the

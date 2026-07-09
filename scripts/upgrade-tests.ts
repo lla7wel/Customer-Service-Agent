@@ -154,7 +154,7 @@ test('detectImageRequest ignores price/availability/order-only messages', () => 
   }
 });
 test('isMetaSafeImageUrl requires public https (no local paths/http)', () => {
-  assert.ok(isMetaSafeImageUrl('https://x.supabase.co/storage/v1/object/public/eh-media/a.jpg'));
+  assert.ok(isMetaSafeImageUrl('https://media.example.com/products/10001821004/00.jpg'));
   assert.ok(!isMetaSafeImageUrl('http://x.com/a.jpg'));
   assert.ok(!isMetaSafeImageUrl('https://localhost:3000/a.jpg'));
   assert.ok(!isMetaSafeImageUrl('/var/data/images/a.jpg'));

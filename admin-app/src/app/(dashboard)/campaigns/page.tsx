@@ -5,7 +5,7 @@ import NotConnected from '@/components/NotConnected';
 import { getT } from '@/lib/i18n/server';
 import { databaseStatus } from '@integrations/status';
 import { jsonArrayFrom } from 'kysely/helpers/postgres';
-import { getDb } from '@/lib/supabase/db';
+import { getDb } from '@/lib/db';
 import { campaignTone } from '@/lib/status-tone';
 import { humanize, formatDate } from '@/lib/format';
 

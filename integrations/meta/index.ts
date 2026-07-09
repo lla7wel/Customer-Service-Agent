@@ -1,7 +1,7 @@
 /**
  * Meta / Facebook integration — Graph API client + webhook verification.
- * Portable across Node 18+, Next.js and Cloudflare Workers (uses fetch + Web
- * Crypto). Centralizes Messenger send, page posting, and comment replies.
+ * Portable across runtimes (fetch + Web Crypto only). Centralizes Messenger
+ * send and page posting.
  */
 import { env, envAny } from '../env';
 import { metaStatus } from '../status';

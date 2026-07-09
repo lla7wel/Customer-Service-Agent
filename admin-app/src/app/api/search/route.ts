@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { jsonObjectFrom } from 'kysely/helpers/postgres';
-import { getDb } from '@/lib/supabase/db';
+import { getDb } from '@/lib/db';
 import { databaseStatus } from '@integrations/status';
 import { uiProductQuery, toUiCandidate } from '@/lib/product-candidates';
 

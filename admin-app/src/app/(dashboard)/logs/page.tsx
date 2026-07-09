@@ -21,7 +21,6 @@ const ICON: Record<string, any> = {
   campaign_image_edit_generated: Megaphone,
   campaign_image_edit_failed: AlertTriangle,
   fb_post: Share2,
-  fb_comment_reply: CornerDownRight,
   ai_settings_updated: Cog,
   order_draft_created: Package,
   import: Database,
