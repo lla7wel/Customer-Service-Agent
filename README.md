@@ -62,9 +62,14 @@ Every guard in the pipeline exists because of a real incident:
 └── docs/             architecture, operations, AI pipeline deep-dives
 ```
 
-Companion repository: [english-home-catalog-scraper](../english-home-tr-scraper)
-— a resumable Playwright-over-CDP scraper (real-Chrome Cloudflare bypass) that
-builds the product/image database this platform imports.
+Companion repositories:
+
+- [english-home-catalog-scraper](https://github.com/lla7wel/english-home-catalog-scraper)
+  — resumable Playwright-over-CDP scraper (real-Chrome Cloudflare bypass) that
+  builds the product/image database this platform imports.
+- [trilingual-catalog-matcher](https://github.com/lla7wel/trilingual-catalog-matcher)
+  — the Arabic/Turkish/English product-matching engine, extracted from
+  `integrations/catalog-match.ts` as a zero-dependency library.
 
 ## Engineering decisions
 
