@@ -70,6 +70,9 @@ Companion repositories:
 - [trilingual-catalog-matcher](https://github.com/lla7wel/trilingual-catalog-matcher)
   — the Arabic/Turkish/English product-matching engine, extracted from
   `integrations/catalog-match.ts` as a zero-dependency library.
+- [visual-product-matcher](https://github.com/lla7wel/visual-product-matcher)
+  — the photo-recognition pipeline (dHash backbone, learning loop, pluggable
+  vision/retrieval) as a standalone, provider-agnostic library.
 
 ## Engineering decisions
 
