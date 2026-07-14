@@ -189,7 +189,17 @@ export function mapNewProductRow(p: ScraperProduct, importRunId: string | null) 
 
 /** Resolve an image's absolute path on disk from its scraper-relative path. */
 export function resolveImageAbsPath(relPath: string): string {
-  return path.isAbsolute(relPath) ? relPath : path.join(scraperRoot(), relPath);
+  if (path.isAbsolute(relPath)) return relPath;
+  // Paths in the scraper JSON are relative to the scraper repo root
+  // ("data/images/<product>/<n>.jpg"). SCRAPER_IMAGES_DIR relocates the images
+  // tree on machines that only have the images (e.g. a production server).
+  const imagesDir = process.env.SCRAPER_IMAGES_DIR;
+  if (imagesDir) {
+    const marker = `data${path.sep}images${path.sep}`;
+    const idx = relPath.indexOf(marker);
+    if (idx !== -1) return path.join(imagesDir, relPath.slice(idx + marker.length));
+  }
+  return path.join(scraperRoot(), relPath);
 }
 
 export function fileExists(p: string): boolean {

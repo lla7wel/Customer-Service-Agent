@@ -95,7 +95,9 @@ npm run import:products && npm run catalog:csv
 # (/srv/eh-media) is the in-container path and wins over scripts/.env:
 MEDIA_ROOT=/var/lib/docker/volumes/eh-platform_media/_data npm run upload:images
 chown -R 100:101 /var/lib/docker/volumes/eh-platform_media/_data   # app uid:gid
-npm run fingerprints && npm run embeddings && npm run validate
+npm run fingerprints && npm run embeddings
+npm run match:images   # refresh scraper↔CSV match suggestions for admin review
+npm run validate
 ```
 
 ## 5. Cron + backups
