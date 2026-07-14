@@ -19,7 +19,8 @@ RUN cd admin-app && npx next build
 FROM node:22-alpine AS runner
 ENV NODE_ENV=production
 WORKDIR /app
-RUN addgroup -S app && adduser -S app -G app
+RUN addgroup -S app && adduser -S app -G app \
+    && mkdir -p /srv/eh-media && chown app:app /srv/eh-media
 # Standalone output is rooted at the repo root (outputFileTracingRoot).
 COPY --from=build /repo/admin-app/.next/standalone ./
 COPY --from=build /repo/admin-app/.next/static ./admin-app/.next/static
