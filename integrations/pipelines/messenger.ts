@@ -618,13 +618,20 @@ async function markNeedsHuman(db: Kysely<DB>, conversationId: string, reason: st
 }
 
 async function fetchAndSaveCustomerProfile(db: Kysely<DB>, customerId: string, psid: string) {
-  const profile = await getUserProfile(psid);
-  if (profile?.first_name || profile?.last_name) {
-    await db.updateTable('customers').set({
-      first_name: profile.first_name ?? null,
-      last_name: profile.last_name ?? null,
-      display_name: [profile.first_name, profile.last_name].filter(Boolean).join(' ') || null,
-    }).where('id', '=', customerId).execute();
+  // Fire-and-forget from ingest (`void fetchAndSaveCustomerProfile(...)`) — a
+  // profile the Graph API can't serve (deleted account, missing permission)
+  // must never surface as an unhandled rejection.
+  try {
+    const profile = await getUserProfile(psid);
+    if (profile?.first_name || profile?.last_name) {
+      await db.updateTable('customers').set({
+        first_name: profile.first_name ?? null,
+        last_name: profile.last_name ?? null,
+        display_name: [profile.first_name, profile.last_name].filter(Boolean).join(' ') || null,
+      }).where('id', '=', customerId).execute();
+    }
+  } catch {
+    // Name stays null; the next inbound message retries.
   }
 }
 
