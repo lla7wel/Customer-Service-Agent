@@ -864,34 +864,11 @@ begin
       or p.active_campaign_id is distinct from v.active_campaign_id);
 end; $$;
 
--- =============================================================================
--- ROW LEVEL SECURITY  (v0: single admin role — any authenticated user = admin)
--- =============================================================================
--- service_role (scripts + server) bypasses RLS automatically. These policies
--- govern the browser/anon+auth client. Tighten per-role later without schema
--- changes.
-do $$
-declare t text;
-begin
-  foreach t in array array[
-    'admin_users','customers','customer_memory','conversations','messages','conversation_labels',
-    'escalations','products','product_images','product_variants','product_fingerprints',
-    'product_import_runs','image_match_corrections','orders','order_items',
-    'campaigns','campaign_products','campaign_assets','facebook_posts',
-    'ai_settings','ai_events','activity_logs','integration_logs'
-  ] loop
-    execute format('alter table %I enable row level security;', t);
-    execute format('drop policy if exists %I on %I;', t || '_admin_all', t);
-    execute format(
-      'create policy %I on %I for all to authenticated using (true) with check (true);',
-      t || '_admin_all', t);
-  end loop;
-end $$;
 
 -- =============================================================================
--- DONE. Seed prompts + bucket reminder live in database/seed/.
--- After running this file:
---   1) Create a Storage bucket named `eh-media` (public read) in Supabase.
---   2) Run database/seed/seed.sql for the default AI settings row.
---   3) Create your admin user (docs/SETUP.md) and insert into admin_users.
+-- DONE. Apply database/migrations/*.sql in order after this file.
+-- Fresh database bootstrap: run migrations/0013_self_hosted.sql FIRST (it
+-- creates the auth shim this file expects), then this file, then 0001..0013.
+-- Row-level security is intentionally absent: the app connects as the database
+-- owner and the admin session middleware is the gate (see 0013).
 -- =============================================================================
