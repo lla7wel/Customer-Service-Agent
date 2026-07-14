@@ -96,7 +96,10 @@ npm run import:products && npm run catalog:csv
 MEDIA_ROOT=/var/lib/docker/volumes/eh-platform_media/_data npm run upload:images
 chown -R 100:101 /var/lib/docker/volumes/eh-platform_media/_data   # app uid:gid
 npm run fingerprints && npm run embeddings
-npm run match:images   # refresh scraper↔CSV match suggestions for admin review
+# Scraper↔CSV match suggestions for admin review. The bare script is a dry
+# run; apply writes in batches (re-run until "remaining" hits 0):
+npm run match:images                              # dry run — review the report
+npx tsx catalog-image-match.ts --apply --yes      # write suggestions
 npm run validate
 ```
 
