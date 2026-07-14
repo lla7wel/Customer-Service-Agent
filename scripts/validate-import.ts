@@ -1,6 +1,6 @@
 /**
  * Dry-run validator. Reads the scraper output and reports exactly what WOULD be
- * imported. Writes NOTHING (neither to the scraper nor to Supabase). Safe to run
+ * imported. Writes NOTHING (neither to the scraper nor to the database). Safe to run
  * anytime. Exit code is non-zero if the output is missing/invalid.
  */
 import { readScraperProducts, productsJsonPath, resolveImageAbsPath, fileExists } from './_lib';
@@ -60,7 +60,7 @@ function main() {
 
   console.log('\nNext steps:');
   console.log('  npm run import:products   # upsert products + product_images rows');
-  console.log('  npm run upload:images     # upload local images to Supabase Storage');
+  console.log('  npm run upload:images     # copy local images into media storage');
   console.log('\n✓ Validation complete. No data was written.');
 }
 
