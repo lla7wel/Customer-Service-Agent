@@ -29,15 +29,16 @@ const FORCE = process.env.FORCE === '1' || process.env.FORCE === 'true';
 interface ImgRow { id: string; public_url: string | null; local_path: string | null; perceptual_hash: string | null }
 
 async function loadBytes(row: ImgRow): Promise<Buffer | null> {
+  // Local file first — same bytes as the served copy, no network round-trip.
+  if (row.local_path) {
+    const abs = resolveImageAbsPath(row.local_path);
+    if (fileExists(abs)) { try { return fs.readFileSync(abs); } catch { /* ignore */ } }
+  }
   if (row.public_url) {
     try {
       const res = await fetch(row.public_url);
       if (res.ok) return Buffer.from(await res.arrayBuffer());
-    } catch { /* fall through to local */ }
-  }
-  if (row.local_path) {
-    const abs = resolveImageAbsPath(row.local_path);
-    if (fileExists(abs)) { try { return fs.readFileSync(abs); } catch { /* ignore */ } }
+    } catch { /* ignore */ }
   }
   return null;
 }
