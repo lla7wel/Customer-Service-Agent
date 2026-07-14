@@ -1,8 +1,17 @@
-# Host crontab for the English Home Libya platform (crontab -e on the VPS).
-# Replace /srv/eh-platform with the actual checkout path and set CRON_SECRET.
+# Cron for the English Home Libya platform. Install as /etc/cron.d/eh-platform
+# (chmod 644). Requires the app port published on the host loopback — add a
+# docker-compose.override.yml next to docker-compose.yml:
+#
+#   services:
+#     app:
+#       ports:
+#         - "127.0.0.1:3000:3000"
+#
+# The secret is read from .env at run time: cron does not expand ${VARS}, and
+# the value should not be hardcoded into this file.
 
 # Campaign scheduler: refresh cached pricing + publish due scheduled posts.
-*/5 * * * * curl -fsS -m 30 -X POST -H "Authorization: Bearer ${CRON_SECRET}" http://127.0.0.1:3000/api/cron/campaign-scheduler >> /var/log/eh-cron.log 2>&1
+*/5 * * * * root curl -fsS -m 30 -X POST -H "Authorization: Bearer $(grep -m1 ^CRON_SECRET= /srv/eh-platform/.env | cut -d= -f2)" http://127.0.0.1:3000/api/cron/campaign-scheduler >> /var/log/eh-cron.log 2>&1
 
 # Nightly database backup (02:30).
-30 2 * * * /srv/eh-platform/deploy/backup.sh >> /var/log/eh-backup.log 2>&1
+30 2 * * * root /srv/eh-platform/deploy/backup.sh >> /var/log/eh-backup.log 2>&1
