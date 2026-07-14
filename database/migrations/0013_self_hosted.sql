@@ -5,6 +5,14 @@
 -- Supabase-era policies are therefore inert theater — drop them so the schema
 -- honestly reflects the trust model (the app's middleware is the gate).
 -- Idempotent; safe to re-run.
+--
+-- Fresh-database bootstrap: run this file FIRST (before schema.sql). schema.sql
+-- predates the migration off Supabase and declares admin_users with a foreign
+-- key to auth.users; the shim below gives it the minimal shape it expects. The
+-- FK is detached at the end of this file, so the shim carries no runtime role.
+
+create schema if not exists auth;
+create table if not exists auth.users (id uuid primary key);
 
 do $$
 declare
