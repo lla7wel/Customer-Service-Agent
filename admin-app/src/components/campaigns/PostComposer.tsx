@@ -123,7 +123,7 @@ export default function PostComposer({
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-fg">{ar ? 'منشور' : 'Post'} {i + 1}</span>
                   <Badge tone="neutral">{humanize(p.type)} · {p.asset_ids?.length ?? 0} {ar ? 'صورة' : 'img'}</Badge>
-                  <PostStatus status={p.status} ar={ar} />
+                  <PostStatus status={p.status} />
                 </div>
                 {p.status === 'published' ? (
                   p.fb_post_id ? (
@@ -167,7 +167,7 @@ function ModeCard({ active, onClick, disabled, icon, title, desc }: { active: bo
   );
 }
 
-function PostStatus({ status, ar }: { status: string; ar: boolean }) {
+function PostStatus({ status }: { status: string }) {
   const tone = status === 'published' ? 'good' : status === 'failed' ? 'bad' : status === 'scheduled' ? 'info' : status === 'publishing' ? 'warn' : 'neutral';
   return (
     <Badge tone={tone as any}>

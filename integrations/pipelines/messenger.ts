@@ -9,7 +9,7 @@
  *        - customer-specific MEMORY (recent products, name, facts, preferences),
  *        - the CONTROLLED TOOLS layer (code/barcode/url/text/vector lookups),
  *        - the CANONICAL image matcher for any image,
- *      then replies in Libyan Arabic with real catalog data (never invented).
+ *      then replies using current AI Control and verified catalog data.
  *
  * There is no legacy escalation workflow. For admin-required cases, the pipeline
  * sends one natural handoff reply, marks the conversation needs_human, and sets
@@ -23,18 +23,17 @@ import {
   isGeminiConfigured, generateContent, routerModel,
 } from '../gemini';
 import {
-  detectImageRequest, selectSendableImages, imageSendSituation, imageUnavailableSituation,
+  detectImageRequest, selectSendableImages, imageSendContext, imageUnavailableContext,
   type SendableSelection, MAX_AUTO_IMAGES,
 } from './product-image';
 import { loadBehaviorsWith, behaviorMetadata, composeBehaviorContext, type BehaviorMap } from '../ai-behaviors';
 import { messageBatchingEnabled, batchWindowMs } from '../flags';
 import { matchCustomerImage } from './image-match';
 import { resolveProductsFromText } from './product-resolve';
-import { composeCustomerReply, situationNote } from './compose-reply';
+import { composeCustomerReply } from './compose-reply';
 import { decideAgentAction, isProductQuestion } from './agent-policy';
 import {
   adminRequiredReason,
-  adminRequiredSituation,
   decideImageContextFollowUp,
   createLastImageContext,
   isAdminRequiredText,
@@ -49,6 +48,7 @@ import {
   type ProductCandidate, type RecentProduct,
 } from '../tools';
 import { productSelect, activePriced } from '../tools/products';
+import { compilePrompt } from '../prompt-compiler';
 
 /** jsonb columns need explicit JSON encoding — node-pg would encode a JS array
  *  as a Postgres array literal, not JSON. */
@@ -225,7 +225,7 @@ export async function runConversationTurn(db: Kysely<DB>, conversationId: string
 
   // Persist customer memory after the turn (best-effort).
   if (convo.customer_id) {
-    await updateMemoryAfterTurn(db, convo.customer_id, cust, resolved, conversationId, text);
+    await updateMemoryAfterTurn(db, convo.customer_id, cust, resolved, conversationId, text, behaviors);
   }
 }
 
@@ -247,7 +247,7 @@ async function handleImageTurn(
   const behavior = composeBehaviorContext(behaviors, 'image_matching');
   const result = await matchCustomerImage(db, {
     imageUrl, extraText, memoryContext,
-    behaviorSystemPrompt: behavior.systemPrompt,
+    behaviors,
     baseDiagnostics: behaviorMetadata(behavior, { workflow: 'messenger_image' }),
     searchLimit: 50,
   });
@@ -264,24 +264,23 @@ async function handleImageTurn(
   if (messageId) await updateMessageMeta(db, messageId, diagnostics);
 
   // Gemini writes the customer reply from the visual matches (no option template).
-  const replyBehavior = composeBehaviorContext(behaviors, 'messenger');
   const history = await loadHistory(db, conversationId, messageId);
   // If the customer also asked to SEE photos, attach images of THIS turn's
   // matches only (never fall back to older products on a fresh, unmatched photo).
   const imageSel = detectImageRequest(extraText) ? selectSendableImages(result.candidates, MAX_AUTO_IMAGES) : null;
   const sendImages = imageSel?.images ?? [];
-  const baseSituation = result.candidates.length
-    ? 'The customer sent a photo of a product. The catalog results are the closest visual matches. Present them naturally in Libyan Arabic (at most 5) and help them confirm which one they mean. Use ONLY these prices; if a price is missing, say it will be confirmed. Do not claim certainty you do not have.'
-    : 'The customer sent a photo but no product matched it confidently. Ask ONE short, friendly clarifying question to narrow it down (what the item is, its colour or use). Do not guess products.';
-  const situation = sendImages.length
-    ? `${baseSituation} ${imageSendSituation({ count: sendImages.length, grouped: imageSel!.grouped, more: imageSel!.more })}`
-    : baseSituation;
+  const turnState: Record<string, unknown> = {
+    flow: 'image_match', outcome: result.outcome,
+    action: result.candidates.length ? 'present_candidates_and_confirm' : 'clarify_product',
+    ...(sendImages.length ? imageSendContext({ count: sendImages.length, grouped: imageSel!.grouped, more: imageSel!.more }) : {}),
+  };
   const composed = await composeCustomerReply(db, {
-    systemPrompt: replyBehavior.systemPrompt,
+    behaviors,
     history,
     message: extraText || '',
     candidates: result.candidates,
-    contextNote: situationNote(memoryContext, situation),
+    memoryContext,
+    runtimeState: turnState,
   });
   const delivery = await deliverAndStore(db, conversationId, psid, composed.text, behaviorMetadata(behavior, {
     workflow: 'messenger_image',
@@ -342,17 +341,18 @@ async function handleImageFollowUpTurn(
   // Attach photos if the follow-up asked to SEE them ("نبي نشوفهم", "وريني الألوان").
   const imagePlan = await resolveTurnImages(db, conversationId, messageId, detectImageRequest(text), products);
   const sendImages = imagePlan.selection?.images ?? [];
-  const situation = imagePlan.selection
-    ? `${decision.situation} ${imageSendSituation({ count: imagePlan.selection.images.length, grouped: imagePlan.selection.grouped, more: imagePlan.selection.more })}`
-    : imagePlan.noImage
-      ? `${decision.situation} ${imageUnavailableSituation()}`
-      : decision.situation;
+  const followupState = {
+    ...decision.runtimeState,
+    ...(imagePlan.selection ? imageSendContext({ count: imagePlan.selection.images.length, grouped: imagePlan.selection.grouped, more: imagePlan.selection.more }) : {}),
+    ...(imagePlan.noImage ? imageUnavailableContext() : {}),
+  };
   const composed = await composeCustomerReply(db, {
-    systemPrompt: behavior.systemPrompt,
+    behaviors,
     history,
     message: text || 'سلام',
     candidates: products,
-    contextNote: situationNote(memoryContext, situation),
+    memoryContext,
+    runtimeState: followupState,
   });
   const delivery = await deliverAndStore(db, conversationId, psid, composed.text, behaviorMetadata(behavior, {
     workflow: 'messenger_image_followup',
@@ -383,16 +383,17 @@ async function handleTextTurn(
 ): Promise<ProductCandidate[]> {
   const behavior = composeBehaviorContext(behaviors, 'messenger');
 
-  // Admin-required (order/refund/exchange/complaint/payment/delivery): Gemini
-  // writes a warm handoff in its own words, then we pause for a human.
+  // Admin-required cases use the handoff task, then pause for a human.
   if (isAdminRequiredText(text)) {
     const reason = adminRequiredReason(text);
     const history = await loadHistory(db, conversationId, messageId);
     const composed = await composeCustomerReply(db, {
-      systemPrompt: behavior.systemPrompt,
+      behaviors,
+      task: 'handoff_reply',
       history,
       message: text,
-      contextNote: situationNote(memoryContext, adminRequiredSituation(reason)),
+      memoryContext,
+      runtimeState: { flow: 'human_handoff', reason },
     });
     const delivery = await deliverAndStore(db, conversationId, psid, composed.text, behaviorMetadata(behavior, {
       workflow: 'messenger_admin_followup',
@@ -434,19 +435,21 @@ async function handleTextTurn(
   // This is the same path the admin "AI suggest" button uses — no robotic
   // numbered-option template.
   const history = await loadHistory(db, conversationId, messageId);
-  const situation = imagePlan.selection
-    ? imageSendSituation({ count: imagePlan.selection.images.length, grouped: imagePlan.selection.grouped, more: imagePlan.selection.more })
-    : imagePlan.noImage
-      ? imageUnavailableSituation()
-      : candidates.length
-        ? 'The customer is asking about products. Use ONLY the catalog results provided; show at most 5 options and help them choose. If a price is missing, say it will be confirmed — never invent it.'
-        : undefined;
+  const turnState = {
+    flow: 'customer_reply',
+    catalog_question: isCatalogQuestion,
+    candidate_count: candidates.length,
+    action: candidates.length ? 'answer_from_candidates' : 'answer_customer',
+    ...(imagePlan.selection ? imageSendContext({ count: imagePlan.selection.images.length, grouped: imagePlan.selection.grouped, more: imagePlan.selection.more }) : {}),
+    ...(imagePlan.noImage ? imageUnavailableContext() : {}),
+  };
   const composed = await composeCustomerReply(db, {
-    systemPrompt: behavior.systemPrompt,
+    behaviors,
     history,
     message: text || 'سلام',
     candidates: replyCandidates,
-    contextNote: situationNote(memoryContext, situation),
+    memoryContext,
+    runtimeState: turnState,
   });
   const delivery = await deliverAndStore(db, conversationId, psid, composed.text, behaviorMetadata(behavior, {
     workflow: 'messenger_text', model: composed.model, history_turns: history.length,
@@ -462,7 +465,7 @@ async function handleTextTurn(
 
 /** Update per-customer memory after a turn: recent products, contact facts, summary. */
 async function updateMemoryAfterTurn(
-  db: Kysely<DB>, customerId: string, cust: any, resolved: ProductCandidate[], conversationId: string, lastText: string,
+  db: Kysely<DB>, customerId: string, cust: any, resolved: ProductCandidate[], conversationId: string, lastText: string, behaviors: BehaviorMap,
 ): Promise<void> {
   const top = resolved[0];
   const addRecentProduct: RecentProduct | undefined = top
@@ -479,10 +482,10 @@ async function updateMemoryAfterTurn(
   try {
     const history = await loadHistory(db, conversationId, null, 14);
     if (history.length >= 2) {
-      const convo = history.map((h) => `${h.role === 'customer' ? 'Customer' : 'Assistant'}: ${h.text}`).join('\n');
+      const envelope = compilePrompt(behaviors, 'memory_summary', { conversation_history: history, latest_customer_message: lastText });
       const r = await generateContent(
-        `Summarize what we know about this customer for future replies in 1-2 short sentences (their needs, products discussed, any preferences). Conversation:\n${convo}`,
-        { model: routerModel(), temperature: 0.2, maxOutputTokens: 200 },
+        envelope.runtimeData,
+        { model: routerModel(), systemInstruction: envelope.effectiveSystemInstruction, temperature: envelope.generationSettings.temperature, maxOutputTokens: envelope.generationSettings.maxOutputTokens },
       );
       const summary = r.text?.trim();
       if (summary) await updateCustomerMemory(db, customerId, { summary });

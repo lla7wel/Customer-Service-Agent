@@ -37,8 +37,8 @@ export interface LastImageContext {
 
 export interface FollowUpDecision {
   candidates: ProductCandidate[];
-  /** Internal guidance for Gemini on what to say — never shown to the customer. */
-  situation: string;
+  /** Typed state for the prompt compiler; wording is owned by AI Control. */
+  runtimeState: Record<string, unknown>;
   replyStrategy: 'single_price' | 'single_order_collect' | 'reuse_previous_options' | 'ask_clarify';
   selectedProductId: string | null;
   needsHuman: boolean;
@@ -81,29 +81,6 @@ export function adminRequiredReason(text: string): string {
   if (/(الدفع|دفع|payment|pay)/i.test(t)) return 'payment_question';
   if (/(توصيل|delivery|شحن|وصل|وقت التوصيل|delivery fee|delivery time)/i.test(t)) return 'delivery_details_request';
   return 'admin_follow_up_required';
-}
-
-/**
- * Internal guidance (English, never shown to the customer) telling Gemini how to
- * phrase a warm handoff for cases that must go to a human. Gemini writes the
- * actual Libyan-Arabic message from this, so it never sounds like a fixed template.
- */
-export function adminRequiredSituation(reason: string): string {
-  switch (reason) {
-    case 'order_request':
-      return 'The customer wants to place an order. Acknowledge warmly and ask for their name, phone number and address so the team can complete it. Do not confirm totals, prices or delivery yourself.';
-    case 'refund_request':
-    case 'exchange_request':
-      return 'The customer is asking about a return or exchange. Reassure them warmly and tell them the team will check the details and follow up. Do not promise a specific outcome.';
-    case 'complaint':
-      return 'The customer has a complaint. Apologize sincerely and tell them the team will look into it and follow up. Do not be defensive.';
-    case 'payment_question':
-      return 'The customer is asking about payment. Tell them warmly the team will confirm the payment details and get back to them.';
-    case 'delivery_details_request':
-      return 'The customer is asking about delivery (time, fee or shipping). Tell them warmly the team will confirm the delivery details and follow up. Never invent times or fees.';
-    default:
-      return 'This message needs a human teammate. Reply warmly: acknowledge what they asked and tell them the team will follow up shortly. Do not promise specifics.';
-  }
 }
 
 export function extractOptionNumber(text: string): number | null {
@@ -183,15 +160,14 @@ export function normalizeLastImageContext(raw: unknown): LastImageContext | null
 /**
  * Decide how to follow up when the customer references an earlier photo (picks an
  * option, asks the price, or says they want it). Returns the structured decision
- * (which candidate, whether a human is needed) plus an internal `situation` note;
- * Gemini writes the actual Libyan-Arabic reply from that note + the candidates.
+ * (which candidate, whether a human is needed) plus typed runtime state.
  */
 export function decideImageContextFollowUp(context: LastImageContext, text: string): FollowUpDecision {
   const candidates = normalizeCandidates(context.candidates);
   if (!candidates.length) {
     return {
       candidates: [],
-      situation: 'The customer is following up about a photo they sent earlier, but there is no safe product match. Ask ONE short, friendly clarifying question to identify the item. Do not guess products.',
+      runtimeState: { flow: 'image_followup', result: 'no_safe_match', action: 'clarify_product' },
       replyStrategy: 'ask_clarify',
       selectedProductId: null,
       needsHuman: true,
@@ -204,7 +180,7 @@ export function decideImageContextFollowUp(context: LastImageContext, text: stri
   if (!selected) {
     return {
       candidates,
-      situation: 'The customer is choosing among the product options they saw from their earlier photo. Re-present these options naturally (at most 5) and help them pick the right one. Use ONLY the prices given; if one is missing, say it will be confirmed.',
+      runtimeState: { flow: 'image_followup', result: 'multiple_candidates', action: 'help_select' },
       replyStrategy: 'reuse_previous_options',
       selectedProductId: null,
       needsHuman: false,
@@ -216,7 +192,7 @@ export function decideImageContextFollowUp(context: LastImageContext, text: stri
   if (orderIntent) {
     return {
       candidates: [selected],
-      situation: `The customer wants to order this product. Confirm warmly and ask for their name, phone number and address so the team can complete the order.${missingPrice ? ' Its price is not available — say it will be confirmed; never invent it.' : ''}`,
+      runtimeState: { flow: 'image_followup', result: 'selected_product', intent: 'order', missing_price: missingPrice, required_contact_fields: ['name', 'phone', 'address'] },
       replyStrategy: 'single_order_collect',
       selectedProductId: selected.id,
       needsHuman: true,
@@ -227,7 +203,7 @@ export function decideImageContextFollowUp(context: LastImageContext, text: stri
   if (missingPrice) {
     return {
       candidates: [selected],
-      situation: 'The customer is asking about this specific product but its price is not available. Tell them warmly it will be confirmed shortly; never invent a price. Invite them to share their name, phone and address if they want it.',
+      runtimeState: { flow: 'image_followup', result: 'selected_product', intent: 'price', missing_price: true },
       replyStrategy: 'single_price',
       selectedProductId: selected.id,
       needsHuman: true,
@@ -237,7 +213,7 @@ export function decideImageContextFollowUp(context: LastImageContext, text: stri
 
   return {
     candidates: [selected],
-    situation: 'The customer is asking about this specific product. Give a short, natural answer using its real price, and invite them to share their name, phone and address if they want it.',
+    runtimeState: { flow: 'image_followup', result: 'selected_product', intent: 'price', missing_price: false },
     replyStrategy: 'single_price',
     selectedProductId: selected.id,
     needsHuman: false,

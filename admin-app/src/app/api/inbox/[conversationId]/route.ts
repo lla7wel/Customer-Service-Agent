@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { jsonArrayFrom } from 'kysely/helpers/postgres';
 import { getDb } from '@integrations/db/client';
 import { putObject } from '@integrations/storage';
-import { databaseStatus, metaStatus, geminiStatus } from '@integrations/status';
+import { databaseStatus, geminiStatus } from '@integrations/status';
 import { resolveProductsFromText } from '@integrations/pipelines/product-resolve';
 import { resolveProducts } from '@integrations/pipelines/resolver';
 import { composeCustomerReply } from '@integrations/pipelines/compose-reply';
@@ -253,9 +253,11 @@ export async function POST(req: NextRequest, props: { params: Promise<{ conversa
           if (up.ok) imageUrl = up.data.publicUrl;
         } catch { /* storage optional — matching still runs on bytes */ }
         const memory = convo?.customer_id ? await getCustomerMemory(db, convo.customer_id) : null;
+        const imageBehaviors = await loadBehaviors();
         const result = await resolveProducts(db, {
           imageBase64: base64, mimeType: mime, mode: 'admin', limit: 8,
           memoryContext: memory ? `customer memory present` : undefined,
+          behaviors: imageBehaviors,
         });
         // Record the uploaded image in the timeline (internal note).
         if (imageUrl) {
@@ -440,7 +442,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ conversa
           candidates = r?.hits ?? [];
         }
         const composed = await composeCustomerReply(db, {
-          systemPrompt: behavior.systemPrompt,
+          behaviors,
           history: history.slice(0, -1),
           message: lastText,
           candidates,

@@ -1,6 +1,6 @@
 import {
   ScrollText, User, Bot, Cog, MessageSquare, Package, Megaphone, Share2,
-  CornerDownRight, AlertTriangle, Database,
+  AlertTriangle, Database,
 } from 'lucide-react';
 import { PageHeader, Card, EmptyState, Badge } from '@/components/ui';
 import NotConnected from '@/components/NotConnected';

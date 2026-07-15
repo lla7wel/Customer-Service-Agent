@@ -1,10 +1,11 @@
 'use client';
+/* eslint-disable @next/next/no-img-element -- operator review needs original remote catalog media */
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   ImageOff, Check, X, Hash, Barcode, Tag, Loader2, Languages, ChevronLeft, ChevronRight, Sparkles,
-  RefreshCw, Images, AlertTriangle, Clock, RotateCcw, HelpCircle, ScanSearch, CheckCheck, Upload,
+  RefreshCw, AlertTriangle, Clock, RotateCcw, HelpCircle, ScanSearch, CheckCheck, Upload,
 } from 'lucide-react';
 import { Card, EmptyState } from '@/components/ui';
 
@@ -313,7 +314,6 @@ export default function CatalogMatch({ ar }: { ar: boolean }) {
                 <div className="flex items-center gap-3 sm:w-[48%]">
                   <div className="h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-surface2">
                     {r.suggestion.image ? (
-                      // eslint-disable-next-line @next/next/no-img-element
                       <img src={r.suggestion.image} alt="" className="h-full w-full object-cover" loading="lazy" />
                     ) : (
                       <div className="flex h-full items-center justify-center text-faint"><ImageOff size={18} /></div>

@@ -36,6 +36,8 @@ import {
   type ProductCandidate,
 } from '../tools';
 import { productSelect, activePriced, searchProductRows } from '../tools/products';
+import type { BehaviorMap } from '../ai-behaviors';
+import { compilePrompt } from '../prompt-compiler';
 
 /** Back-compat alias — the canonical candidate shape now lives in the tools layer. */
 export type ImageMatchCandidate = ProductCandidate;
@@ -55,7 +57,7 @@ export interface MatchCustomerImageOpts {
   extraText?: string;
   /** Internal customer-memory context (helps "the one I sent before"). */
   memoryContext?: string;
-  behaviorSystemPrompt?: string;
+  behaviors: BehaviorMap;
   baseDiagnostics?: Record<string, unknown>;
   searchLimit?: number;
 }
@@ -259,9 +261,14 @@ export async function matchCustomerImage(db: Kysely<DB>, opts: MatchCustomerImag
   // DEGRADE (keep matching on dHash/keyword/vector), never throw a 504.
   let desc: Awaited<ReturnType<typeof describeProductImage>>;
   try {
+    const visionPrompt = compilePrompt(opts.behaviors, 'vision_describe', {
+      customer_text: opts.extraText || null,
+      customer_memory_reference: opts.memoryContext || null,
+      requested_operation: 'extract searchable visual product attributes and visible code or barcode',
+    });
     desc = await describeProductImage({
       imageBase64: base64, mimeType, extraText: [opts.extraText, opts.memoryContext].filter(Boolean).join('\n'),
-      instructions: opts.behaviorSystemPrompt,
+      systemPrompt: visionPrompt.effectiveSystemInstruction,
     });
   } catch (e: any) {
     diagnostics.vision_describe_error = e?.timeout ? 'timeout' : (e?.message ?? 'error');
@@ -332,8 +339,12 @@ export async function matchCustomerImage(db: Kysely<DB>, opts: MatchCustomerImag
   const ctx: ProductContext[] = pool.map((p: any) => ({ id: p.id, name: customerProductName(p), category: p.category, price: p.active_price }));
   let ranked: Awaited<ReturnType<typeof matchProductFromImage>>;
   try {
+    const rankPrompt = compilePrompt(opts.behaviors, 'vision_rank', {
+      customer_text: opts.extraText || null,
+      allowed_candidate_ids: ctx.map((c) => c.id),
+    });
     ranked = await matchProductFromImage({
-      imageBase64: base64, mimeType, candidates: ctx, extraText: opts.extraText, instructions: opts.behaviorSystemPrompt,
+      imageBase64: base64, mimeType, candidates: ctx, extraText: opts.extraText, systemPrompt: rankPrompt.effectiveSystemInstruction,
     });
   } catch (e: any) {
     diagnostics.vision_rank_error = e?.timeout ? 'timeout' : (e?.message ?? 'error');
@@ -399,9 +410,10 @@ export async function matchCustomerImage(db: Kysely<DB>, opts: MatchCustomerImag
       .map(({ p, dl }) => ({ id: p.id, name: customerProductName(p), imageBase64: (dl as any).data, mimeType: (dl as any).mimeType ?? 'image/jpeg' }));
     if (items.length >= 1) {
       try {
+        const rankPrompt = compilePrompt(opts.behaviors, 'vision_rank', { customer_text: opts.extraText || null, allowed_candidate_ids: items.map((i) => i.id) });
         const vr = await rankProductsByImage({
           customerImageBase64: base64, customerMimeType: mimeType, candidates: items,
-          extraText: opts.extraText, instructions: opts.behaviorSystemPrompt,
+          extraText: opts.extraText, systemPrompt: rankPrompt.effectiveSystemInstruction,
         });
         if (vr.ok && vr.ranked.length) {
           const byId = new Map(vr.ranked.map((r) => [r.product_id, r] as const));
@@ -447,8 +459,9 @@ export async function matchCustomerImage(db: Kysely<DB>, opts: MatchCustomerImag
       if (dl.ok && dl.data) items.push({ id: c.id, name: c.name, imageBase64: dl.data, mimeType: dl.mimeType || 'image/jpeg' });
     }
     if (items.length >= 2) {
+      const rankPrompt = compilePrompt(opts.behaviors, 'vision_rank', { customer_text: opts.extraText || null, allowed_candidate_ids: items.map((i) => i.id) });
       const vr = await rankProductsByImage({
-        customerImageBase64: base64, customerMimeType: mimeType, candidates: items, extraText: opts.extraText, instructions: opts.behaviorSystemPrompt,
+        customerImageBase64: base64, customerMimeType: mimeType, candidates: items, extraText: opts.extraText, systemPrompt: rankPrompt.effectiveSystemInstruction,
       });
       if (vr.ok && vr.ranked.length) {
         const byId = new Map(vr.ranked.map((r) => [r.product_id, r] as const));

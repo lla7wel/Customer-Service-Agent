@@ -51,13 +51,14 @@ docker compose up -d --build
 
 ## 3. Database schema
 
-Bootstrap order matters on a fresh database: `0013_self_hosted.sql` first (it
-creates the `auth` shim that `schema.sql` still expects), then `schema.sql`,
-then every migration in order (0013 is idempotent and re-runs harmlessly).
+Bootstrap order matters on a fresh database: `bootstrap.sql` creates the small
+compatibility shim needed by the historical baseline, then `schema.sql`, then
+every migration in order through 0014. Migration 0013 removes the historical
+RLS/policies; the live app uses jose session auth and direct PostgreSQL.
 
 ```bash
 cd /srv/eh-platform
-docker compose exec -T postgres psql -U eh -d eh_system -v ON_ERROR_STOP=1 < database/migrations/0013_self_hosted.sql
+docker compose exec -T postgres psql -U eh -d eh_system -v ON_ERROR_STOP=1 < database/bootstrap.sql
 docker compose exec -T postgres psql -U eh -d eh_system -v ON_ERROR_STOP=1 < database/schema.sql
 for f in database/migrations/0*.sql; do
   docker compose exec -T postgres psql -U eh -d eh_system -v ON_ERROR_STOP=1 < "$f"

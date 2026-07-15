@@ -1,128 +1,76 @@
 # Architecture
 
-## 1. System overview
+## Runtime
+
+The production stack is PostgreSQL 16, a Next.js 16 standalone app, and Caddy on one Docker Compose VPS. Caddy terminates HTTPS for `app.ehlibya.com` and serves persisted media from `media.ehlibya.com`. Gemini and Meta Graph are the only external runtime APIs.
 
 ![Architecture](diagrams/architecture.svg)
 
-```
-                      ┌──────────────────────────────────┐
-   Admin browser ────▶│  Next.js admin-app (App Router)  │
-   (AR/EN, RTL)       │  • dashboard UI pages            │
-                      │  • API routes (webhooks, AI)     │
-                      └──────────────┬───────────────────┘
-                                     │ server-only
-               ┌─────────────────────┼──────────────────────┐
-               ▼                     ▼                      ▼
-       ┌──────────────┐     ┌──────────────┐     ┌──────────────────┐
-       │  PostgreSQL  │     │   Gemini     │     │   Meta Graph API │
-       │  (Kysely) +  │     │  chat, tools,│     │  Messenger DMs + │
-       │  media on    │     │  vision,     │     │  story replies + │
-       │  disk (Caddy)│     │  embeddings, │     │  page posts      │
-       └──────────────┘     │  image gen   │     └──────────────────┘
-               ▲            └──────────────┘
-               │ read-only import (scripts only, never deployed)
-       ┌───────┴──────────────────────────┐
-       │  ../english-home-tr-scraper      │  ← SEPARATE project. Never touched.
-       │  data/output/*.json, data/images │
-       └──────────────────────────────────┘
+## AI instruction boundary
+
+`ai_behaviors` is the source of truth for editable AI behavior. Every model task follows one path:
+
+```text
+ai_behaviors rows
+  -> compilePrompt(typed task, structured runtime facts)
+     -> immutable execution/safety policy
+     -> exact applicable AI Control text (word-for-word)
+     -> stable JSON runtime data
+     -> tool policy and response schema
+     -> trace hash
+  -> provider adapter
+  -> Gemini
 ```
 
-## 2. Folder ownership
+`integrations/prompt-compiler.ts` owns task applicability and deterministic section ordering. Provider adapters own only Gemini formatting, modalities, model routing, timeouts, fallback, tools, and parsing. They must not append brand, language, tone, recommendation, handoff, or creative-direction prose.
 
-| Path | Owns |
-|------|------|
-| `admin-app/` | Next.js app: UI pages, API route handlers, middleware. Nothing here calls vendor SDKs directly. |
-| `integrations/` | Framework-agnostic runtime layer: database (Kysely), Gemini, Meta, media storage, Messenger pipeline, image matching, campaign pipeline, product tools, AI behaviors. Imported by the app and the local scripts. |
-| `database/` | Postgres schema, ordered migrations (0001–0013), bootstrap + cutover helpers. |
-| `scripts/` | **Local-only** catalog import tools (`catalog:csv`, `import:products`, `upload:images`, `embeddings`). Never imported by the deployed app. |
-| `deploy/` | Docker/Caddy/cron/backup configuration + the VPS runbook. |
-| `docs/` | All documentation. |
+Missing required AI Control rows, or enabled required rows with no content, raise `PromptConfigurationError`. Disabled rows are intentionally excluded. There is no hidden prose fallback.
 
-## 3. Runtime flow
+Typed tasks are `customer_reply`, `product_recommendation`, `handoff_reply`, `vision_describe`, `vision_rank`, `memory_summary`, `campaign_caption`, `campaign_image`, and `campaign_image_verify`. AI Control preview calls the same compiler as runtime and never includes customer data.
 
-**Inbound Messenger message:**
-```
-POST /api/meta/webhook
-  → verifyWebhookSignature() (HMAC-SHA256)
-  → processMessengerEvents()
-  → ingestInbound() (upsert customer + conversation, dedupe by external_id)
-  → [batching] runMessageBatchDebounce() — waits for burst to settle
-  → runConversationTurn()
-      → getCustomerMemory()
-      → decideAgentAction() → image_turn | text_turn
-      → handleImageTurn() / handleTextTurn()
-      → composeCustomerReply() (Gemini, temp 0.7, with product tools)
-      → deliverAndStore() — supersede check → Meta send → store message
-      → updateMemoryAfterTurn()
+## Core flows
+
+Messenger:
+
+```text
+signed Meta webhook -> idempotent ingest -> burst debounce -> deterministic turn routing
+-> catalog/image resolution -> compiled reply -> read-only product tools
+-> supersede + ai_enabled + sanitizer gates -> Meta delivery -> memory update
 ```
 
-**Admin page load:** Next.js server component queries Postgres through Kysely. The middleware session gate (jose HS256 cookie) enforces that the admin is authenticated before any server component or API handler runs.
+Campaign creative:
 
-**Admin action (e.g. manual reply):** Client component → `fetch /api/inbox/[id]` → Kysely write → Meta send (for outbound messages).
+```text
+campaign variables + source product + current AI Control
+-> shared campaign creative pipeline -> strongest image model/fallback chain
+-> source/generated vision review + text-status review -> optional fidelity retry
+-> unapproved review asset -> explicit human approval -> publish/schedule
+```
 
-## 4. What is production runtime
+Playground uses the same reply compiler, image matcher, campaign creative pipeline, model router, tools, and response parsers. It uses simulation data and never delivers a Messenger message.
 
-These run on every request / Messenger event:
-- `admin-app/` (Docker on the VPS, behind Caddy)
-- `integrations/pipelines/` — Messenger, image-match, compose-reply, product-resolve, context-followup, agent-policy
-- `integrations/gemini/`, `integrations/meta/`, `integrations/tools/`
-- `integrations/ai-behaviors.ts`, `integrations/flags.ts`, `integrations/product-locks.ts`
+## Deterministic invariants
 
-## 5. What is local/offline only
+Code, SQL, and tool contracts continue to enforce authentication, valid product IDs, `active_price` truth, catalog eligibility, read-only AI tools, webhook signatures, delivery race guards, output schemas, confidence thresholds, file limits, timeouts, and human approval. These are not editable prompts.
 
-Never deployed; run manually on a developer's machine:
-- `scripts/` — all catalog import tools
-- `../english-home-tr-scraper/` — separate project, this repo never touches it
+Vision tasks receive only `image_matching` plus optional advanced task instructions. Customer-service, campaign styling, language, and memory prose are excluded from vision extraction/ranking.
 
-## 6. Critical files — do not edit without a full plan
+## Folder ownership
 
-| File | Why |
-|------|-----|
-| `integrations/pipelines/messenger.ts` | Entire Messenger agent loop; every inbound customer message flows through it |
-| `integrations/pipelines/image-match.ts` | Canonical image→product matcher; both live pipeline and Playground call it |
-| `integrations/pipelines/compose-reply.ts` | Single canonical customer-reply path via `composeCustomerReply` |
-| `integrations/pipelines/product-resolve.ts` | Text/URL→catalog resolver used in every product-question reply |
-| `integrations/pipelines/agent-policy.ts` | Decides image turn vs. text turn — pure logic, high impact |
-| `integrations/tools/` | Controlled DB tools — the AI's only catalog access |
-| `integrations/gemini/index.ts` | All AI functions including `chatReplyWithTools`, `embedText` |
-| `integrations/gemini/client.ts` | Low-level Gemini HTTP client |
-| `integrations/meta/index.ts` | All Meta Graph API calls; a bug here can corrupt sends or fail webhook verification |
-| `integrations/ai-behaviors.ts` | Behavior loader + prompt composer used by all pipelines |
-| `integrations/product-locks.ts` | Admin-lock enforcement; a bug silently lets imports overwrite admin decisions |
-| `admin-app/src/middleware.ts` | Auth gate — the security boundary for all admin routes |
-| `admin-app/src/app/api/meta/webhook/route.ts` | Canonical webhook entry; changing signature verification drops messages |
-| `database/migrations/*.sql` | Applied migrations — do not modify a migration that has already been run |
+| Path | Responsibility |
+|---|---|
+| `admin-app/` | Authenticated UI and HTTP routes |
+| `integrations/prompt-compiler.ts` | Canonical provider-neutral prompt contract |
+| `integrations/pipelines/` | Messenger, matching, reply, and campaign workflows |
+| `integrations/gemini/` | Provider formatting, model routing, fallback, parsing |
+| `integrations/tools/` | Authorized read-only catalog tools |
+| `integrations/db/` | Kysely/PostgreSQL access and generated types |
+| `database/` | Fresh schema and forward-only migrations |
+| `deploy/` | Caddy, backup, and VPS runbooks |
+| `scripts/` | Offline catalog maintenance and regression tests |
 
-## 7. High-risk files — edit carefully, test end-to-end before deploying
+## Security and operations
 
-| File | Risk |
-|------|------|
-| `admin-app/src/app/api/products/[productId]/price/route.ts` | Activates products into the live catalog; wrong logic makes unready products customer-visible |
-| `admin-app/src/app/api/campaigns/[campaignId]/route.ts` | Campaign publish; calls Meta Graph API |
-| `admin-app/src/app/api/cron/campaign-scheduler/route.ts` | Pricing refresh + auto-publish; has auth check — do not remove it |
-| `integrations/db/client.ts` | The database handle — never import into a client component |
-| `integrations/util/customer-text.ts` | Outbound safety sanitizer; weakening it leaks system text to customers |
+The jose session middleware protects admin pages and APIs. Only auth, health, Meta webhook, and the bearer-protected scheduler have public exceptions. Meta POSTs require `X-Hub-Signature-256`; cron requires `CRON_SECRET`. PostgreSQL is private to Compose. Secrets are environment-only.
 
-## 8. Security invariants
-
-These must not be changed:
-- `DATABASE_URL` and `SESSION_SECRET` must never have a `NEXT_PUBLIC_` prefix and must never reach the browser.
-- `admin-app/src/middleware.ts` gates all `/dashboard/*` and `/api/*` routes (except `/api/meta/webhook`, `/api/health`, `/api/cron/campaign-scheduler`, `/login`). This is the only security boundary — RLS is not relied on for admin-app security.
-- The Meta webhook verifies `X-Hub-Signature-256` on every POST. Do not weaken this.
-- The cron route verifies `CRON_SECRET`. Do not remove this check.
-
-## 9. The "not connected" contract
-
-`integrationStatus()` reads env and returns `{ configured: boolean, missing: string[] }` per integration. Server endpoints return `503 integration_not_configured` when something is missing. No code path substitutes fake data for a missing integration.
-
-## 10. Removed features (do not reintroduce)
-
-| Removed | Migration / Pass |
-|---------|-----------------|
-| Orders module (`/orders`, order-draft inbox actions, `orders`/`order_items` tables) | 0012 |
-| Catalog Sync (`/api/catalog-sync`, `lib/sync/runner.ts`, Sync tab in catalog review) | 0012 / cleanup pass |
-| Facebook comments workflow + `comment_reply_rules` | 0010 / 0012 |
-| Hard-coded Arabic reply templates | AI quality pass |
-| Random product fallback in image matching | AI quality pass |
-| `escalations`, `product_variants`, `ai_settings` tables | 0012 |
-| Legacy `extractOrderDraft` from Gemini | cleanup pass |
+Applied migrations are immutable. Deployments must be built and tested from Git, backed up before migration, and verified through `/api/health`, container status, logs, auth gates, webhook challenge, catalog counts, and restart persistence.

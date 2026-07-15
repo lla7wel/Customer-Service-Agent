@@ -33,8 +33,8 @@
 
   <rect x="30" y="354" width="270" height="72" rx="12" class="step"/>
   <text x="48" y="378" class="t">4 · Context load</text>
-  <text x="48" y="396" class="s">live-editable AI behaviors (DB prompts)</text>
-  <text x="48" y="411" class="s">+ per-customer memory</text>
+  <text x="48" y="396" class="s">current AI Control + customer memory</text>
+  <text x="48" y="411" class="s">+ verified runtime facts (kept separate)</text>
 
   <!-- branch -->
   <rect x="360" y="90" width="270" height="100" rx="12" class="hot"/>
@@ -50,9 +50,9 @@
   <text x="378" y="277" class="s">order/refund → warm human handoff</text>
 
   <rect x="360" y="322" width="270" height="86" rx="12" class="hot"/>
-  <text x="378" y="346" class="t">6 · Compose (Gemini)</text>
-  <text x="378" y="364" class="s">function-calling over read-only catalog tools</text>
-  <text x="378" y="379" class="s">(≤3 rounds) · replies in Libyan Arabic ·</text>
+  <text x="378" y="346" class="t">6 · Compile + compose</text>
+  <text x="378" y="364" class="s">immutable policy + exact applicable AI Control</text>
+  <text x="378" y="379" class="s">+ runtime JSON + read-only catalog tools</text>
   <text x="378" y="394" class="s">prices only from active_price — never invented</text>
 
   <rect x="690" y="90" width="240" height="318" rx="12" class="hot"/>
@@ -74,7 +74,7 @@
 
   <rect x="360" y="450" width="270" height="58" rx="12" class="step"/>
   <text x="378" y="474" class="t">8 · Memory update</text>
-  <text x="378" y="492" class="s">recent products + rolling summary (cheap model)</text>
+  <text x="378" y="492" class="s">recent products + compiled memory-summary task</text>
 
   <rect x="690" y="450" width="240" height="58" rx="12" class="step"/>
   <text x="708" y="474" class="t">Learning loop</text>

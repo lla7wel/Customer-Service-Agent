@@ -11,8 +11,8 @@ export const runtime = 'nodejs';
 
 const FIELDS = [
   'name', 'type', 'discount_percent', 'starts_at', 'ends_at', 'priority',
-  'caption_tone', 'design_prompt', 'caption_prompt',
   'publish_mode', 'scheduled_for', 'auto_publish',
+  'objective', 'image_text', 'aspect_ratio', 'target_channel', 'generated_caption',
 ];
 
 /** Create a draft campaign. */

@@ -136,8 +136,7 @@ test('order follow-up after one clear image product collects details and needs h
   assert.equal(d.selectedProductId, 'p1');
   assert.equal(d.needsHuman, true);
   assert.equal(d.needsHumanReason, 'order_request');
-  // The internal situation note asks for contact details (Gemini writes the reply).
-  assert.ok(/name|phone|address/i.test(d.situation));
+  assert.deepEqual(d.runtimeState.required_contact_fields, ['name', 'phone', 'address']);
 });
 
 console.log('product image sending');

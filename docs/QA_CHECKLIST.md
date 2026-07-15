@@ -143,6 +143,16 @@ Repeat with a ~12-second delay (after image turn starts Gemini but before it del
 - [ ] Enter the same product question as in test 5.
 - [ ] Reply matches the style and content of the live auto-reply.
 - [ ] Debug panel shows tool calls, candidates with confidence scores, memory used.
+- [ ] Debug panel identifies task, model, applicable AI Control sections, prompt trace and production-path parity.
+
+## 12b. AI Control compiler
+
+- [ ] Every behavior section and every prompt/rules/memory field is visible.
+- [ ] Save a harmless punctuation-only test change; reload and confirm exact text.
+- [ ] Preview effective instructions; confirm edited text and contributor appear word-for-word.
+- [ ] Run the applicable Playground task and confirm the same compiler provenance is reported.
+- [ ] Restore the test text exactly and save again.
+- [ ] Disable a non-critical test section and confirm it is excluded, then re-enable it.
 
 ---
 
@@ -166,10 +176,22 @@ Repeat with a ~12-second delay (after image turn starts Gemini but before it del
 
 ## 15. Campaign
 
-- [ ] Create a campaign draft, attach a product, generate a caption.
-- [ ] Caption is in Libyan Arabic.
+- [ ] Create a draft using internal name, objective, caption, image text and aspect/channel; no style/design prompt control is present.
+- [ ] Attach a source product and explicitly generate a caption if desired; manual caption remains unchanged otherwise.
+- [ ] Generate an image and confirm it is persisted on the media host as unapproved.
+- [ ] Confirm requested text, prompt trace, requested/actual model, fallback flag, product review and text review are visible.
+- [ ] Regenerate after a harmless master-prompt test change and confirm current AI Control is used, then restore it.
+- [ ] Review and approve manually; no verification status is presented as a guarantee.
 - [ ] Schedule/publish → campaign posts to the Facebook page.
 - [ ] Campaign status updates to `published`.
+
+## 15b. Persistence and operations
+
+- [ ] `docker compose restart app` returns healthy and saved AI/campaign state remains.
+- [ ] PostgreSQL is healthy and not published on a host port.
+- [ ] Catalog/product-image/fingerprint/embedding counts match the pre-deploy record.
+- [ ] Scheduler cron and nightly backup cron remain installed; latest backup passes `gzip -t`.
+- [ ] App logs contain no new critical errors after smoke testing.
 
 ---
 

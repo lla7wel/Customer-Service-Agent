@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Import the existing scraper's output into Supabase. Read-only on the scraper.",
+  "description": "Catalog maintenance, verification, enrichment and regression checks for self-hosted PostgreSQL.",
   "scripts": {
     "validate": "tsx validate-import.ts",
     "catalog:csv": "tsx import-csv-catalog.ts",

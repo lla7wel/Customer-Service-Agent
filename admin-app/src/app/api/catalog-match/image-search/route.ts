@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@integrations/db/client';
 import { databaseStatus, geminiStatus } from '@integrations/status';
 import { resolveProducts } from '@integrations/pipelines/resolver';
+import { loadBehaviors } from '@/lib/ai-behaviors';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -35,11 +36,13 @@ export async function POST(req: NextRequest) {
   const limit = Math.min(12, Math.max(1, parseInt(String(body?.limit ?? 8), 10) || 8));
 
   try {
+    const behaviors = await loadBehaviors();
     const result = await resolveProducts(db, {
       imageBase64: base64 || undefined,
       imageUrl: imageUrl || undefined,
       mimeType: mime,
       mode: 'admin',
+      behaviors,
       limit,
     });
     return NextResponse.json({
