@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable @next/next/no-img-element -- Messenger attachments are arbitrary public media URLs */
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Send, Sparkles, Search, Package, Bot, User, X, Plus, ScanSearch, ImageOff, CircleSlash, Check, ChevronDown, ChevronUp, AlertTriangle, Image as ImageIcon } from 'lucide-react';
@@ -391,7 +392,6 @@ function Thumb({ url }: { url: string | null }) {
   return (
     <span className="h-16 w-16 shrink-0 overflow-hidden rounded-md border border-line bg-surface2">
       {url && ok ? (
-        // eslint-disable-next-line @next/next/no-img-element
         <img src={url} alt="" className="h-full w-full object-cover" loading="lazy" onError={() => setOk(false)} />
       ) : (
         <span className="flex h-full flex-col items-center justify-center gap-1 text-faint"><ImageOff size={16} /><span className="text-[9px]">No image</span></span>
@@ -421,7 +421,6 @@ function Bubble({ m, ar }: { m: Msg; ar: boolean }) {
       {images.length > 0 && (
         <div className={`mb-1 flex max-w-full flex-wrap gap-1.5 ${customer ? 'justify-start' : 'justify-end'}`}>
           {images.map((a, i) => (
-            // eslint-disable-next-line @next/next/no-img-element
             <a key={i} href={a.url} target="_blank" rel="noreferrer">
               <img src={a.url} alt="" className="max-h-56 max-w-[260px] rounded-lg border border-line object-cover" loading="lazy" />
             </a>

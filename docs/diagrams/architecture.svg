@@ -56,7 +56,7 @@
   <rect x="558" y="200" width="156" height="72" rx="9" class="boxlight"/>
   <text x="570" y="222" fill="#e2e8f0" font-size="12" font-weight="600">Messenger pipeline</text>
   <text x="570" y="238" class="lbl">burst batching · supersede</text>
-  <text x="570" y="252" class="lbl">guard · Libyan-Arabic replies</text>
+  <text x="570" y="252" class="lbl">guard · catalog-grounded replies</text>
 
   <rect x="726" y="200" width="156" height="72" rx="9" class="boxlight"/>
   <text x="738" y="222" fill="#e2e8f0" font-size="12" font-weight="600">Image matcher</text>
@@ -64,19 +64,19 @@
   <text x="738" y="252" class="lbl">→ vision → vector re-rank</text>
 
   <rect x="558" y="284" width="156" height="70" rx="9" class="boxlight"/>
-  <text x="570" y="306" fill="#e2e8f0" font-size="12" font-weight="600">Gemini router</text>
-  <text x="570" y="322" class="lbl">per-task models</text>
-  <text x="570" y="336" class="lbl">rate-limit fallback chain</text>
+  <text x="570" y="306" fill="#e2e8f0" font-size="12" font-weight="600">Prompt compiler</text>
+  <text x="570" y="322" class="lbl">typed task · exact AI Control</text>
+  <text x="570" y="336" class="lbl">runtime JSON · trace · schema</text>
 
   <rect x="726" y="284" width="156" height="70" rx="9" class="boxlight"/>
   <text x="738" y="306" fill="#e2e8f0" font-size="12" font-weight="600">Campaign engine</text>
-  <text x="738" y="322" class="lbl">assets · captions · scheduler</text>
-  <text x="738" y="336" class="lbl">SQL pricing truth</text>
+  <text x="738" y="322" class="lbl">current master direction · fallback</text>
+  <text x="738" y="336" class="lbl">fidelity/text review · approval</text>
 
   <!-- Postgres -->
   <rect x="540" y="400" width="220" height="100" rx="12" class="box"/>
   <text x="558" y="428" class="t">PostgreSQL 16</text>
-  <text x="558" y="446" class="s">Kysely (typed SQL) · 23 tables</text>
+  <text x="558" y="446" class="s">Kysely (typed SQL) · AI Control</text>
   <text x="558" y="462" class="s">catalog · conversations · memory</text>
   <text x="558" y="478" class="s">JSONB embeddings · dHash prints</text>
 
@@ -103,7 +103,7 @@
   <path class="edged" d="M540 250 C 480 260, 300 260, 205 250"/>
   <text x="330" y="248" class="lbl">send replies · publish posts</text>
   <path class="edged" d="M636 284 C 600 330, 400 345, 205 345"/>
-  <text x="330" y="330" class="lbl">generateContent · embeddings</text>
+  <text x="330" y="330" class="lbl">text · vision · image generation · embeddings</text>
   <path class="edge" d="M200 442 C 240 442, 260 210, 310 200"/>
   <text x="212" y="425" class="lbl">HTTPS</text>
   <path class="edge" d="M660 370 L 660 400"/>

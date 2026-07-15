@@ -117,18 +117,26 @@ export interface AiEvents {
 }
 
 export interface CampaignAssets {
+  actual_model: string | null;
   approved: Generated<boolean>;
   campaign_id: string;
   caption: string | null;
   created_at: Generated<Timestamp>;
   id: Generated<string>;
   kind: CampaignAssetKind;
+  fallback_used: Generated<boolean>;
+  overlay_text_status: string | null;
   position: Generated<number>;
+  product_fidelity_status: string | null;
+  prompt_trace_id: string | null;
   product_id: string | null;
   public_url: string | null;
+  requested_model: string | null;
+  requested_overlay_text: string | null;
   source_asset_id: string | null;
   source_prompt: string | null;
   storage_path: string | null;
+  verification: Generated<Json>;
 }
 
 export interface CampaignProducts {
@@ -141,6 +149,7 @@ export interface CampaignProducts {
 }
 
 export interface Campaigns {
+  aspect_ratio: Generated<string>;
   auto_publish: Generated<boolean>;
   caption_prompt: string | null;
   caption_tone: string | null;
@@ -150,13 +159,16 @@ export interface Campaigns {
   discount_percent: Numeric | null;
   ends_at: Timestamp | null;
   generated_caption: string | null;
+  image_text: string | null;
   id: Generated<string>;
   name: string;
+  objective: string | null;
   priority: Generated<number>;
   publish_mode: Generated<string>;
   scheduled_for: Timestamp | null;
   starts_at: Timestamp | null;
   status: Generated<CampaignStatus>;
+  target_channel: Generated<string>;
   type: Generated<CampaignType>;
   updated_at: Generated<Timestamp>;
 }

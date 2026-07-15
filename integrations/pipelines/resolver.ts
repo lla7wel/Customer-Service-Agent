@@ -21,6 +21,7 @@ import type { DB } from '../db/types';
 import type { ProductCandidate } from '../tools';
 import { resolveProductsFromText } from './product-resolve';
 import { matchCustomerImage } from './image-match';
+import type { BehaviorMap } from '../ai-behaviors';
 
 export type ResolveMode = 'customer' | 'admin';
 
@@ -36,8 +37,7 @@ export interface ResolveInput {
   mode?: ResolveMode;
   /** Internal customer-memory note (helps "the one I sent before"). Admin/customer. */
   memoryContext?: string;
-  /** Admin-configured image-matching behavior prompt. */
-  behaviorSystemPrompt?: string;
+  behaviors?: BehaviorMap;
 }
 
 export interface ResolveOutput {
@@ -64,13 +64,14 @@ export async function resolveProducts(db: Kysely<DB>, input: ResolveInput): Prom
 
   // --- Image path -----------------------------------------------------------
   if (input.imageBase64 || input.imageUrl) {
+    if (!input.behaviors) throw new Error('AI Control behaviors are required for image resolution.');
     const r = await matchCustomerImage(db, {
       imageBase64: input.imageBase64 ?? undefined,
       imageUrl: input.imageUrl ?? undefined,
       mimeType: input.mimeType ?? undefined,
       extraText: input.text || undefined,
       memoryContext: input.memoryContext,
-      behaviorSystemPrompt: input.behaviorSystemPrompt,
+      behaviors: input.behaviors,
       searchLimit: Math.max(limit, 50),
     });
     return {

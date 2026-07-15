@@ -13,7 +13,8 @@ Gemini API and Meta's Graph API.
 
 ## What it does
 
-- **Answers Messenger DMs and story replies automatically** in Libyan dialect,
+- **Answers Messenger DMs and story replies automatically** using the exact
+  language and service behavior configured in AI Control,
   grounded in the real catalog — the model can call read-only product tools
   (code/barcode/URL/keyword/semantic lookup) but can never invent a price.
 - **Recognizes products from photos** with an 8-step hybrid matcher:
@@ -27,8 +28,8 @@ Gemini API and Meta's Graph API.
   human-handoff reply and pause the AI for that conversation.
 - **Admin command center**: inbox with AI pause/resume and suggested drafts,
   4,700-product catalog with image-match review queues, campaign builder with
-  AI captions and image editing, live-editable AI behavior prompts, and a
-  playground that runs the exact production pipeline.
+  AI captions and image editing, a sectioned AI Control prompt workbench, and a
+  playground that runs the production compiler and execution paths.
 
 ## Production hardening (the interesting bits)
 
@@ -52,11 +53,12 @@ Every guard in the pipeline exists because of a real incident:
 ├── integrations/     Framework-agnostic core, shared by app + scripts
 │   ├── db/           Kysely + pg (typed queries; codegen'd schema types)
 │   ├── gemini/       central model router — per-task models, fallback chains
+│   ├── prompt-compiler.ts typed AI Control compiler + prompt trace
 │   ├── meta/         Graph API client + webhook signature verification
 │   ├── pipelines/    messenger turn engine, hybrid image matcher, campaigns
 │   ├── tools/        the AI's ONLY database access (read-only, price-safe)
 │   └── storage/      media on disk, served by Caddy at media.<domain>
-├── database/         plain-SQL schema + 13 idempotent migrations
+├── database/         plain-SQL schema + 14 ordered migrations
 ├── scripts/          local catalog import/enrich CLIs (scraper → Postgres)
 ├── deploy/           Caddyfile, backup cron, VPS runbook
 └── docs/             architecture, operations, AI pipeline deep-dives
@@ -91,8 +93,11 @@ Companion repositories:
 - **One reply composer** — the live webhook, the inbox "suggest" button and
   the playground all call the same `composeCustomerReply()`, so what the admin
   tests is exactly what customers get.
-- **Arabic-first** — the UI is RTL-first with full AR/EN dictionaries; the
-  agent replies in Libyan dialect regardless of input language.
+- **AI Control is authoritative** — typed tasks compile immutable execution
+  policy, exact editable sections, structured runtime facts, tools/schema and a
+  trace hash. Provider adapters contain no hidden English Home behavior prose.
+- **Arabic-first UI** — the admin is RTL-first with AR/EN dictionaries;
+  customer and marketing language is configured in AI Control.
 
 ## Run it locally
 
@@ -118,7 +123,7 @@ runbook (domain, TLS, Meta webhook, backups, smoke tests).
 ```bash
 cd scripts
 npx tsx upgrade-tests.ts             # 34 pure-logic assertions (sanitizer, policy, hashing)
-npx tsx ai-control-behavior-test.ts  # behavior composition
+npx tsx ai-control-behavior-test.ts  # compiler, provenance, parity and prompt boundaries
 ```
 
 ## Documentation

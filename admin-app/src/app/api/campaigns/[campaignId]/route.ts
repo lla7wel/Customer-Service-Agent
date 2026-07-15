@@ -2,7 +2,7 @@
  * Per-campaign CRUD, AI generation, and publish actions.
  * GET = campaign detail; PATCH = update fields; DELETE = soft-archive.
  * POST /publish = push to Meta (calls publishCampaign in campaign pipeline).
- * POST /caption, /design, /image = Gemini AI generation endpoints.
+ * POST actions provide caption and image generation through shared pipelines.
  * Called by: CampaignBuilder, PostComposer, CaptionPanel components.
  * Must not: bypass the send gate or skip pricing refresh after publish.
  */
@@ -11,19 +11,20 @@ import { jsonObjectFrom } from 'kysely/helpers/postgres';
 import { getDb } from '@integrations/db/client';
 import { putObject, removeObject } from '@integrations/storage';
 import { databaseStatus, geminiStatus } from '@integrations/status';
-import { caption as genCaption, designPrompt as genDesignPrompt, editImage } from '@integrations/gemini';
+import { caption as genCaption } from '@integrations/gemini';
 import { prepareCampaignPosts, publishPost, publishCampaign } from '@integrations/pipelines/campaign';
-import { behaviorMetadata, composeBehaviorContext, loadBehaviors } from '@/lib/ai-behaviors';
-import { customerProductName } from '@integrations/util/product-display';
+import { loadBehaviors } from '@/lib/ai-behaviors';
+import { compilePrompt } from '@integrations/prompt-compiler';
+import { generateCampaignCreative } from '@integrations/pipelines/campaign-creative';
 
 export const runtime = 'nodejs';
 // Image generation can take time; allow headroom so the platform doesn't kill
 // the function mid-generation (the "takes forever and outputs nothing" bug).
 // One primary attempt (~25s cap) + a working fallback (~30s) fits comfortably.
-export const maxDuration = 90;
+export const maxDuration = 240;
 // Cap how many source images one request will edit so the request always
 // finishes inside maxDuration. The UI can call again for the rest.
-const MAX_EDITS_PER_REQUEST = 3;
+const MAX_EDITS_PER_REQUEST = 1;
 
 const MAX_SOURCE_BYTES = 20 * 1024 * 1024; // 20MB cap — never download huge files
 const SOURCE_FETCH_TIMEOUT_MS = 8_000;     // 8s — never hang on a slow source
@@ -52,6 +53,18 @@ async function uploadImageBytes(campaignId: string, base64: string, mime: string
   return { path: up.data.path, publicUrl: up.data.publicUrl };
 }
 
+async function campaignProducts(db: NonNullable<ReturnType<typeof getDb>>, campaignId: string) {
+  const rows = await db.selectFrom('campaign_products').innerJoin('products', 'products.id', 'campaign_products.product_id')
+    .select(['products.id', 'products.product_code', 'products.libyan_display_name', 'products.arabic_name', 'products.english_name', 'products.source_name', 'products.category'])
+    .where('campaign_products.campaign_id', '=', campaignId).limit(20).execute();
+  return rows.map((product: any) => ({
+    id: product.id,
+    product_code: product.product_code ?? null,
+    name: product.libyan_display_name || product.arabic_name || product.english_name || product.source_name || product.product_code,
+    category: product.category ?? null,
+  })).filter((product) => product.name);
+}
+
 /**
  * Campaign actions (JSON):
  *   generate_caption | attach_products{productIds} | detach_product{productId}
@@ -74,7 +87,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ campaign
   try {
     switch (action) {
       case 'update': {
-        const FIELDS = ['name', 'type', 'discount_percent', 'starts_at', 'ends_at', 'caption_tone', 'design_prompt', 'caption_prompt', 'auto_publish', 'generated_caption'];
+        const FIELDS = ['name', 'type', 'discount_percent', 'starts_at', 'ends_at', 'auto_publish', 'generated_caption', 'objective', 'image_text', 'aspect_ratio', 'target_channel'];
         const upd: Record<string, unknown> = {};
         for (const k of FIELDS) if (k in body) upd[k] = body[k];
         if (Object.keys(upd).length) await db.updateTable('campaigns').set(upd as any).where('id', '=', id).execute();
@@ -98,20 +111,22 @@ export async function POST(req: NextRequest, props: { params: Promise<{ campaign
           .execute();
         const products = cps.map((cp: any) => ({
           id: cp.product_id,
-          name: cp.products ? customerProductName(cp.products) : 'منتج من إنجلش هوم',
+          name: cp.products
+            ? cp.products.libyan_display_name || cp.products.arabic_name || cp.products.english_name || cp.products.source_name || cp.products.product_code
+            : null,
           price: cp.products?.active_price ?? null,
           category: cp.products?.category ?? null,
-        }));
+        })).filter((product) => product.name);
         const behaviors = await loadBehaviors();
-        const behavior = composeBehaviorContext(behaviors, 'campaign_caption');
+        const envelope = compilePrompt(behaviors, 'campaign_caption', {
+          campaign_objective: body.objective || campaign.objective || campaign.name,
+          verified_products: products,
+          verified_discount_percent: campaign.discount_percent,
+        });
         const result = await genCaption({
-          prompt: body.prompt || campaign.caption_prompt || `Campaign: ${campaign.name}`,
-          tone: campaign.caption_tone || undefined,
-          systemPrompt: campaign.caption_tone
-            ? `${behavior.systemPrompt}\n\n## Campaign Tone Override\n${campaign.caption_tone}`
-            : behavior.systemPrompt,
-          products,
-          discountPercent: campaign.discount_percent,
+          prompt: envelope.runtimeData,
+          systemPrompt: envelope.effectiveSystemInstruction,
+          temperature: envelope.generationSettings.temperature,
         });
         if (!result.ok) return NextResponse.json({ error: 'integration_not_configured', missing: result.missing }, { status: 503 });
         await db.updateTable('campaigns').set({ generated_caption: result.text }).where('id', '=', id).execute();
@@ -121,61 +136,17 @@ export async function POST(req: NextRequest, props: { params: Promise<{ campaign
           model: result.model,
           latency_ms: result.latencyMs,
           success: true,
-          prompt_summary: JSON.stringify(behaviorMetadata(behavior, {
+          prompt_summary: JSON.stringify({
             workflow: 'campaign_caption',
             campaign_id: id,
             products_count: products.length,
-          })),
+            prompt_trace_id: envelope.traceId,
+            behavior_keys: envelope.contributors.map((c) => c.behaviorKey),
+          }),
           output_summary: result.text.slice(0, 240),
         }).execute();
         await db.insertInto('activity_logs').values({ actor_type: 'ai', action: 'campaign_generated', entity_type: 'campaign', entity_id: id, summary: 'Caption generated' }).execute();
         return NextResponse.json({ ok: true, caption: result.text });
-      }
-
-      case 'generate_design_prompt': {
-        if (!geminiStatus().configured) return NextResponse.json({ error: 'integration_not_configured', missing: ['GEMINI_API_KEY'] }, { status: 503 });
-        const cps = await db
-          .selectFrom('campaign_products')
-          .select(['product_id'])
-          .select((eb) => [
-            jsonObjectFrom(
-              eb.selectFrom('products')
-                .select(['product_code', 'libyan_display_name', 'arabic_name', 'english_name', 'source_name', 'active_price', 'category', 'arabic_keywords'])
-                .whereRef('products.id', '=', 'campaign_products.product_id'),
-            ).as('products'),
-          ])
-          .where('campaign_id', '=', id)
-          .limit(20)
-          .execute();
-        const products = cps.map((cp: any) => ({
-          id: cp.product_id,
-          name: cp.products ? customerProductName(cp.products) : 'منتج من إنجلش هوم',
-          category: cp.products?.category ?? null,
-        }));
-        const behaviors = await loadBehaviors();
-        const behavior = composeBehaviorContext(behaviors, 'campaign_image');
-        const result = await genDesignPrompt({
-          brief: body.brief || campaign.design_prompt || `Promotional image for campaign: ${campaign.name}`,
-          systemPrompt: behavior.systemPrompt,
-          products,
-        });
-        if (!result.ok) return NextResponse.json({ error: 'integration_not_configured', missing: result.missing }, { status: 503 });
-        await db.updateTable('campaigns').set({ design_prompt: result.text }).where('id', '=', id).execute();
-        await db.insertInto('ai_events').values({
-          kind: 'image_edit',
-          related_id: id,
-          model: result.model,
-          latency_ms: result.latencyMs,
-          success: true,
-          prompt_summary: JSON.stringify(behaviorMetadata(behavior, {
-            workflow: 'campaign_design_prompt',
-            campaign_id: id,
-            products_count: products.length,
-          })),
-          output_summary: result.text.slice(0, 240),
-        }).execute();
-        await db.insertInto('activity_logs').values({ actor_type: 'ai', action: 'campaign_generated', entity_type: 'campaign', entity_id: id, summary: 'Design prompt generated' }).execute();
-        return NextResponse.json({ ok: true, design_prompt: result.text });
       }
 
       case 'attach_products': {
@@ -213,12 +184,14 @@ export async function POST(req: NextRequest, props: { params: Promise<{ campaign
 
       case 'generate_edits': {
         if (!geminiStatus().configured) return NextResponse.json({ error: 'integration_not_configured', missing: ['GEMINI_API_KEY'] }, { status: 503 });
-        const prompt = String(body.prompt || campaign.design_prompt || '').trim();
-        if (!prompt) return NextResponse.json({ error: 'missing_prompt' }, { status: 400 });
+        if (!campaign.objective?.trim()) return NextResponse.json({ error: 'campaign_objective_required' }, { status: 400 });
+        const behaviors = await loadBehaviors();
+        const products = await campaignProducts(db, id);
         const assetsAll = await db
-          .selectFrom('campaign_assets').select(['id', 'public_url', 'product_id', 'kind'])
+          .selectFrom('campaign_assets').select(['id', 'public_url', 'product_id', 'kind', 'source_asset_id'])
           .where('campaign_id', '=', id).where('public_url', 'is not', null).execute();
-        let sources = assetsAll.filter((a: any) => a.kind !== 'ai_edited_image' && a.kind !== 'final_post_image');
+        const completedSourceIds = new Set(assetsAll.filter((a) => a.kind === 'ai_edited_image' && a.source_asset_id).map((a) => a.source_asset_id));
+        let sources = assetsAll.filter((a: any) => a.kind !== 'ai_edited_image' && a.kind !== 'final_post_image' && !completedSourceIds.has(a.id));
         if (Array.isArray(body.assetIds) && body.assetIds.length) sources = sources.filter((a: any) => body.assetIds.includes(a.id));
         if (!sources.length) return NextResponse.json({ error: 'no_source_images' }, { status: 400 });
         // Process at most MAX_EDITS_PER_REQUEST so the request finishes within
@@ -245,20 +218,27 @@ export async function POST(req: NextRequest, props: { params: Promise<{ campaign
           try {
             const img = await fetchImageAsBase64((src as any).public_url);
             if (!img) throw new Error('source_download_failed');
-            const res = await editImage({ prompt, baseImageBase64: img.data, mimeType: img.mime });
-            if (!res.ok) throw new Error('gemini_not_configured');
+            const sourceProducts = (src as any).product_id ? products.filter((product) => product.id === (src as any).product_id) : products;
+            const res = await generateCampaignCreative({
+              behaviors, sourceImageBase64: img.data, sourceMimeType: img.mime,
+              objective: campaign.objective || '', caption: campaign.generated_caption || '', imageText: campaign.image_text || '',
+              aspectRatio: campaign.aspect_ratio || '1:1', targetChannel: campaign.target_channel || 'facebook_instagram', products: sourceProducts,
+            });
             modelsUsed.add(res.model);
             requestedModel = res.requestedModel;
             if (res.fallbackUsed) fallbackUsed = true;
-            const out = res.images?.[0];
-            if (!out) throw new Error('no_image_returned');
-            const up = await uploadImageBytes(id, out.data, out.mimeType);
+            const up = await uploadImageBytes(id, res.image.data, res.image.mimeType);
             const asset = await db.insertInto('campaign_assets').values({
               campaign_id: id, product_id: (src as any).product_id ?? null, kind: 'ai_edited_image',
-              storage_path: up.path, public_url: up.publicUrl, source_prompt: prompt,
+              storage_path: up.path, public_url: up.publicUrl, source_prompt: null,
               source_asset_id: (src as any).id, approved: false, position: pos++,
+              prompt_trace_id: res.promptTraceId, requested_overlay_text: campaign.image_text || null,
+              overlay_text_status: res.verification.overlay_text_status,
+              product_fidelity_status: res.verification.product_status,
+              verification: JSON.stringify({ ...res.verification, verification_model: res.verificationModel, regenerated_for_fidelity: res.regeneratedForFidelity }),
+              requested_model: res.requestedModel, actual_model: res.model, fallback_used: res.fallbackUsed,
             }).returning(['id', 'public_url', 'source_asset_id']).executeTakeFirstOrThrow();
-            created.push(asset);
+            created.push({ ...asset, verification: res.verification, promptTraceId: res.promptTraceId });
           } catch (e: any) { errors.push(`${(src as any).id}: ${e.message}`); }
         }
         if (created.length === 0) {
@@ -293,7 +273,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ campaign
 
       case 'regenerate_edit': {
         if (!geminiStatus().configured) return NextResponse.json({ error: 'integration_not_configured', missing: ['GEMINI_API_KEY'] }, { status: 503 });
-        const a = await db.selectFrom('campaign_assets').select(['id', 'source_asset_id', 'source_prompt', 'product_id']).where('id', '=', body.assetId).where('campaign_id', '=', id).executeTakeFirst();
+        const a = await db.selectFrom('campaign_assets').select(['id', 'source_asset_id', 'product_id']).where('id', '=', body.assetId).where('campaign_id', '=', id).executeTakeFirst();
         if (!a) return NextResponse.json({ error: 'not_found' }, { status: 404 });
         let srcUrl: string | null = null;
         if ((a as any).source_asset_id) {
@@ -303,19 +283,13 @@ export async function POST(req: NextRequest, props: { params: Promise<{ campaign
         if (!srcUrl) return NextResponse.json({ error: 'no_source' }, { status: 400 });
         const img = await fetchImageAsBase64(srcUrl);
         if (!img) return NextResponse.json({ error: 'source_download_failed' }, { status: 502 });
-        const res = await editImage({ prompt: String(body.prompt || (a as any).source_prompt || ''), baseImageBase64: img.data, mimeType: img.mime });
-        if (!res.ok) return NextResponse.json({ error: 'integration_not_configured', missing: res.missing }, { status: 503 });
-        const out = res.images?.[0];
-        if (!out) {
-          await db.insertInto('ai_events').values({ kind: 'image_edit', related_id: id, success: false, error: 'Gemini returned no image output during regeneration.' }).execute();
-          return NextResponse.json({
-            error: 'no_image_returned',
-            hint: 'Check that GEMINI_IMAGE_MODEL is an image-generation/edit model enabled for this Gemini API key.',
-          }, { status: 502 });
-        }
-        const up = await uploadImageBytes(id, out.data, out.mimeType);
-        await db.updateTable('campaign_assets').set({ storage_path: up.path, public_url: up.publicUrl, approved: false, source_prompt: String(body.prompt || (a as any).source_prompt || '') }).where('id', '=', (a as any).id).execute();
-        return NextResponse.json({ ok: true, public_url: up.publicUrl, model: res.model, requestedModel: res.requestedModel, fallbackUsed: res.fallbackUsed });
+        const behaviors = await loadBehaviors();
+        const products = await campaignProducts(db, id);
+        const sourceProducts = a.product_id ? products.filter((product) => product.id === a.product_id) : products;
+        const res = await generateCampaignCreative({ behaviors, sourceImageBase64: img.data, sourceMimeType: img.mime, objective: campaign.objective || campaign.name, caption: campaign.generated_caption || '', imageText: campaign.image_text || '', aspectRatio: campaign.aspect_ratio || '1:1', targetChannel: campaign.target_channel || 'facebook_instagram', products: sourceProducts });
+        const up = await uploadImageBytes(id, res.image.data, res.image.mimeType);
+        await db.updateTable('campaign_assets').set({ storage_path: up.path, public_url: up.publicUrl, approved: false, source_prompt: null, prompt_trace_id: res.promptTraceId, requested_overlay_text: campaign.image_text || null, overlay_text_status: res.verification.overlay_text_status, product_fidelity_status: res.verification.product_status, verification: JSON.stringify({ ...res.verification, verification_model: res.verificationModel, regenerated_for_fidelity: res.regeneratedForFidelity }), requested_model: res.requestedModel, actual_model: res.model, fallback_used: res.fallbackUsed }).where('id', '=', (a as any).id).execute();
+        return NextResponse.json({ ok: true, public_url: up.publicUrl, model: res.model, requestedModel: res.requestedModel, fallbackUsed: res.fallbackUsed, verification: res.verification, promptTraceId: res.promptTraceId });
       }
 
       case 'approve_asset': {

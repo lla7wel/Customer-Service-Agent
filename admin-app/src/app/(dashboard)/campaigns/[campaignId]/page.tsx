@@ -14,7 +14,7 @@ import PostComposer from '@/components/campaigns/PostComposer';
 
 export const dynamic = 'force-dynamic';
 
-interface Asset { id: string; kind: string; public_url: string | null; position: number; approved?: boolean; source_asset_id?: string | null }
+interface Asset { id: string; kind: string; public_url: string | null; position: number; approved?: boolean; source_asset_id?: string | null; prompt_trace_id?: string | null; requested_overlay_text?: string | null; overlay_text_status?: string | null; product_fidelity_status?: string | null; requested_model?: string | null; actual_model?: string | null; fallback_used?: boolean; verification?: Record<string, unknown> }
 interface Post { id: string; type: string; status: string; asset_ids: string[]; fb_post_id: string | null; permalink_url: string | null; scheduled_for: string | null; error: string | null }
 
 export default async function CampaignDetailPage(props: { params: Promise<{ campaignId: string }> }) {
@@ -63,7 +63,7 @@ export default async function CampaignDetailPage(props: { params: Promise<{ camp
         {/* builder */}
         <div className="space-y-5">
           <AssetManager campaignId={campaign.id} assets={assets} locale={locale} />
-          <CaptionPanel campaignId={campaign.id} caption={campaign.generated_caption} captionPrompt={(campaign as any).caption_prompt ?? null} designPrompt={(campaign as any).design_prompt ?? null} locale={locale} />
+          <CaptionPanel campaignId={campaign.id} caption={campaign.generated_caption} objective={(campaign as any).objective ?? ''} imageText={(campaign as any).image_text ?? ''} aspectRatio={(campaign as any).aspect_ratio ?? '1:1'} targetChannel={(campaign as any).target_channel ?? 'facebook_instagram'} locale={locale} />
           <PostComposer campaignId={campaign.id} assetCount={assets.filter((a) => a.public_url).length} posts={posts} locale={locale} />
         </div>
 

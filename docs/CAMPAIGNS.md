@@ -1,96 +1,45 @@
-# EH-SYSTEM1 — Campaigns
+# Campaigns
 
-How Facebook marketing campaigns are built, priced, and published from the admin app.
+## Operator workflow
 
----
+1. Create a draft with an internal name and objective.
+2. Attach a product/source image.
+3. Enter or edit the post caption.
+4. Enter the exact text requested on the generated image, if any.
+5. Select aspect ratio and target channel only when needed.
+6. Generate, review the warnings, approve or regenerate, then publish/schedule.
 
-## Campaign lifecycle
+The Campaign UI contains variables, not style prompts. Brand aesthetics, photography, composition, lighting, product preservation, and typography live in AI Control. A manually edited caption is preserved until the operator explicitly requests a new generated caption.
 
-```
-Draft → [add products] → [add assets] → [generate caption] → Scheduled | Published
-                                                                ↑
-                                             campaign-scheduler refreshes pricing
-                                             and calls Meta Graph API on publish time
-```
+## Caption generation
 
----
+An explicit Generate action loads current `campaign_caption` AI Control instructions, compiles verified campaign/product runtime data, and returns editable text. It never silently rewrites manual copy or invents price, discount, date, stock, or availability facts.
 
-## Creating a campaign
+## Image generation and regeneration
 
-1. **Campaigns → New** — enter a name, start/end dates, and optionally a discount percentage.
-2. Save as draft.
+Both actions load current AI Control at execution time and call `generateCampaignCreative()` with the objective, saved caption, exact image text, aspect/channel, verified products, and source image. The pipeline uses the centrally configured strongest compatible campaign image model and its ordered fallback chain.
 
----
+Legacy campaign prompt columns and `campaign_assets.source_prompt` remain for historical compatibility, but new generation never reads them. New/updated AI assets store `source_prompt = null`, prompt trace, requested overlay text, review status, requested/actual model, and whether fallback occurred.
 
-## Attaching products
+## Preservation and verification
 
-1. In the campaign editor, click "Add products".
-2. Search by name, code, or category.
-3. Attach products. Each attached product creates a `campaign_products` row.
-4. Optional: set a `override_price` per product (for a specific campaign price, independent of the discount percentage).
+The master creative direction tells the model to build the scene around the supplied product. Separate editable preservation guidance covers shape, color, pattern, material, proportions, stitching, handles, labels, construction, and included pieces.
 
-`fn_refresh_product_pricing()` computes each product's `campaign_price` and `active_price` when the campaign is published. The function picks the winner when multiple campaigns overlap: highest `priority`, then latest `starts_at`. Products attached to the campaign get their `active_price` updated to the campaign price for the campaign's active window.
+After generation, a vision comparison reviews source identity and requested text. Results are probabilistic:
 
----
+- product status: acceptable, warning, unacceptable, or unverifiable;
+- overlay status: likely exact, mismatch, missing, unverifiable, or not requested;
+- observed text and concerns;
+- one automatic retry when fidelity is clearly unacceptable or below threshold.
 
-## Campaign assets
+The UI surfaces these statuses and never describes them as proof. Gemini renders image text itself; Arabic spelling and typography can still fail. Human approval remains mandatory before publication.
 
-Each product in the campaign can have one or more images:
-- **Upload** a product photo.
-- **AI image generation** — click "Generate image" and describe what you want. Gemini (`GEMINI_IMAGE_MODEL`) generates a campaign-style image. If the primary model is rate-limited, the system automatically falls back to `GEMINI_IMAGE_FALLBACK_MODEL`, then `GEMINI_IMAGE_LAST_FALLBACK_MODEL`. The admin UI shows which model was used and flags if a fallback was used.
+## Assets and publishing
 
-A unique constraint on `campaign_assets(campaign_id, product_id, kind) WHERE product_id IS NOT NULL` prevents duplicate asset rows when a product is re-attached.
+Generated output is persisted to the media host as an unapproved review asset. Approval is explicit. Regeneration reuses campaign variables but recompiles current AI Control.
 
----
+Scheduling and publication continue through `/api/cron/campaign-scheduler`, protected by `CRON_SECRET`. Publication refreshes campaign pricing and calls Meta Graph; activity/integration logs capture the result.
 
-## Generating captions
+## Deprecated data
 
-1. With products and assets attached, click "Generate caption".
-2. Gemini (`GEMINI_MARKETING_TEXT_MODEL`) writes a short Libyan-Arabic caption using the product names, prices, and campaign context.
-3. Edit the caption in the text field if needed.
-
-The caption model is the **text** model — the image model does not generate text in images. The instruction to the image model explicitly suppresses Arabic text, logos, prices, and ornaments inside the image, leaving clean space for a text overlay added later.
-
----
-
-## Scheduling and publishing
-
-- **Schedule:** set a publish date/time. The campaign-scheduler cron (`workers/campaign-scheduler` or `/api/cron/campaign-scheduler`) checks every 5 minutes and publishes campaigns whose `starts_at` has arrived.
-- **Publish now:** triggers the same flow immediately.
-
-On publish:
-1. `fn_refresh_product_pricing()` is called — `campaign_price` and `active_price` are updated for all attached products.
-2. The Facebook post (photo or carousel) is created via the Meta Graph API.
-3. A `facebook_posts` row is created.
-4. Campaign `status` → `published`.
-5. `activity_logs` and `integration_logs` record the result.
-
-If Meta publish fails, the campaign status is set to `failed` and the error is in `integration_logs`.
-
----
-
-## Comment auto-reply rules
-
-**Removed.** There are no comment-reply rules on campaigns. The `campaigns.comment_reply_rules` column was dropped in migration 0012. The Facebook comments feature is not part of this system.
-
----
-
-## Debugging campaign failures
-
-1. Check `campaigns.status` — if `failed`, the Meta publish call failed.
-2. Check `integration_logs WHERE integration='meta' AND direction='outbound'` — look for the campaign publish event and its error.
-3. Check `activity_logs` for the scheduler run.
-4. Verify `META_PAGE_ACCESS_TOKEN` has not expired and the page has posting permissions.
-5. Check that `fn_refresh_product_pricing()` ran without error — pricing errors surface in `activity_logs`.
-
----
-
-## Campaign pricing refresh (standalone)
-
-To refresh campaign pricing without publishing:
-
-```sql
-select fn_refresh_product_pricing();
-```
-
-Or trigger the campaign scheduler: `POST /api/cron/campaign-scheduler` with `Authorization: Bearer <CRON_SECRET>` (the host crontab does this every 5 minutes).
+Columns such as caption/design/style prompt fields are retained in PostgreSQL so historical records are not destroyed. They are not active authoring controls and are not sources for new generation. Remove them only in a later migration after historical export and production evidence confirm safety.

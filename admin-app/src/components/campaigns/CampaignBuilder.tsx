@@ -2,105 +2,46 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Megaphone, ArrowRight } from 'lucide-react';
-import { Card, SectionTitle, Notice } from '@/components/ui';
+import { ArrowRight, ImageIcon, Megaphone } from 'lucide-react';
+import { Card, Notice, SectionTitle } from '@/components/ui';
 import type { Locale } from '@/lib/i18n/config';
 
-const TYPES: [string, string, string][] = [
-  ['single_product_discount', 'Single product discount', 'خصم منتج واحد'],
-  ['multi_product_carousel', 'Multi-product carousel', 'كاروسيل عدة منتجات'],
-  ['category_sale', 'Category sale', 'تخفيض فئة'],
-  ['flash_sale', 'Flash sale', 'عرض سريع'],
-  ['clearance', 'Clearance', 'تصفية'],
-  ['seasonal', 'Seasonal (Ramadan/Eid)', 'موسمي (رمضان/عيد)'],
-];
+const RATIOS = ['1:1', '4:5', '9:16', '16:9'];
 
 export default function CampaignBuilder({ locale }: { locale: Locale }) {
   const ar = locale === 'ar';
   const router = useRouter();
-  const [f, setF] = useState({
-    name: '', type: 'single_product_discount', discount_percent: '',
-    starts_at: '', ends_at: '', caption_tone: 'friendly, professional',
-    design_prompt: '', caption_prompt: '', auto_publish: false,
-  });
+  const [form, setForm] = useState({ name: '', objective: '', caption: '', image_text: '', aspect_ratio: '1:1', target_channel: 'facebook_instagram' });
   const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
-
-  function set<K extends keyof typeof f>(k: K, v: (typeof f)[K]) {
-    setF((s) => ({ ...s, [k]: v }));
-  }
+  const [error, setError] = useState<string | null>(null);
+  const set = (key: keyof typeof form, value: string) => setForm((current) => ({ ...current, [key]: value }));
 
   async function create() {
-    if (!f.name.trim()) { setMsg(ar ? 'الاسم مطلوب' : 'Name is required'); return; }
-    setSaving(true);
-    setMsg(null);
-    const res = await fetch('/api/campaigns', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        ...f,
-        discount_percent: f.discount_percent === '' ? null : Number(f.discount_percent),
-        starts_at: f.starts_at || null, ends_at: f.ends_at || null, publish_mode: 'manual',
-      }),
-    });
-    const d = await res.json().catch(() => ({}));
+    if (!form.name.trim() || !form.objective.trim()) { setError(ar ? 'الاسم والهدف مطلوبان' : 'Campaign name and objective are required'); return; }
+    setSaving(true); setError(null);
+    const res = await fetch('/api/campaigns', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...form, generated_caption: form.caption || null }) });
+    const data = await res.json().catch(() => ({}));
     setSaving(false);
-    if (res.ok && d?.id) router.push(`/campaigns/${d.id}`);
-    else setMsg(d?.missing?.join(', ') || d?.error || 'Failed');
+    if (res.ok && data.id) router.push(`/campaigns/${data.id}`); else setError(data.error || 'Failed');
   }
 
-  return (
-    <div className="space-y-4">
-      <Notice>{ar ? 'بعد الإنشاء تنتقل لمساحة البناء: رفع الصور، توليد التعليق، اختيار منشور واحد أو منشورات، ثم النشر.' : 'After creating you go to the builder: upload images, generate a caption, choose one post or multiple, then publish.'}</Notice>
-
+  return <div className="space-y-4">
+    <Notice>{ar ? 'أسلوب الصورة والهوية والإضاءة والخط تأتي تلقائياً من AI Control. هنا تدخل معلومات هذه الحملة فقط.' : 'Visual identity, lighting, composition and typography come from AI Control. Enter only this campaign’s variables here.'}</Notice>
+    <Card>
+      <SectionTitle icon={Megaphone} title={ar ? 'محتوى الحملة' : 'Campaign content'} />
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <SectionTitle icon={Megaphone} title={ar ? 'الأساسيات' : 'Basics'} />
-          <L label={ar ? 'اسم الحملة' : 'Campaign name'}>
-            <input value={f.name} onChange={(e) => set('name', e.target.value)} dir="auto" className="input" placeholder={ar ? 'مثال: تخفيضات رمضان' : 'e.g. Ramadan Sale'} />
-          </L>
-          <L label={ar ? 'النوع' : 'Type'}>
-            <select value={f.type} onChange={(e) => set('type', e.target.value)} className="input">
-              {TYPES.map(([v, en, arl]) => <option key={v} value={v}>{ar ? arl : en}</option>)}
-            </select>
-          </L>
-          <L label={ar ? 'نسبة الخصم %' : 'Discount %'}>
-            <input type="number" value={f.discount_percent} onChange={(e) => set('discount_percent', e.target.value)} className="input" placeholder="20" />
-          </L>
-          <div className="grid grid-cols-2 gap-3">
-            <L label={ar ? 'البداية' : 'Start'}><input type="datetime-local" value={f.starts_at} onChange={(e) => set('starts_at', e.target.value)} className="input" /></L>
-            <L label={ar ? 'النهاية' : 'End'}><input type="datetime-local" value={f.ends_at} onChange={(e) => set('ends_at', e.target.value)} className="input" /></L>
-          </div>
-          <p className="text-[11px] text-faint">{ar ? 'عند التداخل: الأعلى أولوية يفوز، ثم الأحدث بداية.' : 'On overlap: highest priority wins, then latest start.'}</p>
-        </Card>
-
-        <Card>
-          <SectionTitle title={ar ? 'الذكاء والتصميم' : 'AI & design'} />
-          <L label={ar ? 'نبرة التعليق' : 'Caption tone'}><input value={f.caption_tone} onChange={(e) => set('caption_tone', e.target.value)} dir="auto" className="input" /></L>
-          <L label={ar ? 'وصف تصميم الصورة (برومبت)' : 'Image design prompt'}><textarea value={f.design_prompt} onChange={(e) => set('design_prompt', e.target.value)} rows={2} dir="auto" className="input resize-y" /></L>
-          <L label={ar ? 'برومبت التعليق' : 'Caption prompt'}><textarea value={f.caption_prompt} onChange={(e) => set('caption_prompt', e.target.value)} rows={2} dir="auto" className="input resize-y" /></L>
-          <label className="mt-1 flex items-center gap-2 text-sm text-muted">
-            <input type="checkbox" checked={f.auto_publish} onChange={(e) => set('auto_publish', e.target.checked)} className="accent-[rgb(var(--accent))]" />
-            {ar ? 'نشر تلقائي للمنشورات المجدولة' : 'Auto-publish scheduled posts'}
-          </label>
-        </Card>
+        <L label={ar ? 'اسم الحملة الداخلي' : 'Internal campaign name'}><input value={form.name} onChange={(e) => set('name', e.target.value)} className="input" dir="auto" /></L>
+        <L label={ar ? 'هدف الحملة' : 'Campaign objective'}><input value={form.objective} onChange={(e) => set('objective', e.target.value)} className="input" dir="auto" placeholder={ar ? 'مثال: إبراز مجموعة مفارش جديدة' : 'e.g. Introduce a new bedding collection'} /></L>
       </div>
-
-      <div className="flex items-center gap-3">
-        <button onClick={create} disabled={saving} className="btn-primary">
-          {saving ? '…' : ar ? 'إنشاء ومتابعة' : 'Create & continue'} <ArrowRight size={16} className="rtl-flip" />
-        </button>
-        {msg && <span className="text-sm text-danger">{msg}</span>}
+      <L label={ar ? 'كابشن المنشور (لن يُعاد كتابته تلقائياً)' : 'Post caption (preserved as entered)'}><textarea value={form.caption} onChange={(e) => set('caption', e.target.value)} rows={4} className="input resize-y" dir="auto" /></L>
+      <L label={ar ? 'النص المطلوب داخل الصورة بالضبط' : 'Exact text requested inside the image'}><input value={form.image_text} onChange={(e) => set('image_text', e.target.value)} className="input" dir="auto" /></L>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <L label={ar ? 'نسبة الصورة' : 'Aspect ratio'}><select value={form.aspect_ratio} onChange={(e) => set('aspect_ratio', e.target.value)} className="input">{RATIOS.map((ratio) => <option key={ratio}>{ratio}</option>)}</select></L>
+        <L label={ar ? 'القناة المستهدفة' : 'Target channel'}><select value={form.target_channel} onChange={(e) => set('target_channel', e.target.value)} className="input"><option value="facebook_instagram">Facebook + Instagram</option><option value="facebook">Facebook</option><option value="instagram">Instagram</option><option value="story">Story / Reel</option></select></L>
       </div>
-    </div>
-  );
+      <div className="mt-4 flex items-center gap-3"><button onClick={create} disabled={saving} className="btn-primary"><ImageIcon size={15} />{saving ? '…' : ar ? 'إنشاء واختيار الصورة' : 'Create & choose image'}<ArrowRight size={15} className="rtl-flip" /></button>{error && <span className="text-sm text-danger">{error}</span>}</div>
+    </Card>
+  </div>;
 }
 
-function L({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="mb-3 block">
-      <span className="mb-1 block text-xs font-medium text-muted">{label}</span>
-      {children}
-    </label>
-  );
-}
+function L({ label, children }: { label: string; children: React.ReactNode }) { return <label className="mb-3 block"><span className="mb-1 block text-xs font-medium text-muted">{label}</span>{children}</label>; }

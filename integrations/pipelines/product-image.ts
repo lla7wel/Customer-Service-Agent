@@ -7,8 +7,7 @@
  * and identical wherever they run.
  *
  * Hard guarantees enforced here:
- *   - The BACKEND chooses the actual image URLs — Gemini never picks a URL. It
- *     only composes the natural Libyan-Arabic caption.
+ *   - The backend chooses the actual image URLs; Gemini never picks a URL.
  *   - Only HTTPS, publicly-fetchable URLs are ever sent to Meta (no local file
  *     paths, no localhost, no broken URLs).
  *   - At most 3 images are sent automatically (no spam), de-duplicated by product
@@ -132,26 +131,15 @@ export function selectSendableImages(candidates: ProductCandidate[] | null | und
 }
 
 /* -------------------------------------------------------------------------- */
-/* Situation notes (internal guidance for Gemini — never shown verbatim)      */
+/* Structured runtime state                                                   */
 /* -------------------------------------------------------------------------- */
 
-/** Guidance for the caption that accompanies attached product photos. */
-export function imageSendSituation(opts: { count: number; grouped: boolean; more: boolean }): string {
-  const lines = [
-    `You are attaching ${opts.count} real product photo${opts.count > 1 ? 's' : ''} from the catalog to THIS reply.`,
-    'Write a short, warm Libyan-Arabic caption to go with the photo(s): name the product(s) naturally and include the price ONLY if it is given in the catalog data. If a price is missing, say it will be confirmed — never invent one.',
-    'Do not describe the photo in detail, and do not include links, codes, or internal notes.',
-  ];
-  if (opts.grouped) {
-    lines.push('These photos are the SAME item/style in different colours — say that naturally so the customer knows they are colour variants, not different products.');
-  }
-  if (opts.more) {
-    lines.push('More options are available than the photos shown — briefly offer to send more or help narrow down.');
-  }
-  return lines.join(' ');
+/** Runtime facts for a reply that accompanies attached product photos. */
+export function imageSendContext(opts: { count: number; grouped: boolean; more: boolean }): Record<string, unknown> {
+  return { images_attached: true, image_count: opts.count, same_product_color_variants: opts.grouped, more_images_available: opts.more };
 }
 
-/** Guidance when the customer asked to see a photo but none is available. */
-export function imageUnavailableSituation(): string {
-  return 'The customer asked to see a photo, but no product image is available right now. Apologize warmly in Libyan Arabic and offer to share the product details or help another way. Do not invent or promise an image you do not have.';
+/** Runtime facts when the requested product photo is unavailable. */
+export function imageUnavailableContext(): Record<string, unknown> {
+  return { images_requested: true, images_available: false };
 }

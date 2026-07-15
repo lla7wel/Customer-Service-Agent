@@ -155,6 +155,10 @@ export interface Campaign {
   priority: number;
   caption_tone: string | null;
   generated_caption: string | null;
+  objective?: string | null;
+  image_text?: string | null;
+  aspect_ratio?: string;
+  target_channel?: string;
   auto_publish: boolean;
   created_at: string;
 }
@@ -162,7 +166,9 @@ export interface Campaign {
 export type AiBehaviorKey =
   | 'customer_service' | 'reply_language' | 'product_recommendation'
   | 'campaign_caption' | 'campaign_image' | 'image_matching'
-  | 'missing_price' | 'memory_context';
+  | 'missing_price' | 'memory_context' | 'brand_identity' | 'human_handoff'
+  | 'memory_summary' | 'product_preservation' | 'image_typography'
+  | 'advanced_task_instructions';
 
 export interface AiBehavior {
   id: string;

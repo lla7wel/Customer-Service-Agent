@@ -4,6 +4,24 @@ Major system changes in reverse chronological order.
 
 ---
 
+## 2026-07-15 — Central AI Control and campaign creative hardening
+
+- Added a typed provider-neutral prompt compiler with exact AI Control text,
+  task-scoped sections, structured runtime JSON, immutable policy/schema/tool
+  boundaries, provenance, token estimate and prompt trace.
+- Removed hidden configurable behavior from Gemini adapters and Messenger
+  situation notes. Missing required configuration now fails visibly.
+- Rebuilt AI Control as a complete prompt workbench with the production compiler preview.
+- Simplified Campaign authoring to objective, caption, exact image text,
+  source/product, and aspect/channel variables. Legacy prompt data is preserved
+  but ignored by new generation and regeneration.
+- Unified production and Playground campaign generation, retained the strongest
+  image-model fallback chain, recorded requested/actual models, and added
+  probabilistic product/text review with one low-fidelity retry.
+- Added migration 0014 without overwriting existing behavior content or dropping historical data.
+
+---
+
 ## 2026-07 — Full infrastructure ownership (Supabase/Vercel/Cloudflare → one VPS)
 
 The platform went down when its free-tier database provider paused the

@@ -79,6 +79,25 @@ LIMIT 20;
 - `GEMINI_API_KEY` expired or rate-limited.
 - Image model rate-limited (normal for `gemini-3-pro-image-preview` — system falls back automatically, but if all three models in the chain fail, the image reply fails).
 - A specific product in the turn caused a tool call loop.
+- AI Control is incomplete. A `PromptConfigurationError` names the missing or
+  empty required behavior section; fix it in `/ai-control`. Do not add a code fallback.
+
+## AI Control preview or execution fails
+
+Confirm migration 0014 was applied and all required behavior keys exist. An
+enabled required row must contain prompt, rules, or memory text. A disabled row
+is intentionally excluded. Preview and production use the same compiler, so a
+preview error also protects production from hidden or stale fallbacks.
+
+## Campaign image warning
+
+`product_fidelity_status` and `overlay_text_status` are probabilistic vision
+reviews. `unverifiable`, `warning`, `mismatch`, or `missing` requires human
+review or regeneration. The image model renders Arabic text itself and may
+misspell it. Never treat a score as proof.
+
+Regeneration always loads current AI Control. `campaign_assets.source_prompt`
+is historical and should remain null on newly generated assets.
 
 ---
 
@@ -207,7 +226,7 @@ SELECT id, email, role FROM admin_users;
 
 **Rules:**
 - Never modify a migration file that has already been applied. Write a new migration.
-- All migrations are in `database/migrations/` numbered `0001`–`0012`. Apply in order.
+- All migrations are in `database/migrations/` numbered `0001`–`0014`. Apply in order.
 - Migration 0012 (`production_cleanup`) is destructive but scoped — it archives orders before dropping.
 
 **Check which migrations have been applied:**

@@ -3,7 +3,7 @@ import { geminiStatus } from '../status';
 
 /**
  * Low-level Gemini REST client (no SDK — uses fetch, so it runs in Node 18+,
- * Next.js, and Cloudflare Workers identically). This is the ONLY place that
+ * and Next.js). This is the ONLY place that
  * talks to Google. Every higher-level helper (chat, intent, vision, caption,
  * image edit) goes through `generateContent`.
  */
@@ -42,7 +42,7 @@ export function textModel(): string {
 export function routerModel(): string {
   return envAny('GEMINI_ROUTER_MODEL', 'GEMINI_TEXT_MODEL') || 'gemini-2.5-flash-lite';
 }
-/** Marketing copy: campaign captions, Arabic headlines, hooks, design briefs.
+/** Marketing copy: campaign captions and related text tasks.
  *  A normal text model — NEVER the image model. */
 export function marketingTextModel(): string {
   return envAny('GEMINI_MARKETING_TEXT_MODEL', 'GEMINI_TEXT_MODEL') || 'gemini-2.5-flash';
@@ -272,7 +272,7 @@ export interface ImageGenResult {
  */
 export async function generateImage(
   parts: GeminiPart[] | string,
-  opts: { chain?: string[]; temperature?: number; signal?: AbortSignal; perAttemptTimeoutMs?: number } = {},
+  opts: { chain?: string[]; temperature?: number; signal?: AbortSignal; perAttemptTimeoutMs?: number; systemInstruction?: string } = {},
 ): Promise<ImageGenResult> {
   const apiKey = env('GEMINI_API_KEY');
   if (!apiKey) throw new GeminiNotConfiguredError();
@@ -288,6 +288,7 @@ export async function generateImage(
         model,
         responseModalities: ['TEXT', 'IMAGE'],
         temperature: opts.temperature ?? 0.8,
+        systemInstruction: opts.systemInstruction,
         signal: opts.signal,
         timeoutMs: perAttempt,
       });

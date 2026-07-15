@@ -556,6 +556,10 @@ create table if not exists campaigns (
   design_prompt     text,                              -- AI image-edit instructions
   caption_prompt    text,                              -- AI caption instructions
   generated_caption text,                              -- last AI caption (Arabic/Libyan)
+  objective         text,                              -- campaign-specific goal; not style
+  image_text        text,                              -- exact text requested inside generated image
+  aspect_ratio      text not null default '1:1',       -- 1:1, 4:5, 16:9, 9:16
+  target_channel    text not null default 'facebook_instagram',
   comment_reply_rules text,                            -- free-text rules for FB comment AI
   publish_mode      text not null default 'manual',    -- 'manual' | 'now' | 'scheduled'
   scheduled_for     timestamptz,
@@ -605,6 +609,14 @@ create table if not exists campaign_assets (
   public_url      text,
   source_prompt   text,                                -- prompt used for AI edits
   caption         text,
+  prompt_trace_id text,
+  requested_overlay_text text,
+  overlay_text_status text,
+  product_fidelity_status text,
+  verification    jsonb not null default '{}',
+  requested_model text,
+  actual_model    text,
+  fallback_used   boolean not null default false,
   position        int not null default 0,
   created_at      timestamptz not null default now()
 );

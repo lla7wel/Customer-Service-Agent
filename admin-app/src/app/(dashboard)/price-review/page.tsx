@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { Tags, ChevronLeft, ChevronRight, CheckCircle2 } from 'lucide-react';
-import { PageHeader, Card, EmptyState } from '@/components/ui';
+import { PageHeader, EmptyState } from '@/components/ui';
 import NotConnected from '@/components/NotConnected';
 import Diagnostics from '@/components/catalog/Diagnostics';
 import CatalogReviewTabs from '@/components/catalog/CatalogReviewTabs';

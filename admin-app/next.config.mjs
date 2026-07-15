@@ -16,8 +16,6 @@ const nextConfig = {
   // The app imports ../integrations, so file tracing must treat the repo
   // root as the project root or standalone output would miss those files.
   outputFileTracingRoot: path.join(__dirname, '..'),
-  // Keep lint out of the production build path (run `npm run lint` separately).
-  eslint: { ignoreDuringBuilds: true },
   images: {
     // Product/campaign images are served from our own media host; the scraper
     // CDN appears only in admin-side review screens.

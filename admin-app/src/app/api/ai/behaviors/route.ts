@@ -2,11 +2,13 @@
  * Admin CRUD for the ai_behaviors table — GET (list), PATCH (update one row).
  * Changes here take effect immediately on the next live pipeline call.
  * Called by: admin-app/src/components/ai/AiBehaviors.tsx (AI Control page).
- * Calls: integrations/supabase/admin-client.
+ * Calls: PostgreSQL through the shared Kysely integration.
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@integrations/db/client';
 import { databaseStatus } from '@integrations/status';
+import { compilePrompt, publicPromptPreview, type AiTask } from '@integrations/prompt-compiler';
+import { loadBehaviorsWith } from '@integrations/ai-behaviors';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -14,7 +16,9 @@ export const dynamic = 'force-dynamic';
 const FIELDS = ['title', 'prompt', 'rules', 'memory', 'enabled'];
 
 /** List all AI behaviors. */
-export async function GET() {
+const TASKS: AiTask[] = ['customer_reply', 'product_recommendation', 'handoff_reply', 'vision_describe', 'vision_rank', 'memory_summary', 'campaign_caption', 'campaign_image', 'campaign_image_verify'];
+
+export async function GET(req: NextRequest) {
   const db = getDb();
   if (!db) {
     return NextResponse.json(
@@ -23,6 +27,13 @@ export async function GET() {
     );
   }
   try {
+    const task = req.nextUrl.searchParams.get('task') as AiTask | null;
+    if (task) {
+      if (!TASKS.includes(task)) return NextResponse.json({ error: 'invalid_task' }, { status: 400 });
+      const behaviors = await loadBehaviorsWith(db);
+      const envelope = compilePrompt(behaviors, task, {});
+      return NextResponse.json({ preview: publicPromptPreview(envelope) });
+    }
     const data = await db.selectFrom('ai_behaviors').selectAll().orderBy('behavior_key', 'asc').execute();
     return NextResponse.json({ behaviors: data });
   } catch (e: any) {
@@ -45,6 +56,11 @@ export async function PATCH(req: NextRequest) {
 
   const update: Record<string, unknown> = {};
   for (const k of FIELDS) if (k in body) update[k] = body[k];
+  for (const field of ['title', 'prompt', 'rules', 'memory']) {
+    if (typeof update[field] === 'string' && (update[field] as string).length > 30_000) {
+      return NextResponse.json({ error: `${field}_too_long` }, { status: 400 });
+    }
+  }
   if (Object.keys(update).length === 0) {
     return NextResponse.json({ error: 'no_editable_fields' }, { status: 400 });
   }

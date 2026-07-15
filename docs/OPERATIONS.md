@@ -78,29 +78,32 @@ Shows products with a price but not yet activated (`status != active`). Review e
 
 ## Campaign workflow
 
-1. **Campaigns → New** — create a draft with a name, date range, discount (optional), and target products.
-2. **Attach products** — search and attach the products to feature.
-3. **Upload or generate images** — upload a product photo or use AI image generation to create campaign creative.
-4. **Generate caption** — one click generates a short Libyan-Arabic caption from the product context.
-5. **Schedule or publish** — set a publish date/time (scheduled) or publish immediately. The campaign scheduler calls `fn_refresh_product_pricing()` before publishing, so `campaign_price` is always up-to-date.
+1. **Campaigns → New** — enter an internal name, objective, caption, exact image text, and any needed aspect/channel.
+2. **Attach products/source images** — these are the verified identity references.
+3. **Generate** — current master creative, preservation, and typography instructions are loaded from AI Control.
+4. **Review** — inspect product-fidelity and text warnings; approve or regenerate. Verification is probabilistic and human approval is required.
+5. **Schedule or publish** — the scheduler refreshes pricing before publication.
 
 ---
 
 ## AI Control
 
-`/ai-control` shows all `ai_behaviors` rows in two sections:
-1. **Customer Service Behavior** — service style and tone.
-2. **Campaign / Marketing AI** — caption tone, image guidance.
+`/ai-control` shows every behavior row and all prompt/rules/memory fields. It
+includes task applicability, enable/disable state, warnings, save feedback, and
+the effective production compiler preview with provenance and trace ID.
 
-Changes take effect immediately (no redeploy). Hard safety rules (never invent a price, reply in Libyan Arabic only, never confirm orders alone, never leak internal tool names) are enforced in code — they cannot be overridden from AI Control.
+Changes take effect on the next applicable execution. Catalog/price truth,
+valid IDs, permissions, schemas, race guards and privacy remain immutable.
+Language, brand, tone, response shape, handoff wording, campaign art direction,
+preservation and typography are editable here and are not duplicated in code.
 
 ---
 
 ## AI Playground
 
-`/ai-playground` runs the exact Messenger pipeline and shows:
+`/ai-playground` runs the same compiler, model router and core production paths and shows:
 - **Customer reply** — the message the customer would receive.
-- **Technical debug** — extracted signals (code/barcode/URL/hash), database candidates with confidence, tool calls, memory used, Gemini model used.
+- **Technical debug** — task, production-path parity, contributing AI Control sections, prompt trace, model, candidates and tool calls.
 
 Use this to verify AI behavior before live deployment and to reproduce issues reported in production.
 

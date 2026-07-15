@@ -12,6 +12,14 @@ interface Asset {
   public_url: string | null;
   approved?: boolean;
   source_asset_id?: string | null;
+  prompt_trace_id?: string | null;
+  requested_overlay_text?: string | null;
+  overlay_text_status?: string | null;
+  product_fidelity_status?: string | null;
+  requested_model?: string | null;
+  actual_model?: string | null;
+  fallback_used?: boolean;
+  verification?: Record<string, unknown>;
 }
 interface FoundProduct {
   id: string;
@@ -35,7 +43,6 @@ export default function AssetManager({
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ k: 'ok' | 'err' | 'info'; t: string } | null>(null);
   const [showPicker, setShowPicker] = useState(false);
-  const [editPrompt, setEditPrompt] = useState('');
 
   const sourceAssets = assets.filter((a) => a.kind !== 'ai_edited_image' && a.public_url);
   const editedAssets = assets.filter((a) => a.kind === 'ai_edited_image');
@@ -49,9 +56,8 @@ export default function AssetManager({
   }
 
   async function generateEdits() {
-    if (!editPrompt.trim()) { setMsg({ k: 'info', t: ar ? 'اكتب وصف التعديل أولاً' : 'Enter an edit prompt first' }); return; }
     setBusy(true); setMsg({ k: 'info', t: ar ? 'جاري توليد الصور… قد يأخذ حتى دقيقة' : 'Generating images… this can take up to a minute' });
-    const { ok, data, status } = await campaignAction({ action: 'generate_edits', prompt: editPrompt });
+    const { ok, data, status } = await campaignAction({ action: 'generate_edits' });
     setBusy(false);
     if (ok && (data.created?.length ?? 0) > 0) {
       const failed = data.errors?.length ? (ar ? ` · فشل ${data.errors.length}` : ` · ${data.errors.length} failed`) : '';
@@ -79,7 +85,7 @@ export default function AssetManager({
   async function approve(assetId: string) { setBusy(true); const { ok } = await campaignAction({ action: 'approve_asset', assetId }); setBusy(false); if (ok) router.refresh(); }
   async function regenerate(assetId: string) {
     setBusy(true); setMsg(null);
-    const { ok, data } = await campaignAction({ action: 'regenerate_edit', assetId, prompt: editPrompt || undefined });
+    const { ok, data } = await campaignAction({ action: 'regenerate_edit', assetId });
     setBusy(false);
     if (ok) router.refresh(); else setMsg({ k: 'err', t: data?.error || 'Failed' });
   }
@@ -139,20 +145,13 @@ export default function AssetManager({
 
       {showPicker && <ProductPicker ar={ar} onConfirm={attachProducts} onClose={() => setShowPicker(false)} />}
 
-      {/* AI image edit: style/edit prompt applied to the source images */}
+      {/* AI Control owns style; the campaign supplies variables only. */}
       {sourceAssets.length > 0 && (
         <div className="mb-4 rounded-lg border border-line bg-elevated/55 p-3">
-          <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-fg"><Wand2 size={13} className="text-accent" /> {ar ? 'تعديل الصور بالذكاء' : 'AI image edit'}</p>
-          <textarea
-            value={editPrompt}
-            onChange={(e) => setEditPrompt(e.target.value)}
-            rows={2}
-            dir="auto"
-            placeholder={ar ? 'وصف التعديل/الستايل… مثال: خلفية بيضاء نظيفة وإضاءة فاخرة' : 'Style / edit prompt… e.g. clean white background, premium lighting'}
-            className="input resize-none text-sm"
-          />
+          <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-fg"><Wand2 size={13} className="text-accent" /> {ar ? 'توليد صورة الحملة' : 'Generate campaign image'}</p>
+          <p className="text-[11px] text-faint">{ar ? 'يُحمّل النظام أحدث توجيه بصري وحفظ المنتج والخط من AI Control عند كل توليد أو إعادة توليد.' : 'Every generation and regeneration loads the current visual, product-preservation and typography instructions from AI Control.'}</p>
           <button onClick={generateEdits} disabled={busy} className="btn-primary mt-2 h-8 px-3 text-xs">
-            <Wand2 size={13} /> {busy ? '…' : ar ? 'ولّد صور معدّلة' : 'Generate edited images'}
+            <Wand2 size={13} /> {busy ? '…' : ar ? 'ولّد من AI Control' : 'Generate from AI Control'}
           </button>
         </div>
       )}
@@ -182,7 +181,7 @@ export default function AssetManager({
 
           {approvedAssets.length > 0 && (
             <AssetSection title={ar ? 'الصور المعتمدة للنشر' : 'Approved images for posting'} count={approvedAssets.length}>
-              {approvedAssets.map((a) => <AssetTile key={a.id} asset={a} ar={ar} busy={busy} onRegenerate={regenerate} onReject={reject} compact />)}
+              {approvedAssets.map((a) => <AssetTile key={a.id} asset={a} ar={ar} busy={busy} onRegenerate={regenerate} onReject={reject} />)}
             </AssetSection>
           )}
         </div>
@@ -207,7 +206,6 @@ function AssetTile({
   asset,
   ar,
   busy,
-  compact = false,
   onRemove,
   onApprove,
   onRegenerate,
@@ -216,7 +214,6 @@ function AssetTile({
   asset: Asset;
   ar: boolean;
   busy: boolean;
-  compact?: boolean;
   onRemove?: (id: string) => void;
   onApprove?: (id: string) => void;
   onRegenerate?: (id: string) => void;
@@ -224,29 +221,31 @@ function AssetTile({
 }) {
   const edited = asset.kind === 'ai_edited_image';
   return (
-    <div className={`group relative aspect-square overflow-hidden rounded-lg border bg-surface2 ${edited && asset.approved ? 'border-success ring-1 ring-success/70' : 'border-line'}`}>
-      {asset.public_url ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={asset.public_url} alt="" className="h-full w-full object-cover" />
-      ) : (
-        <div className="flex h-full items-center justify-center text-[10px] text-faint">{asset.kind}</div>
-      )}
-      <span className={`absolute inset-s-1 top-1 rounded-sm px-1.5 py-0.5 text-[9px] font-semibold ${asset.approved ? 'bg-success text-black' : 'bg-black/65 text-white'}`}>
-        {edited ? (asset.approved ? (ar ? 'معتمدة' : 'Approved') : (ar ? 'معدّلة' : 'Edited')) : (ar ? 'أصلية' : 'Original')}
-      </span>
-      {edited ? (
-        <div className={`absolute inset-x-1 bottom-1 flex justify-center gap-1 ${compact ? '' : 'opacity-0 transition group-hover:opacity-100'}`}>
-          {!asset.approved && onApprove && (
-            <button onClick={() => onApprove(asset.id)} disabled={busy} title={ar ? 'اعتماد' : 'Approve'} className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-success text-black"><Check size={13} /></button>
-          )}
-          {onRegenerate && <button onClick={() => onRegenerate(asset.id)} disabled={busy} title={ar ? 'إعادة توليد' : 'Regenerate'} className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-black/65 text-white hover:bg-accent hover:text-black"><RefreshCw size={13} /></button>}
-          {onReject && <button onClick={() => onReject(asset.id)} disabled={busy} title={ar ? 'رفض' : 'Reject'} className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-black/65 text-white hover:bg-danger"><Trash2 size={13} /></button>}
-        </div>
-      ) : (
-        onRemove && <button onClick={() => onRemove(asset.id)} className="absolute inset-e-1 top-1 inline-flex h-7 w-7 items-center justify-center rounded-md bg-black/65 text-white opacity-0 transition hover:bg-danger group-hover:opacity-100">
-          <Trash2 size={13} />
-        </button>
-      )}
+    <div className={`group overflow-hidden rounded-lg border bg-surface2 ${edited && asset.approved ? 'border-success ring-1 ring-success/70' : 'border-line'}`}>
+      <div className="relative aspect-square overflow-hidden">
+        {asset.public_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={asset.public_url} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full items-center justify-center text-[10px] text-faint">{asset.kind}</div>
+        )}
+        <span className={`absolute inset-s-1 top-1 rounded-sm px-1.5 py-0.5 text-[9px] font-semibold ${asset.approved ? 'bg-success text-black' : 'bg-black/65 text-white'}`}>
+          {edited ? (asset.approved ? (ar ? 'معتمدة' : 'Approved') : (ar ? 'للمراجعة' : 'Review')) : (ar ? 'أصلية' : 'Original')}
+        </span>
+        {edited ? (
+          <div className="absolute inset-x-1 bottom-1 flex justify-center gap-1">
+            {!asset.approved && onApprove && <button onClick={() => onApprove(asset.id)} disabled={busy} title={ar ? 'اعتماد بشري' : 'Human approve'} className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-success text-black"><Check size={13} /></button>}
+            {onRegenerate && <button onClick={() => onRegenerate(asset.id)} disabled={busy} title={ar ? 'إعادة توليد' : 'Regenerate'} className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-black/65 text-white hover:bg-accent hover:text-black"><RefreshCw size={13} /></button>}
+            {onReject && <button onClick={() => onReject(asset.id)} disabled={busy} title={ar ? 'رفض' : 'Reject'} className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-black/65 text-white hover:bg-danger"><Trash2 size={13} /></button>}
+          </div>
+        ) : onRemove && <button onClick={() => onRemove(asset.id)} className="absolute inset-e-1 top-1 inline-flex h-7 w-7 items-center justify-center rounded-md bg-black/65 text-white opacity-0 transition hover:bg-danger group-hover:opacity-100"><Trash2 size={13} /></button>}
+      </div>
+      {edited && <div className="space-y-0.5 border-t border-line px-1.5 py-1 text-[9px] leading-tight text-faint">
+        <p className={asset.product_fidelity_status === 'unacceptable' || asset.overlay_text_status === 'mismatch' || asset.overlay_text_status === 'missing' ? 'font-semibold text-warning' : ''}>{asset.product_fidelity_status ?? 'unverified'} · {asset.overlay_text_status ?? 'unverified'}</p>
+        {asset.requested_overlay_text && <p className="truncate" dir="auto">{ar ? 'النص: ' : 'Text: '}{asset.requested_overlay_text}</p>}
+        <p className="truncate">{asset.actual_model ?? 'model unrecorded'}{asset.fallback_used ? ` ← ${asset.requested_model ?? 'fallback'}` : ''}</p>
+        {asset.prompt_trace_id && <p className="truncate font-mono">trace {asset.prompt_trace_id}</p>}
+      </div>}
     </div>
   );
 }
