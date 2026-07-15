@@ -122,7 +122,7 @@ runbook (domain, TLS, Meta webhook, backups, smoke tests).
 
 ```bash
 cd scripts
-npx tsx upgrade-tests.ts             # 34 pure-logic assertions (sanitizer, policy, hashing)
+npx tsx upgrade-tests.ts             # focused pure-logic regression suite (sanitizer, policy, hashing)
 npx tsx ai-control-behavior-test.ts  # compiler, provenance, parity and prompt boundaries
 ```
 
