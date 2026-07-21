@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   contentConfigFingerprint,
+  exactCreativePriceText,
   generationNeedsRetry,
   generationVerificationWarnings,
 } from '../../integrations/pipelines/content-create';
@@ -44,6 +45,17 @@ describe('content generation configuration', () => {
     expect(contentConfigFingerprint(base)).not.toBe(
       contentConfigFingerprint({ ...base, price: 79 }),
     );
+  });
+
+  it('keeps single-product price text concise and associates multiple prices by name', () => {
+    expect(exactCreativePriceText([{ name: 'Violet Diffuser', oldPrice: null, newPrice: 69 }]))
+      .toEqual(['69 د.ل']);
+    expect(exactCreativePriceText([{ name: 'Pillow', oldPrice: 99, newPrice: 79 }]))
+      .toEqual(['قبل 99 د.ل — بعد 79 د.ل']);
+    expect(exactCreativePriceText([
+      { name: 'Pillow', oldPrice: null, newPrice: 99 },
+      { name: 'Sheet', oldPrice: null, newPrice: 149 },
+    ])).toEqual(['Pillow: 99 د.ل', 'Sheet: 149 د.ل']);
   });
 
   it('uses the professional image model unless explicitly configured otherwise', () => {

@@ -130,6 +130,16 @@ export function generationVerificationWarnings(v: CampaignImageVerification, has
   return [...new Set(out)].slice(0, 12);
 }
 
+export function exactCreativePriceText(prices: Array<{ name: string; oldPrice: number | null; newPrice: number }>): string[] {
+  const includeName = prices.length > 1;
+  return prices.map((price) => {
+    const prefix = includeName ? `${price.name}: ` : '';
+    return price.oldPrice != null
+      ? `${prefix}قبل ${price.oldPrice} د.ل — بعد ${price.newPrice} د.ل`
+      : `${prefix}${price.newPrice} د.ل`;
+  });
+}
+
 /** Worker handler for one durable generation revision. */
 export async function processContentGeneration(db: Kysely<DB>, runId: string): Promise<void> {
   const run = await db.selectFrom('content_generation_runs').selectAll().where('id', '=', runId).executeTakeFirst();
@@ -218,9 +228,7 @@ export async function processContentGeneration(db: Kysely<DB>, runId: string): P
 
       for (let attempt = 1; attempt <= 3; attempt++) {
         await db.updateTable('content_generation_runs').set({ attempt_count: groupIndex * 3 + attempt, stage: 'creating' }).where('id', '=', runId).execute();
-        const exactPriceText = groupPrices.map((p) => p.oldPrice != null
-          ? `${p.name}: قبل ${p.oldPrice} د.ل — بعد ${p.newPrice} د.ل`
-          : `${p.name}: ${p.newPrice} د.ل`);
+        const exactPriceText = exactCreativePriceText(groupPrices);
         const envelope = compilePrompt(behaviors, 'campaign_image', {
           task: 'content_studio_professional_visual',
           treatment: item.creative_treatment,
@@ -232,13 +240,15 @@ export async function processContentGeneration(db: Kysely<DB>, runId: string): P
           brand: brand?.logo_public_url ? 'Use the supplied official logo reference exactly.' : `Render the restrained text wordmark exactly: ${brand?.wordmark || 'ENGLISH HOME LIBYA'}`,
           instruction: item.creative_treatment === 'use_original'
             ? 'Preserve the original photograph and product exactly. Improve only crop, lighting, layout, and commercial finish. Integrate all exact supplied text professionally.'
-            : 'Create premium, photorealistic English Home lifestyle advertising photography around the supplied product. Change the scene, never the product. Reproduce the reference product exactly: identical silhouette and geometry, dimensions, color, material, transparency, printed artwork and labels, packaging, closures, handles, caps, attachments, and exact number and placement of included pieces or reeds. Do not redesign, simplify, substitute, or invent any product detail. Integrate all exact supplied Arabic text, prices, and branding professionally with strong hierarchy and safe margins.',
+            : 'This is an image-editing task. The first supplied image is the PRIMARY PRODUCT IMAGE: retain its actual product pixels and visible identity wherever possible while replacing or extending only the surrounding scene. Create premium, photorealistic English Home lifestyle advertising photography around it. Change the scene, never the product. Preserve identical silhouette and geometry, dimensions, color, material, transparency, printed artwork and labels, packaging, closures, handles, caps, attachments, and exact number and placement of included pieces or reeds. Do not redraw, redesign, simplify, substitute, or invent any product detail. Integrate only the exact supplied Arabic phrase, exact price text, and branding professionally with strong hierarchy and safe margins. Do not add a product name unless it is explicitly included in exact text.',
           correction_feedback: feedback,
         });
         const generated = await editImage({
           prompt: envelope.runtimeData,
           systemPrompt: envelope.effectiveSystemInstruction,
-          referenceImages: group.map((r) => ({ data: r.data, mimeType: r.mimeType, label: r.label })),
+          baseImageBase64: group[0].data,
+          mimeType: group[0].mimeType,
+          referenceImages: group.slice(1).map((r) => ({ data: r.data, mimeType: r.mimeType, label: r.label })),
           aspectRatio: item.aspect_ratio,
           imageSize: '2K',
           strictModel: true,
