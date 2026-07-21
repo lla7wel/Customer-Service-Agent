@@ -165,6 +165,7 @@ Nothing is hard-coded and no secret is ever committed.
 | `MEDIA_ROOT` / `PUBLIC_MEDIA_BASE_URL` | media | Image storage + public base URL |
 | `GEMINI_API_KEY` | AI | Text, vision, embedding and creative-generation calls |
 | `GEMINI_CAMPAIGN_IMAGE_MODEL` | creative | Pinned final Content Studio model (`gemini-3-pro-image`) |
+| `GEMINI_CREATIVE_VERIFICATION_MODEL` | creative QA | High-accuracy product/text verifier (`gemini-2.5-pro`) |
 | `META_PAGE_ID`, `META_PAGE_ACCESS_TOKEN`, `META_APP_SECRET`, `META_VERIFY_TOKEN` | Meta | Messenger + Page publishing |
 | `META_IG_USER_ID` | Instagram | Instagram DMs, publishing and comments |
 

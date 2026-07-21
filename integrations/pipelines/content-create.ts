@@ -109,15 +109,21 @@ export async function generationFingerprint(db: Kysely<DB>, contentItemId: strin
 }
 
 export function generationNeedsRetry(v: CampaignImageVerification, hasPhrase: boolean, hasPrice: boolean, hasBrand: boolean): boolean {
-  return v.product_status === 'unacceptable' || v.product_fidelity < 0.72
-    || (hasPhrase && ['mismatch', 'missing'].includes(v.overlay_text_status))
-    || (hasPrice && ['mismatch', 'missing'].includes(v.price_text_status ?? 'unverifiable'))
-    || (hasBrand && ['mismatch'].includes(v.brand_mark_status ?? 'unverifiable'));
+  const identityChecks = Object.values(v.identity_checks ?? {});
+  return v.product_status !== 'acceptable' || v.product_fidelity < 0.9
+    || identityChecks.length !== 5 || identityChecks.some((status) => status !== 'match')
+    || (hasPhrase && v.overlay_text_status !== 'likely_exact')
+    || (hasPrice && v.price_text_status !== 'likely_exact')
+    || (hasBrand && v.brand_mark_status !== 'likely_exact');
 }
 
 export function generationVerificationWarnings(v: CampaignImageVerification, hasPhrase: boolean, hasPrice: boolean): string[] {
   const out = [...(v.concerns ?? [])];
-  if (v.product_status !== 'acceptable' || v.product_fidelity < 0.72) out.push('Product fidelity could not be fully verified.');
+  const identityChecks = Object.entries(v.identity_checks ?? {});
+  if (v.product_status !== 'acceptable' || v.product_fidelity < 0.9 || identityChecks.length !== 5 || identityChecks.some(([, status]) => status !== 'match')) out.push('Product fidelity could not be fully verified.');
+  for (const [attribute, status] of identityChecks) {
+    if (status !== 'match') out.push(`Product identity check failed: ${attribute.replaceAll('_', ' ')} (${status}).`);
+  }
   if (hasPhrase && v.overlay_text_status !== 'likely_exact') out.push('Arabic image text could not be verified as exact.');
   if (hasPrice && v.price_text_status !== 'likely_exact') out.push('Price text could not be verified as exact.');
   if (v.brand_mark_status && !['likely_exact', 'not_requested'].includes(v.brand_mark_status)) out.push('Brand mark could not be verified.');
@@ -226,7 +232,7 @@ export async function processContentGeneration(db: Kysely<DB>, runId: string): P
           brand: brand?.logo_public_url ? 'Use the supplied official logo reference exactly.' : `Render the restrained text wordmark exactly: ${brand?.wordmark || 'ENGLISH HOME LIBYA'}`,
           instruction: item.creative_treatment === 'use_original'
             ? 'Preserve the original photograph and product exactly. Improve only crop, lighting, layout, and commercial finish. Integrate all exact supplied text professionally.'
-            : 'Create premium, photorealistic English Home lifestyle advertising photography around the supplied product. Preserve product identity exactly. Integrate all exact supplied Arabic text, prices, and branding professionally with strong hierarchy and safe margins.',
+            : 'Create premium, photorealistic English Home lifestyle advertising photography around the supplied product. Change the scene, never the product. Reproduce the reference product exactly: identical silhouette and geometry, dimensions, color, material, transparency, printed artwork and labels, packaging, closures, handles, caps, attachments, and exact number and placement of included pieces or reeds. Do not redesign, simplify, substitute, or invent any product detail. Integrate all exact supplied Arabic text, prices, and branding professionally with strong hierarchy and safe margins.',
           correction_feedback: feedback,
         });
         const generated = await editImage({
@@ -246,7 +252,7 @@ export async function processContentGeneration(db: Kysely<DB>, runId: string): P
           requested_prices: exactPriceText,
           requested_brand: brand?.logo_public_url ? 'official supplied logo' : (brand?.wordmark || 'ENGLISH HOME LIBYA'),
           products: products.filter((p) => !groupProductIds.length || groupProductIds.includes(p.product_id)).map((p) => ({ id: p.product_id, code: p.product_code, name: customerProductName(p as any) })),
-          instruction: 'Compare every supplied product reference with the generated visual. Read the Arabic phrase, every price, and the brand mark. Report mismatch or missing content conservatively.',
+          instruction: 'Compare every supplied product reference side by side with the generated visual. Audit every required identity field separately. Product beauty or category similarity is irrelevant. Read the Arabic phrase, every price, and the brand mark character by character. Report every mismatch, obstruction, crop, or uncertainty conservatively.',
         });
         await db.updateTable('content_generation_runs').set({ stage: 'verifying_text' }).where('id', '=', runId).execute();
         const checked = await verifyCampaignImage({
@@ -262,6 +268,11 @@ export async function processContentGeneration(db: Kysely<DB>, runId: string): P
           product_fidelity: 0, product_status: 'unverifiable', overlay_text_status: 'unverifiable',
           price_text_status: 'unverifiable', brand_mark_status: 'unverifiable', observed_text: null,
           concerns: ['Verification model unavailable.'],
+          identity_checks: {
+            silhouette_and_geometry: 'unverifiable', color_material_and_transparency: 'unverifiable',
+            pattern_artwork_and_labels: 'unverifiable', included_components_and_count: 'unverifiable',
+            packaging_and_closures: 'unverifiable',
+          },
         };
         final = { image: generated.images[0], model: generated.model, verification, trace: envelope.traceId };
         if (!generationNeedsRetry(verification, item.image_text_mode !== 'none', exactPriceText.length > 0, true) || attempt === 3) break;

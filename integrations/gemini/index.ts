@@ -19,6 +19,7 @@ import {
   textModel,
   marketingTextModel,
   visionModel,
+  creativeVerificationModel,
   campaignImageModel,
   imageModelChain,
   type GeminiPart,
@@ -325,6 +326,13 @@ export interface CampaignImageVerification {
   brand_mark_status?: 'likely_exact' | 'mismatch' | 'missing' | 'unverifiable' | 'not_requested';
   observed_text: string | null;
   concerns: string[];
+  identity_checks: {
+    silhouette_and_geometry: 'match' | 'mismatch' | 'unverifiable';
+    color_material_and_transparency: 'match' | 'mismatch' | 'unverifiable';
+    pattern_artwork_and_labels: 'match' | 'mismatch' | 'unverifiable';
+    included_components_and_count: 'match' | 'mismatch' | 'unverifiable';
+    packaging_and_closures: 'match' | 'mismatch' | 'unverifiable';
+  };
 }
 
 /** Probabilistic review only. Callers must never present this as pixel-perfect proof. */
@@ -352,9 +360,9 @@ export async function verifyCampaignImage(args: {
     { inlineData: { mimeType: args.generatedMimeType, data: args.generatedImageBase64 } },
   ];
   const r = await generateContent(parts, {
-    model: visionModel(),
+    model: creativeVerificationModel(),
     systemInstruction: args.systemPrompt,
-    timeoutMs: 25_000,
+    timeoutMs: 90_000,
     json: true,
     temperature: args.temperature ?? 0.1,
   });
@@ -365,8 +373,35 @@ export async function verifyCampaignImage(args: {
     overlay_text_status: 'unverifiable',
     observed_text: null,
     concerns: ['Vision verification returned no valid result.'],
+    identity_checks: {
+      silhouette_and_geometry: 'unverifiable',
+      color_material_and_transparency: 'unverifiable',
+      pattern_artwork_and_labels: 'unverifiable',
+      included_components_and_count: 'unverifiable',
+      packaging_and_closures: 'unverifiable',
+    },
   };
   result.product_fidelity = Math.max(0, Math.min(1, Number(result.product_fidelity) || 0));
   result.concerns = Array.isArray(result.concerns) ? result.concerns.map(String).slice(0, 10) : [];
+  const allowed = new Set(['match', 'mismatch', 'unverifiable']);
+  const rawChecks = result.identity_checks && typeof result.identity_checks === 'object' ? result.identity_checks : {} as CampaignImageVerification['identity_checks'];
+  result.identity_checks = {
+    silhouette_and_geometry: allowed.has(rawChecks.silhouette_and_geometry) ? rawChecks.silhouette_and_geometry : 'unverifiable',
+    color_material_and_transparency: allowed.has(rawChecks.color_material_and_transparency) ? rawChecks.color_material_and_transparency : 'unverifiable',
+    pattern_artwork_and_labels: allowed.has(rawChecks.pattern_artwork_and_labels) ? rawChecks.pattern_artwork_and_labels : 'unverifiable',
+    included_components_and_count: allowed.has(rawChecks.included_components_and_count) ? rawChecks.included_components_and_count : 'unverifiable',
+    packaging_and_closures: allowed.has(rawChecks.packaging_and_closures) ? rawChecks.packaging_and_closures : 'unverifiable',
+  };
+  const checkValues = Object.values(result.identity_checks);
+  if (checkValues.includes('mismatch')) {
+    result.product_status = 'unacceptable';
+    result.product_fidelity = Math.min(result.product_fidelity, 0.4);
+    result.concerns.push('One or more immutable product-identity attributes do not match the source.');
+  } else if (checkValues.includes('unverifiable')) {
+    result.product_status = 'unverifiable';
+    result.product_fidelity = Math.min(result.product_fidelity, 0.7);
+    result.concerns.push('One or more immutable product-identity attributes could not be verified.');
+  }
+  result.concerns = [...new Set(result.concerns)].slice(0, 10);
   return { ok: true, result, latencyMs: r.latencyMs, model: r.model };
 }
