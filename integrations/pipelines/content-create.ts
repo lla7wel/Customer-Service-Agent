@@ -23,6 +23,12 @@ import { jsonArrayFrom } from 'kysely/helpers/postgres';
 
 type ReferenceImage = { data: string; mimeType: string; label: string; productId: string | null; url: string };
 
+// Gemini 2.5 Flash counts internal thinking tokens against maxOutputTokens.
+// Small ceilings (the old 80/400 values) left only a word or one partial line
+// for the visible answer even when the model followed the prompt correctly.
+export const MARKETING_PHRASE_MAX_TOKENS = 800;
+export const MARKETING_CAPTION_MAX_TOKENS = 1200;
+
 async function loadItemProducts(db: Kysely<DB>, contentItemId: string) {
   return db
     .selectFrom('content_products as cp')
@@ -96,7 +102,7 @@ export async function generatePhrase(db: Kysely<DB>, productNames: string[], pur
   });
   const r = await generateContent(envelope.runtimeData, {
     model: marketingTextModel(), systemInstruction: envelope.effectiveSystemInstruction,
-    temperature: 0.82, maxOutputTokens: 120,
+    temperature: 0.82, maxOutputTokens: MARKETING_PHRASE_MAX_TOKENS,
   });
   return cleanGeneratedPhrase(r.text);
 }
@@ -117,7 +123,7 @@ export async function generateCaption(db: Kysely<DB>, args: {
   });
   const r = await generateContent(envelope.runtimeData, {
     model: marketingTextModel(), systemInstruction: envelope.effectiveSystemInstruction,
-    temperature: 0.75, maxOutputTokens: 400,
+    temperature: 0.75, maxOutputTokens: MARKETING_CAPTION_MAX_TOKENS,
   });
   return cleanGeneratedCaption(r.text, args.purpose);
 }

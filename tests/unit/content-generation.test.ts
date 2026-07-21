@@ -7,6 +7,8 @@ import {
   exactCreativePriceText,
   generationNeedsRetry,
   generationVerificationWarnings,
+  MARKETING_CAPTION_MAX_TOKENS,
+  MARKETING_PHRASE_MAX_TOKENS,
 } from '../../integrations/pipelines/content-create';
 import { campaignImageModel, creativeVerificationModel, mergeCampaignImageVerifications } from '../../integrations/gemini';
 
@@ -70,6 +72,11 @@ describe('content generation configuration', () => {
       .toBe('نعومة تكمّل راحتك ✨\nاختاري لونك المفضل');
     expect(cleanGeneratedCaption('خصم اليوم 🔥\nقبل 199 وبعد 149', 'price_drop'))
       .toBe('خصم اليوم 🔥\nقبل 199 وبعد 149');
+  });
+
+  it('budgets for Gemini thinking without starving visible Arabic copy', () => {
+    expect(MARKETING_PHRASE_MAX_TOKENS).toBeGreaterThanOrEqual(800);
+    expect(MARKETING_CAPTION_MAX_TOKENS).toBeGreaterThanOrEqual(1000);
   });
 
   it('uses a bold retail-sale contract only for price drops', () => {
