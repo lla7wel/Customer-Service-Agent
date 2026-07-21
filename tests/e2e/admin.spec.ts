@@ -26,9 +26,14 @@ test.describe('authentication', () => {
     await expect(page).toHaveURL(/\/login/);
   });
 
-  test('wrong credentials are rejected with a message', async ({ page }) => {
+  test('wrong credentials are rejected with a message', async ({ page }, testInfo) => {
+    const projectOctet = ({ desktop: 11, tablet: 12, 'phone-360': 13, 'phone-390': 14, 'phone-430': 15 } as Record<string, number>)[testInfo.project.name] ?? 20;
+    await page.setExtraHTTPHeaders({ 'x-forwarded-for': `198.51.100.${projectOctet}` });
     await page.goto('/login');
-    await page.getByPlaceholder('username').fill(E2E_USERNAME);
+    // Keep the deliberate failure isolated per viewport. Reusing the owner
+    // username in five projects would correctly trip the production limiter
+    // and turn later valid-login tests into a test-harness failure.
+    await page.getByPlaceholder('username').fill(`unknown_${testInfo.project.name}`);
     await page.locator('input[type="password"]').fill('definitely-wrong-password');
     await page.locator('input[type="password"]').press('Enter');
     await expect(page.getByText(/غير صحيحة/)).toBeVisible();
@@ -102,6 +107,10 @@ test.describe('signed-in application', () => {
 
   test('catalog lists products and opens a product with price history + family panels', async ({ page }) => {
     await page.goto('/catalog');
+    const allProducts = page.getByText('كل المنتجات').locator('..');
+    await expect(allProducts.getByText('2', { exact: true })).toBeVisible();
+    const imageRecords = page.getByText(/سجلات الصور/).locator('..');
+    await expect(imageRecords.getByText('2', { exact: true })).toBeVisible();
     await expect(page.getByText(/طقم غطاء لحاف/).first()).toBeVisible();
     await page.getByText(/طقم غطاء لحاف/).first().click();
     await expect(page.getByText('تاريخ السعر')).toBeVisible();
@@ -109,15 +118,32 @@ test.describe('signed-in application', () => {
     await expectNoHorizontalOverflow(page);
   });
 
-  test('Content Studio creates a post and shows the full workflow', async ({ page }) => {
+  test('Content Studio creates a post and exposes all four guided screens', async ({ page }) => {
     await page.goto('/content-studio');
     await page.getByRole('button', { name: /محتوى جديد/ }).click();
     await page.getByRole('button', { name: /إنشاء/ }).click();
     await page.waitForURL(/\/content-studio\/[0-9a-f-]{36}/);
-    await expect(page.getByText('المنتجات المختارة')).toBeVisible();
-    await expect(page.getByText('النص على الصورة')).toBeVisible();
-    await expect(page.getByText(/الكابشن/)).toBeVisible();
-    await expect(page.getByText(/المعاينة/)).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'اختر مصادر التصميم' })).toBeVisible();
+    await page.getByRole('button', { name: /الغرض/ }).click();
+    await expect(page.getByRole('heading', { name: 'حدد الغرض وشكل الإخراج' })).toBeVisible();
+    await page.getByRole('button', { name: /النص والتوليد/ }).click();
+    await expect(page.getByRole('heading', { name: 'راجع العبارة والكابشن' })).toBeVisible();
+    await page.getByRole('button', { name: /المعاينة والنشر/ }).click();
+    await expect(page.getByRole('heading', { name: 'المعاينة والنشر' })).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+  });
+
+  test('phone bottom navigation and More sheet keep every primary area reachable', async ({ page, isMobile }) => {
+    test.skip(!isMobile, 'compact navigation only');
+    await page.goto('/dashboard');
+    const nav = page.getByRole('navigation', { name: /التنقل الرئيسي/ });
+    await expect(nav).toBeVisible();
+    for (const label of ['الرئيسية', 'الرسائل', 'الكتالوج', 'المحتوى', 'المزيد']) {
+      await expect(nav.getByText(label, { exact: true })).toBeVisible();
+    }
+    await nav.getByRole('button', { name: /المزيد/ }).click();
+    await expect(page.getByText('تحكّم الذكاء والاختبار')).toBeVisible();
+    await expect(page.getByText('الإعدادات والفريق')).toBeVisible();
     await expectNoHorizontalOverflow(page);
   });
 
@@ -144,14 +170,18 @@ test.describe('signed-in application', () => {
 
   test('AI Control compiles the live prompt and offers version history', async ({ page }) => {
     await page.goto('/ai-control');
+    await page.getByRole('button', { name: /متقدم للمالك/ }).click();
     await expect(page.getByText(/معاينة البرومبت الفعّال/)).toBeVisible();
     await expect(page.getByText(/AI Control configuration is incomplete/)).toHaveCount(0);
-    await expect(page.getByRole('button', { name: /سجل النسخ والاستعادة/ }).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: /سجل النسخ/ }).first()).toBeVisible();
   });
 
-  test('sign out returns to the login page', async ({ page }) => {
+  test('sign out returns to the login page', async ({ page, isMobile }) => {
     await page.goto('/dashboard');
-    await page.getByRole('button', { name: /تسجيل الخروج/ }).click();
+    if (isMobile) {
+      await page.getByRole('navigation', { name: /التنقل الرئيسي/ }).getByRole('button', { name: /المزيد/ }).click();
+    }
+    await page.getByRole('button', { name: isMobile ? 'خروج' : 'تسجيل الخروج', exact: true }).click();
     await page.waitForURL(/\/login/);
     await page.goto('/dashboard');
     await expect(page).toHaveURL(/\/login/);
@@ -180,5 +210,29 @@ test.describe('accessibility basics', () => {
     await page.keyboard.press('Tab');
     const focused = await page.evaluate(() => document.activeElement?.tagName ?? '');
     expect(['A', 'BUTTON', 'INPUT']).toContain(focused);
+  });
+
+  test('interactive controls meet the compact target-size floor', async ({ page }) => {
+    await page.goto('/content-studio');
+    const tooSmall = await page.locator('button:visible, a:visible').evaluateAll((nodes) => nodes
+      .map((node) => ({ text: (node.textContent || '').trim().slice(0, 40), box: node.getBoundingClientRect() }))
+      .filter(({ box }) => box.width > 0 && box.height > 0 && (box.width < 24 || box.height < 24))
+      .map(({ text, box }) => ({ text, width: Math.round(box.width), height: Math.round(box.height) })));
+    expect(tooSmall).toEqual([]);
+  });
+});
+
+test.describe('visual reference states', () => {
+  test.beforeEach(async ({ page }) => signIn(page));
+
+  test('dashboard light and dark', async ({ page, isMobile }) => {
+    await page.goto('/dashboard');
+    await expect(page).toHaveScreenshot('dashboard-light.png', { fullPage: !isMobile, animations: 'disabled' });
+    if (isMobile) {
+      await page.getByRole('navigation', { name: /التنقل الرئيسي/ }).getByRole('button', { name: /المزيد/ }).click();
+    }
+    await page.locator('button[title="Switch to dark"]:visible').click();
+    if (isMobile) await page.keyboard.press('Escape');
+    await expect(page).toHaveScreenshot('dashboard-dark.png', { fullPage: !isMobile, animations: 'disabled' });
   });
 });

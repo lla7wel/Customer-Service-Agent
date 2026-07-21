@@ -121,7 +121,7 @@ export default function BusinessFactsEditor() {
         <button
           onClick={save}
           disabled={busy}
-          className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-accent px-4 text-sm font-semibold text-black shadow-glow transition hover:brightness-110 disabled:opacity-60"
+          className="btn-primary min-h-11 px-4"
         >
           {busy ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} حفظ الحقائق
         </button>

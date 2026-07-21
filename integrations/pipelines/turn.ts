@@ -420,6 +420,13 @@ async function finalizeTurn(
   if (!text && !safeImages.length && !(args.extraTexts?.length)) return { superseded: false };
 
   return db.transaction().execute(async (trx) => {
+    // Serialize finalization per conversation. Multiple workers may compose in
+    // parallel after a retry/race, but only one is allowed to persist a reply.
+    const live = await trx
+      .selectFrom('conversations').select(['ai_enabled'])
+      .where('id', '=', args.conversationId).forUpdate().executeTakeFirst();
+    if (live?.ai_enabled === false) return { superseded: true };
+
     // Supersede guard (durable): the trigger must still be the newest inbound.
     const latest = await trx
       .selectFrom('messages').select('id')
@@ -438,12 +445,18 @@ async function finalizeTurn(
       return { superseded: true };
     }
 
-    // AI may have been paused while composing — honor it at the last moment.
-    const live = await trx
-      .selectFrom('conversations').select(['ai_enabled'])
-      .where('id', '=', args.conversationId).executeTakeFirst();
-    if (live?.ai_enabled === false) return { superseded: true };
+    const trigger = await trx.selectFrom('messages').select('created_at')
+      .where('id', '=', args.triggerMessageId).executeTakeFirst();
+    if (trigger) {
+      const alreadyReplied = await trx.selectFrom('messages').select('id')
+        .where('conversation_id', '=', args.conversationId)
+        .where('direction', '=', 'outbound')
+        .where('created_at', '>=', trigger.created_at)
+        .executeTakeFirst();
+      if (alreadyReplied) return { superseded: true };
+    }
 
+    // AI may have been paused while composing — honor it at the last moment.
     const message = await trx
       .insertInto('messages')
       .values({

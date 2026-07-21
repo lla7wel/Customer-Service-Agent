@@ -93,7 +93,7 @@ export default async function ProductDetailPage(props: { params: Promise<{ produ
             <div className="flex items-center gap-2">
               {resolved.kind !== 'catalog' && <Badge tone="warn">{ar ? 'بحاجة لاسم عربي/إنجليزي' : 'Needs Arabic/English name'}</Badge>}
               <Badge tone={product.status === 'active' ? 'good' : product.status === 'out_of_stock' ? 'bad' : 'neutral'}>{humanize(product.status)}</Badge>
-              {onSale && <Badge tone="accent">{ar ? 'سعر حملة فعّال' : 'Campaign price'}</Badge>}
+              {onSale && <Badge tone="accent">{ar ? 'سعر عرض فعّال' : 'Promotional price'}</Badge>}
             </div>
           </div>
 

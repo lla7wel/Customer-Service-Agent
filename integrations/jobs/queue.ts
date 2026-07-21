@@ -21,6 +21,7 @@ export type JobType =
   | 'customer_turn'
   | 'outbox_deliver'
   | 'content_publish'
+  | 'content_generate'
   | 'comments_poll'
   | 'promotion_tick'
   | 'analytics_refresh'

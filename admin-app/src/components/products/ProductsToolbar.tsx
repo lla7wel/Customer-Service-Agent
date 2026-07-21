@@ -20,8 +20,8 @@ export default function ProductsToolbar({
   const [q, setQ] = useState(params.get('q') ?? '');
   const activeCat = params.get('category') ?? '';
   const view = params.get('view') === 'list' ? 'list' : 'grid';
-  const statusF = params.get('status') ?? '';
-  const imagesF = params.get('images') ?? '';
+  const statusF = params.get('status') ?? 'active';
+  const imagesF = params.get('images') ?? 'with';
 
   function setParam(key: string, val: string) {
     const sp = new URLSearchParams(Array.from(params.entries()));
@@ -89,11 +89,11 @@ export default function ProductsToolbar({
 
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="text-[11px] font-medium uppercase tracking-wide text-faint">{ar ? 'الحالة' : 'Status'}:</span>
-        <CatChip label={ar ? 'الكل' : 'All'} active={!statusF} onClick={() => setParam('status', '')} />
+        <CatChip label={ar ? 'الكل' : 'All'} active={statusF === 'all'} onClick={() => setParam('status', 'all')} />
         <CatChip label={ar ? 'فعّال' : 'Active'} active={statusF === 'active'} onClick={() => setParam('status', 'active')} />
         <CatChip label={ar ? 'بحاجة لمراجعة' : 'Needs review'} active={statusF === 'review'} onClick={() => setParam('status', 'review')} />
         <span className="ms-3 text-[11px] font-medium uppercase tracking-wide text-faint">{ar ? 'الصور' : 'Images'}:</span>
-        <CatChip label={ar ? 'الكل' : 'All'} active={!imagesF} onClick={() => setParam('images', '')} />
+        <CatChip label={ar ? 'الكل' : 'All'} active={imagesF === 'all'} onClick={() => setParam('images', 'all')} />
         <CatChip label={ar ? 'بصور' : 'With images'} active={imagesF === 'with'} onClick={() => setParam('images', 'with')} />
         <CatChip label={ar ? 'بدون صور' : 'Missing images'} active={imagesF === 'missing'} onClick={() => setParam('images', 'missing')} />
       </div>
@@ -114,7 +114,7 @@ function CatChip({ label, active, onClick }: { label: string; active: boolean; o
   return (
     <button
       onClick={onClick}
-      className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition ${
+      className={`min-h-11 shrink-0 rounded-full border px-3 py-2 text-xs font-medium transition ${
         active ? 'border-accent/40 bg-accent/12 text-accent' : 'border-line bg-surface text-muted hover:text-fg'
       }`}
     >

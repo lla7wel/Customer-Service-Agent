@@ -13,7 +13,7 @@ type Mode = 'customer' | 'image_matching' | 'campaign_caption';
 const MODES: { id: Mode; en: string; ar: string; icon: any; needsImage?: boolean; allowsImage?: boolean; ph_en: string; ph_ar: string }[] = [
   { id: 'customer', en: 'Customer turn', ar: 'محادثة عميل', icon: MessageSquare, allowsImage: true, ph_en: 'Customer message, product name, code, barcode, or link…', ph_ar: 'رسالة العميل، اسم منتج، كود، باركود، أو رابط…' },
   { id: 'image_matching', en: 'Image → product', ar: 'مطابقة صورة', icon: ScanSearch, needsImage: true, ph_en: 'Optional text with the image…', ph_ar: 'نص إضافي مع الصورة (اختياري)…' },
-  { id: 'campaign_caption', en: 'Campaign caption', ar: 'كابشن حملة', icon: Megaphone, ph_en: 'Campaign description / prompt…', ph_ar: 'وصف الحملة / البرومبت…' },
+  { id: 'campaign_caption', en: 'Marketing copy', ar: 'نص تسويقي', icon: Megaphone, ph_en: 'Product and content objective…', ph_ar: 'المنتج والغرض من المحتوى…' },
 ];
 
 export default function Playground({ locale }: { locale: Locale }) {
@@ -82,7 +82,7 @@ export default function Playground({ locale }: { locale: Locale }) {
           const Icon = m.icon;
           return (
             <button key={m.id} onClick={() => { setMode(m.id); reset(); }}
-              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition ${mode === m.id ? 'bg-accent-grad text-black shadow-glow' : 'text-muted hover:bg-surface hover:text-fg'}`}>
+              className={`inline-flex min-h-11 items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition ${mode === m.id ? 'bg-navy text-white' : 'text-muted hover:bg-surface hover:text-fg'}`}>
               <Icon size={15} /> {ar ? m.ar : m.en}
             </button>
           );
@@ -90,7 +90,7 @@ export default function Playground({ locale }: { locale: Locale }) {
       </div>
 
       {/* input */}
-      <Card className="mb-4 glass">
+      <Card className="mb-4 border border-line bg-surface shadow-card">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
             <p className="text-sm font-semibold text-fg">{ar ? active.ar : active.en}</p>
@@ -139,7 +139,7 @@ export default function Playground({ locale }: { locale: Locale }) {
 
       <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
         {/* CUSTOMER REPLY (right-hand truth) */}
-        <Card className="glass">
+        <Card className="border border-line bg-surface shadow-card">
           <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-faint">
             <Sparkles size={13} className="text-accent" /> {ar ? 'الرد كما يصل العميل' : 'Exact customer reply'}
           </h3>

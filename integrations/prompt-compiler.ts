@@ -118,7 +118,7 @@ const IMMUTABLE_POLICY: Record<AiTask, string> = {
 const RESPONSE_SCHEMA: Partial<Record<AiTask, string>> = {
   vision_describe: '{"product_type":string|null,"color":string|null,"material":string|null,"keywords_en":string[],"keywords_ar":string[],"code_text":string|null,"barcode_text":string|null,"summary":string|null}',
   vision_rank: '{"ranked":[{"product_id":string,"confidence":number,"reason":string}]}',
-  campaign_image_verify: '{"product_fidelity":number,"product_status":"acceptable"|"warning"|"unacceptable"|"unverifiable","overlay_text_status":"likely_exact"|"mismatch"|"missing"|"unverifiable"|"not_requested","observed_text":string|null,"concerns":string[]}',
+  campaign_image_verify: '{"product_fidelity":number,"product_status":"acceptable"|"warning"|"unacceptable"|"unverifiable","overlay_text_status":"likely_exact"|"mismatch"|"missing"|"unverifiable"|"not_requested","price_text_status":"likely_exact"|"mismatch"|"missing"|"unverifiable"|"not_requested","brand_mark_status":"likely_exact"|"mismatch"|"missing"|"unverifiable"|"not_requested","observed_text":string|null,"concerns":string[]}',
 };
 
 const TOOL_POLICY: Partial<Record<AiTask, string[]>> = {
@@ -182,7 +182,8 @@ export function compilePrompt(
   task: AiTask,
   runtime: Record<string, unknown> = {},
 ): PromptEnvelope {
-  const keys = TASK_BEHAVIORS[task];
+  const consolidated = map[`task:${task}`];
+  const keys = consolidated ? [`task:${task}`] : TASK_BEHAVIORS[task];
   const missing = keys.filter((key) => {
     if (OPTIONAL_BEHAVIORS.has(key)) return false;
     const row = map[key];

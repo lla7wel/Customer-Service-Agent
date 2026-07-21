@@ -40,8 +40,11 @@ export default defineConfig({
   },
   projects: [
     { name: 'desktop', use: { ...devices['Desktop Chrome'], viewport: { width: 1366, height: 900 } } },
-    // A genuinely narrow phone — the owner's team works from phones.
-    { name: 'phone', use: { ...devices['Pixel 5'], viewport: { width: 360, height: 740 } } },
+    { name: 'tablet', use: { ...devices['Desktop Chrome'], viewport: { width: 768, height: 1024 } } },
+    // The three compact widths in the acceptance brief.
+    { name: 'phone-360', use: { ...devices['Pixel 5'], viewport: { width: 360, height: 740 } } },
+    { name: 'phone-390', use: { ...devices['Pixel 5'], viewport: { width: 390, height: 844 } } },
+    { name: 'phone-430', use: { ...devices['Pixel 5'], viewport: { width: 430, height: 932 } } },
   ],
   webServer: {
     // Runs the real production standalone server (output: 'standalone'),

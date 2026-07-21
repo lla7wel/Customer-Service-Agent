@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
     : [];
   const purpose = body?.purpose === 'price_drop' ? 'price_drop' : 'general';
   const outputMode = ['original', 'carousel', 'combined'].includes(String(body?.output_mode)) ? String(body.output_mode) : 'original';
-  const imageTextMode = ['generated', 'manual', 'none'].includes(String(body?.image_text_mode)) ? String(body.image_text_mode) : 'none';
+  const imageTextMode = ['generated', 'manual', 'none'].includes(String(body?.image_text_mode)) ? String(body.image_text_mode) : 'generated';
   if (!platforms.length) return badRequest('missing_platforms', 'Choose Facebook, Instagram, or both.');
 
   const item = await db
@@ -56,6 +56,9 @@ export async function POST(req: NextRequest) {
       purpose,
       output_mode: outputMode,
       image_text_mode: imageTextMode,
+      creative_treatment: 'ai_scene',
+      multi_product_layout: 'carousel',
+      aspect_ratio: contentType === 'story' ? '9:16' : '4:5',
       status: 'draft',
       created_by: admin.id === '00000000-0000-0000-0000-000000000000' ? null : admin.id,
     })

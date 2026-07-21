@@ -275,6 +275,10 @@ export async function editImage(args: {
   systemPrompt: string;
   baseImageBase64?: string;
   mimeType?: string;
+  referenceImages?: Array<{ data: string; mimeType: string; label?: string }>;
+  aspectRatio?: string;
+  imageSize?: '1K' | '2K' | '4K';
+  strictModel?: boolean;
   temperature?: number;
 }): Promise<AiResult<{
   images: { mimeType: string; data: string }[];
@@ -291,10 +295,15 @@ export async function editImage(args: {
   if (args.baseImageBase64 && args.mimeType) {
     parts.push({ inlineData: { mimeType: args.mimeType, data: args.baseImageBase64 } });
   }
+  for (const [index, image] of (args.referenceImages ?? []).entries()) {
+    parts.push({ text: image.label || `REFERENCE PRODUCT ${index + 1}` });
+    parts.push({ inlineData: { mimeType: image.mimeType, data: image.data } });
+  }
   const r = await generateImage(parts, {
-    chain: imageModelChain(campaignImageModel()),
+    chain: args.strictModel ? [campaignImageModel()] : imageModelChain(campaignImageModel()),
     temperature: args.temperature ?? 0.8,
     systemInstruction: args.systemPrompt,
+    imageConfig: { aspectRatio: args.aspectRatio, imageSize: args.imageSize ?? '2K' },
   });
   return {
     ok: true,
@@ -312,6 +321,8 @@ export interface CampaignImageVerification {
   product_fidelity: number;
   product_status: 'acceptable' | 'warning' | 'unacceptable' | 'unverifiable';
   overlay_text_status: 'likely_exact' | 'mismatch' | 'missing' | 'unverifiable' | 'not_requested';
+  price_text_status?: 'likely_exact' | 'mismatch' | 'missing' | 'unverifiable' | 'not_requested';
+  brand_mark_status?: 'likely_exact' | 'mismatch' | 'missing' | 'unverifiable' | 'not_requested';
   observed_text: string | null;
   concerns: string[];
 }
@@ -322,6 +333,7 @@ export async function verifyCampaignImage(args: {
   runtimeData: string;
   sourceImageBase64: string;
   sourceMimeType: string;
+  sourceImages?: Array<{ data: string; mimeType: string; label?: string }>;
   generatedImageBase64: string;
   generatedMimeType: string;
   temperature?: number;
@@ -330,8 +342,12 @@ export async function verifyCampaignImage(args: {
   if (!args.systemPrompt?.trim()) throw new Error('compiled_system_prompt_required');
   const parts: GeminiPart[] = [
     { text: args.runtimeData },
-    { text: 'SOURCE PRODUCT IMAGE' },
+    { text: 'SOURCE PRODUCT IMAGE 1' },
     { inlineData: { mimeType: args.sourceMimeType, data: args.sourceImageBase64 } },
+    ...(args.sourceImages ?? []).flatMap((source, index) => [
+      { text: source.label || `SOURCE PRODUCT IMAGE ${index + 2}` },
+      { inlineData: { mimeType: source.mimeType, data: source.data } },
+    ]),
     { text: 'GENERATED CAMPAIGN IMAGE' },
     { inlineData: { mimeType: args.generatedMimeType, data: args.generatedImageBase64 } },
   ];

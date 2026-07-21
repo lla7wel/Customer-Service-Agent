@@ -6,7 +6,7 @@
 | [`DATABASE.md`](DATABASE.md) | Schema map, migration policy, database-enforced invariants, retention |
 | [`OPERATIONS.md`](OPERATIONS.md) | Deployment, upgrades, backup/restore, monitoring, worker behaviour |
 | [`AI_AND_MESSENGER.md`](AI_AND_MESSENGER.md) | Prompt architecture, tools, conversation rules, order handoff, Take Over |
-| [`CONTENT_STUDIO.md`](CONTENT_STUDIO.md) | Content creation, deterministic typography, publishing states, comment automation |
+| [`CONTENT_STUDIO.md`](CONTENT_STUDIO.md) | Guided creation, durable visual revisions, publishing states, comment automation |
 | [`CATALOG_AND_PRODUCTS.md`](CATALOG_AND_PRODUCTS.md) | Price truth, field locks, CSV import, families, retrieval |
 | [`SECURITY.md`](SECURITY.md) | Security posture, repository hygiene, known limitations |
 | [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) | Operator debug guide |

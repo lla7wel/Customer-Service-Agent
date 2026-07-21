@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { sql } from 'kysely';
 import { requireAdminApi, badRequest, notFound } from '@/lib/api';
 import { audit } from '@/lib/auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const EDITABLE_STATUSES = ['draft', 'generating', 'ready', 'failed'];
+const EDITABLE_STATUSES = ['draft', 'ready', 'failed'];
 
 /** Full detail: item + products + assets + publications + comments. */
 export async function GET(req: NextRequest, props: { params: Promise<{ contentId: string }> }) {
@@ -17,7 +18,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ contentId
   const item = await db.selectFrom('content_items').selectAll().where('id', '=', contentId).executeTakeFirst();
   if (!item) return notFound();
 
-  const [products, assets, publications, comments] = await Promise.all([
+  const [products, assets, generations, publications, comments] = await Promise.all([
     db.selectFrom('content_products as cp')
       .innerJoin('products as p', 'p.id', 'cp.product_id')
       .leftJoin('product_images as pi', (join) => join.onRef('pi.product_id', '=', 'p.id').on('pi.is_primary', '=', true))
@@ -28,6 +29,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ contentId
       .orderBy('cp.position', 'asc')
       .execute(),
     db.selectFrom('content_assets').selectAll().where('content_item_id', '=', contentId).orderBy('position', 'asc').execute(),
+    db.selectFrom('content_generation_runs').selectAll().where('content_item_id', '=', contentId).orderBy('created_at', 'desc').limit(20).execute(),
     db.selectFrom('content_publications').selectAll().where('content_item_id', '=', contentId).execute(),
     db.selectFrom('content_comments as cc')
       .innerJoin('content_publications as pub', 'pub.id', 'cc.publication_id')
@@ -39,7 +41,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ contentId
       .limit(100)
       .execute(),
   ]);
-  return NextResponse.json({ item, products, assets, publications, comments });
+  return NextResponse.json({ item, products, assets, generations, publications, comments });
 }
 
 /** Update draft/ready fields: products, prices, caption, phrase, platforms… */
@@ -63,18 +65,27 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ content
   }
 
   const update: Record<string, unknown> = {};
+  let creativeChanged = false;
   if (typeof body?.title === 'string') update.title = body.title.trim().slice(0, 200) || null;
   if (typeof body?.caption === 'string') update.caption = body.caption.slice(0, 2200) || null;
-  if (typeof body?.image_text === 'string') update.image_text = body.image_text.trim().slice(0, 200) || null;
-  if (['generated', 'manual', 'none'].includes(String(body?.image_text_mode))) update.image_text_mode = body.image_text_mode;
-  if (['original', 'carousel', 'combined'].includes(String(body?.output_mode))) update.output_mode = body.output_mode;
-  if (['price_drop', 'general'].includes(String(body?.purpose))) update.purpose = body.purpose;
-  if (body?.content_type === 'story' || body?.content_type === 'post') update.content_type = body.content_type;
+  if (typeof body?.image_text === 'string') { update.image_text = body.image_text.trim().slice(0, 200) || null; update.image_text_approved = Boolean(body.image_text.trim()); creativeChanged = true; }
+  if (body?.image_text_approved === true) update.image_text_approved = true;
+  if (['generated', 'manual', 'none'].includes(String(body?.image_text_mode))) { update.image_text_mode = body.image_text_mode; creativeChanged = true; }
+  if (['original', 'carousel', 'combined'].includes(String(body?.output_mode))) { update.output_mode = body.output_mode; creativeChanged = true; }
+  if (['price_drop', 'general'].includes(String(body?.purpose))) { update.purpose = body.purpose; creativeChanged = true; }
+  if (body?.content_type === 'story' || body?.content_type === 'post') {
+    update.content_type = body.content_type;
+    update.aspect_ratio = body.content_type === 'story' ? '9:16' : '4:5';
+    creativeChanged = true;
+  }
+  if (['ai_scene', 'use_original'].includes(String(body?.creative_treatment))) { update.creative_treatment = body.creative_treatment; creativeChanged = true; }
+  if (['carousel', 'composition'].includes(String(body?.multi_product_layout))) { update.multi_product_layout = body.multi_product_layout; creativeChanged = true; }
   if (typeof body?.comment_automation === 'boolean') update.comment_automation = body.comment_automation;
   if (Array.isArray(body?.platforms)) {
     const platforms = (body.platforms as unknown[]).map(String).filter((p) => p === 'facebook' || p === 'instagram');
     if (!platforms.length) return badRequest('missing_platforms');
     update.platforms = platforms;
+    creativeChanged = true;
   }
   if (body?.promotion_ends_at === null) update.promotion_ends_at = null;
   else if (typeof body?.promotion_ends_at === 'string') {
@@ -85,6 +96,7 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ content
 
   // Selected products (+ per-product new price for price drops).
   if (Array.isArray(body?.products)) {
+    creativeChanged = true;
     const rows = (body.products as any[]).slice(0, 20).map((p, i) => ({
       product_id: String(p?.product_id ?? ''),
       new_price: p?.new_price != null ? Number(p.new_price) : null,
@@ -110,6 +122,18 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ content
 
   if (Object.keys(update).length) {
     await db.updateTable('content_items').set(update as any).where('id', '=', contentId).execute();
+  }
+  if (creativeChanged) {
+    await db.transaction().execute(async (trx) => {
+      await trx.updateTable('content_assets').set({ selected_for_publish: false })
+        .where('content_item_id', '=', contentId).where('asset_role', '=', 'output').execute();
+      await trx.updateTable('content_items').set({
+        config_revision: sql`config_revision + 1` as any,
+        selected_generation_run_id: null,
+        status: 'draft',
+        last_error: null,
+      }).where('id', '=', contentId).execute();
+    });
   }
   await audit(db, admin, 'content.update', { type: 'content_item', id: contentId, detail: { fields: Object.keys(update) } });
   const fresh = await db.selectFrom('content_items').selectAll().where('id', '=', contentId).executeTakeFirst();

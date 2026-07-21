@@ -28,7 +28,7 @@ export function databaseStatus(): IntegrationStatus {
   };
 }
 
-/** Where product/campaign images live and the public base URL they are served from. */
+/** Where product/content images live and the public base URL they are served from. */
 export function mediaStatus(): { configured: boolean; missing: string[] } {
   const missing: string[] = [];
   if (!envAny('MEDIA_ROOT')) missing.push('MEDIA_ROOT');
@@ -57,10 +57,10 @@ export function metaStatus(): IntegrationStatus {
   const missing = checks.filter(([, v]) => !v).map(([k]) => k);
   return {
     key: 'meta',
-    label: 'Meta / Facebook',
+    label: 'Meta channels',
     configured: missing.length === 0,
     missing,
-    hint: 'Messenger DMs and page posting.',
+    hint: 'Messenger, Instagram DMs, publishing and comment automation.',
   };
 }
 
@@ -71,7 +71,7 @@ export function cronStatus(): IntegrationStatus {
     label: 'Scheduler',
     configured: !!secret,
     missing: secret ? [] : ['CRON_SECRET'],
-    hint: 'Shared secret for the campaign-scheduler cron endpoint.',
+    hint: 'Shared secret for the Content Studio scheduler endpoint.',
   };
 }
 

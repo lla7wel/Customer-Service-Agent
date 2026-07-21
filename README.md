@@ -1,8 +1,8 @@
 # English Home Libya — Customer Service & Content Platform
 
-The operations centre for a real home-furnishings retailer in Libya: it answers
+The Arabic-first operations center for a real home-furnishings retailer in Libya: it answers
 customers on **Facebook Messenger and Instagram Direct** in Libyan Arabic,
-grounded in a locked 4,700-product catalog, and it produces, schedules and
+grounded in the full locked product catalog, and it produces, schedules and
 publishes the brand's Facebook/Instagram content — including automatic replies
 to comments on the posts it published.
 
@@ -38,11 +38,16 @@ API** and **Meta's Graph API**.
   image fingerprint + semantic) with no silent row caps.
 
 **Content Studio**
-- Posts and Stories for Facebook, Instagram or both; original / carousel /
-  combined output; price-drop or general purpose.
-- Exact prices and Arabic phrases are rendered by a **deterministic typography
-  layer** (resvg + rustybuzz shaping, bundled Tajawal font) — an image model is
-  never trusted to spell a price. What you preview is what publishes.
+- A four-screen, autosaving flow: source, purpose, copy/generate, then preview/
+  publish. Uploads and catalog products are equal source-reference choices.
+- Posts and Stories for Facebook, Instagram or both; carousel or one composition;
+  AI lifestyle scene or careful original-image treatment; price-drop or general purpose.
+- Final 2K reference-image creatives use the pinned professional image model.
+  Product identity, exact Arabic phrase, verified prices and branding are checked
+  automatically, with two targeted retries and visible warnings when exactness
+  still cannot be established.
+- Every generation is a durable, preserved revision. Source uploads can never be
+  published accidentally; only the selected output for the current configuration can.
 - Approve immediately or schedule in **Africa/Tripoli** time. A scheduled price
   drop activates the new price only when a platform actually publishes.
 - Automatic Libyan-Arabic comment replies **only on content this app published**.
@@ -51,6 +56,8 @@ API** and **Meta's Graph API**.
 - Durable PostgreSQL-backed jobs, transactional outbox, exactly-once publishing.
 - Multi-admin accounts with database-backed revocable sessions and audit trail.
 - Truthful readiness checks — a channel is never shown as connected without proof.
+- Responsive editorial admin UI: desktop sidebar, five phone tabs, RTL-first
+  layouts, light/dark themes, keyboard focus, reduced motion and sticky task actions.
 
 ---
 
@@ -136,7 +143,7 @@ explicit "not connected" state with the exact remediation instead of faking data
 ```bash
 npm run db:preflight     # report pending migrations, change nothing
 npm run test             # unit + integration (throwaway databases)
-npm run test:e2e         # Playwright: desktop + 360px phone, Arabic RTL
+npm run test:e2e         # desktop, tablet, and 360/390/430px phones, Arabic RTL
 npm run worker:build     # bundle the worker for the container
 npm run bootstrap:families --prefix scripts   # build product families from catalog data
 
@@ -156,7 +163,8 @@ Nothing is hard-coded and no secret is ever committed.
 | `SESSION_SECRET` | yes | Signs admin sessions (≥32 chars). **The app refuses to serve without it.** |
 | `OWNER_USERNAME` / `OWNER_PASSWORD_HASH` | bootstrap | First owner account (bcrypt hash) |
 | `MEDIA_ROOT` / `PUBLIC_MEDIA_BASE_URL` | media | Image storage + public base URL |
-| `GEMINI_API_KEY` | AI | Text, vision and embedding calls |
+| `GEMINI_API_KEY` | AI | Text, vision, embedding and creative-generation calls |
+| `GEMINI_CAMPAIGN_IMAGE_MODEL` | creative | Pinned final Content Studio model (`gemini-3-pro-image`) |
 | `META_PAGE_ID`, `META_PAGE_ACCESS_TOKEN`, `META_APP_SECRET`, `META_VERIFY_TOKEN` | Meta | Messenger + Page publishing |
 | `META_IG_USER_ID` | Instagram | Instagram DMs, publishing and comments |
 
@@ -223,7 +231,7 @@ only when the API actually returns them — never as fabricated zeros.
 
 ```bash
 npm run test        # unit + integration suite
-npm run test:e2e    # Playwright, desktop + 360px phone
+npm run test:e2e    # Playwright across desktop, tablet and three phone sizes
 ```
 
 Integration tests create a throwaway PostgreSQL database, run the **real**
@@ -233,7 +241,8 @@ test environment, so no test can reach a live account or a paid API.
 Coverage includes migrations (fresh + upgrade-from-production), the job queue,
 webhook durability and dedupe, outbox delivery states, exactly-once publishing,
 price/promotion rules, CSV import locks, order-handoff behaviour, comment
-automation, authentication and readiness truthfulness.
+automation, authentication, readiness truthfulness, selected-output publication,
+stale/warning approval gates, responsive navigation and visual reference states.
 
 ---
 

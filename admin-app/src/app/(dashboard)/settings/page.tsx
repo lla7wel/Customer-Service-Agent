@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import {
   Settings, Database, Bot, Facebook, Languages, Palette, ShieldCheck,
-  CircleCheck, CircleAlert, Link2, Activity, Store, Users, Radio,
+  CircleCheck, CircleAlert, Link2, Activity, Store, Users, Radio, BadgeCheck,
 } from 'lucide-react';
 import { PageHeader, Card, Badge, SectionTitle } from '@/components/ui';
 import LanguageSwitcher from '@/components/LanguageSwitcher';
@@ -9,6 +9,7 @@ import ThemeToggle from '@/components/ThemeToggle';
 import BusinessFactsEditor from '@/components/settings/BusinessFactsEditor';
 import AdminsManager from '@/components/settings/AdminsManager';
 import ChannelReadiness from '@/components/settings/ChannelReadiness';
+import BrandKitEditor from '@/components/settings/BrandKitEditor';
 import { getT } from '@/lib/i18n/server';
 import { getTheme } from '@/lib/theme-server';
 import { allIntegrationStatuses, metaStatus, webhookUrls, type IntegrationStatus } from '@integrations/status';
@@ -21,6 +22,7 @@ const TABS = [
   { id: 'general', ar: 'عام', en: 'General', icon: Settings },
   { id: 'channels', ar: 'القنوات', en: 'Channels', icon: Radio },
   { id: 'facts', ar: 'حقائق المتجر', en: 'Business Facts', icon: Store },
+  { id: 'brand', ar: 'هوية العلامة', en: 'Brand Kit', icon: BadgeCheck },
   { id: 'admins', ar: 'المشرفون', en: 'Admins', icon: Users },
   { id: 'activity', ar: 'النشاط والأخطاء', en: 'Activity', icon: Activity },
 ];
@@ -48,7 +50,7 @@ export default async function SettingsPage(props: { searchParams: Promise<{ tab?
             key={tb.id}
             href={`/settings${tb.id === 'general' ? '' : `?tab=${tb.id}`}`}
             className={`inline-flex min-h-11 items-center gap-1.5 rounded-lg border px-3.5 text-sm font-medium transition ${
-              tab === tb.id ? 'border-accent/40 bg-accent/12 text-accent shadow-glow' : 'border-transparent text-muted hover:bg-surface2 hover:text-fg'
+              tab === tb.id ? 'border-navy bg-navy text-white' : 'border-transparent text-muted hover:bg-surface2 hover:text-fg'
             }`}
           >
             <tb.icon size={15} />
@@ -60,6 +62,7 @@ export default async function SettingsPage(props: { searchParams: Promise<{ tab?
       {tab === 'general' && <GeneralTab ar={ar} theme={theme} locale={locale} statuses={statuses} hooks={hooks} metaConfigured={metaConfigured} />}
       {tab === 'channels' && <Card><SectionTitle icon={Radio} title={ar ? 'جاهزية القنوات' : 'Channel readiness'} /><ChannelReadiness /></Card>}
       {tab === 'facts' && <Card><SectionTitle icon={Store} title={ar ? 'حقائق المتجر' : 'Business facts'} /><BusinessFactsEditor /></Card>}
+      {tab === 'brand' && <Card><SectionTitle icon={BadgeCheck} title={ar ? 'هوية العلامة' : 'Brand Kit'} /><BrandKitEditor /></Card>}
       {tab === 'admins' && <Card><SectionTitle icon={Users} title={ar ? 'حسابات المشرفين' : 'Admin accounts'} /><AdminsManager /></Card>}
       {tab === 'activity' && <ActivityTab ar={ar} locale={locale} />}
     </div>

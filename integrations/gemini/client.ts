@@ -30,7 +30,7 @@ export function isGeminiConfigured(): boolean {
  * embedding model is never used for generation.
  */
 
-const DEFAULT_IMAGE_MODEL = 'gemini-3-pro-image-preview';
+const DEFAULT_IMAGE_MODEL = 'gemini-3-pro-image';
 
 /** Fast, affordable text model: customer replies, order wording, store/delivery
  *  info, product Q&A after tools retrieve data. Never the image model. */
@@ -66,13 +66,14 @@ export function imageModel(): string {
 export function imageEditModel(): string {
   return envAny('GEMINI_IMAGE_EDIT_MODEL', 'GEMINI_IMAGE_MODEL') || DEFAULT_IMAGE_MODEL;
 }
-/** Campaign/final creative image model (defaults to the generation model). */
+/** Final Content Studio creative model. It is intentionally independent from
+ * generic image-generation overrides so production cannot silently downgrade. */
 export function campaignImageModel(): string {
-  return envAny('GEMINI_CAMPAIGN_IMAGE_MODEL', 'GEMINI_IMAGE_MODEL') || DEFAULT_IMAGE_MODEL;
+  return envAny('GEMINI_CAMPAIGN_IMAGE_MODEL') || DEFAULT_IMAGE_MODEL;
 }
 /**
  * Ordered image-model fallback chain: preferred → fallback → last fallback.
- * The strong `gemini-3-pro-image-preview` is sometimes transiently rate-limited
+ * Image utilities outside final Content Studio generation may be transiently rate-limited;
  * ("high demand"); the chain keeps image generation working and we ALWAYS log /
  * surface which model actually produced the output (never a silent fallback).
  */
@@ -110,6 +111,8 @@ export interface GenerateOptions {
   json?: boolean;
   /** For image generation models. */
   responseModalities?: ('TEXT' | 'IMAGE')[];
+  /** Native image output controls supported by Gemini image models. */
+  imageConfig?: { aspectRatio?: string; imageSize?: '1K' | '2K' | '4K' };
   signal?: AbortSignal;
   /** Abort the request after this many ms (default below). Prevents hangs. */
   timeoutMs?: number;
@@ -121,7 +124,7 @@ export const DEFAULT_TEXT_TIMEOUT_MS = 30_000;
  *  tight: the strong model is frequently slow/high-demand, so we abort and fall
  *  back rather than let one attempt eat the whole request budget. Two attempts
  *  (≈25s + a ≈30s working fallback) then comfortably fit a 90s function budget. */
-export const DEFAULT_IMAGE_TIMEOUT_MS = 25_000;
+export const DEFAULT_IMAGE_TIMEOUT_MS = 120_000;
 /** Default timeout for a single embedding call. */
 export const DEFAULT_EMBED_TIMEOUT_MS = 12_000;
 /** Default timeout for ONE round of the tool-calling loop. */
@@ -181,6 +184,7 @@ export async function generateContent(
       ...(opts.maxOutputTokens ? { maxOutputTokens: opts.maxOutputTokens } : {}),
       ...(opts.json ? { responseMimeType: 'application/json' } : {}),
       ...(opts.responseModalities ? { responseModalities: opts.responseModalities } : {}),
+      ...(opts.imageConfig ? { imageConfig: opts.imageConfig } : {}),
     },
   };
   if (opts.systemInstruction) {
@@ -276,7 +280,14 @@ export interface ImageGenResult {
  */
 export async function generateImage(
   parts: GeminiPart[] | string,
-  opts: { chain?: string[]; temperature?: number; signal?: AbortSignal; perAttemptTimeoutMs?: number; systemInstruction?: string } = {},
+  opts: {
+    chain?: string[];
+    temperature?: number;
+    signal?: AbortSignal;
+    perAttemptTimeoutMs?: number;
+    systemInstruction?: string;
+    imageConfig?: { aspectRatio?: string; imageSize?: '1K' | '2K' | '4K' };
+  } = {},
 ): Promise<ImageGenResult> {
   const apiKey = env('GEMINI_API_KEY');
   if (!apiKey) throw new GeminiNotConfiguredError();
@@ -295,6 +306,7 @@ export async function generateImage(
         systemInstruction: opts.systemInstruction,
         signal: opts.signal,
         timeoutMs: perAttempt,
+        imageConfig: opts.imageConfig,
       });
       if (r.images.length) {
         attempts.push({ model, ok: true });

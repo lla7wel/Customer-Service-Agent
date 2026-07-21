@@ -3,6 +3,7 @@ import { requireAdminApi, badRequest, notFound } from '@/lib/api';
 import { audit } from '@/lib/auth';
 import { tripoliLocalToUtc } from '@/lib/tripoli-time';
 import { startPublishing } from '@integrations/pipelines/content-publish';
+import { validateSelectedGeneration } from '@integrations/content/approval';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -31,10 +32,25 @@ export async function POST(req: NextRequest, props: { params: Promise<{ contentI
   }
   if (!(item.platforms ?? []).length) return badRequest('missing_platforms');
 
+  const selectedRun = item.selected_generation_run_id
+    ? await db.selectFrom('content_generation_runs').select(['id', 'status', 'quality_status', 'config_revision'])
+      .where('id', '=', item.selected_generation_run_id).where('content_item_id', '=', contentId).executeTakeFirst()
+    : null;
+  const generationIssue = validateSelectedGeneration({
+    selectedGenerationId: item.selected_generation_run_id,
+    itemRevision: item.config_revision,
+    run: selectedRun,
+    warningAcknowledged: body?.acknowledge_quality_warning === true,
+  });
+  if (generationIssue === 'no_selected_generation') return badRequest(generationIssue, 'Select a current generated visual first.');
+  if (generationIssue === 'stale_generation') return badRequest(generationIssue, 'The selected visual is stale. Generate again before publishing.');
+  if (generationIssue === 'quality_warning_ack_required') return badRequest(generationIssue, 'Review and acknowledge the visual quality warning before publishing.');
   const assetCount = await db.selectFrom('content_assets')
     .select(db.fn.countAll<number>().as('n'))
     .where('content_item_id', '=', contentId)
-    .where('kind', 'in', ['composed', 'uploaded', 'original', 'generated'])
+    .where('asset_role', '=', 'output')
+    .where('selected_for_publish', '=', true)
+    .where('config_revision', '=', item.config_revision)
     .executeTakeFirst();
   if (!Number(assetCount?.n ?? 0)) return badRequest('no_assets', 'Generate or upload the visuals first.');
 

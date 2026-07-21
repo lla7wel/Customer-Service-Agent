@@ -44,6 +44,16 @@ export default async function globalSetup() {
        250,250,'active','Bedding', array['مفرش','لحاف'], array['duvet','set']),
       ('E2E-1002','COTTON BATH TOWEL 70x140','منشفة قطن','منشفة حمام قطن',
        45,45,'active','Bath', array['منشفة'], array['towel'])`);
+  await db.query(`
+    with p as (select id from products where product_code = 'E2E-1001'), imgs as (
+      insert into product_images (product_id, public_url, local_path, position, is_primary)
+      select id, 'https://media.example/e2e-duvet-front.jpg', 'e2e/duvet-front.jpg', 0, true from p
+      union all
+      select id, 'https://media.example/e2e-duvet-detail.jpg', 'e2e/duvet-detail.jpg', 1, false from p
+      returning id, product_id, is_primary
+    )
+    update products set primary_image_id = imgs.id from imgs
+    where products.id = imgs.product_id and imgs.is_primary = true`);
 
   // Synthetic conversation already flagged for the team (order intent).
   await db.query(`

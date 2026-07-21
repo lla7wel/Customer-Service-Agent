@@ -71,6 +71,13 @@ Media is not rebuildable; it is backed up with the database.
 
 Install the nightly job from `deploy/crontab.example`.
 
+On the VPS, `deploy/backup.sh` creates a database dump every night. Media uses
+one verified full `eh-media-<timestamp>.tar.gz` baseline followed by append-only
+`eh-media-incremental-<timestamp>.tar.gz` archives, because the production media
+volume is too large to duplicate on the same disk every night. Restore the most
+recent full baseline first, then apply every later incremental in timestamp
+order. The script never prunes a media chain automatically.
+
 ## Monitoring
 
 - `GET /api/health` — returns 503 unless the database really answers a query.

@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 
 type SearchItem = {
   id: string;
-  type: 'product' | 'conversation' | 'customer' | 'campaign';
+  type: 'product' | 'conversation' | 'customer' | 'content';
   title: string;
   subtitle: string;
   href: string;
@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
   if (q.length < 2) return NextResponse.json({ rows: [] });
   const like = `%${q}%`;
 
-  const [products, conversations, customers, campaigns] = await Promise.all([
+  const [products, conversations, customers, content] = await Promise.all([
     uiProductQuery(db)
       .where((eb) =>
         eb.or([
@@ -66,9 +66,9 @@ export async function GET(req: NextRequest) {
       .orderBy('updated_at', 'desc')
       .limit(5)
       .execute(),
-    db.selectFrom('campaigns')
-      .select(['id', 'name', 'status', 'type'])
-      .where((eb) => eb.or([eb('name', 'ilike', like), eb(eb.cast('status', 'text'), 'ilike', like), eb(eb.cast('type', 'text'), 'ilike', like)]))
+    db.selectFrom('content_items')
+      .select(['id', 'title', 'status', 'content_type', 'purpose'])
+      .where((eb) => eb.or([eb('title', 'ilike', like), eb(eb.cast('status', 'text'), 'ilike', like), eb(eb.cast('purpose', 'text'), 'ilike', like)]))
       .orderBy('updated_at', 'desc')
       .limit(5)
       .execute(),
@@ -118,13 +118,13 @@ export async function GET(req: NextRequest) {
       href: latestByCustomer.has(c.id) ? `/inbox/${latestByCustomer.get(c.id)}` : '/inbox',
     });
   }
-  for (const c of campaigns as any[]) {
+  for (const c of content as any[]) {
     rows.push({
-      id: `campaign:${c.id}`,
-      type: 'campaign',
-      title: c.name,
-      subtitle: [c.status, c.type].filter(Boolean).join(' · '),
-      href: `/campaigns/${c.id}`,
+      id: `content:${c.id}`,
+      type: 'content',
+      title: c.title || (c.content_type === 'story' ? 'Story' : 'Post'),
+      subtitle: [c.status, c.purpose].filter(Boolean).join(' · '),
+      href: `/content-studio/${c.id}`,
     });
   }
 

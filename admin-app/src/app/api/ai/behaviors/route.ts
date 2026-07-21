@@ -5,10 +5,9 @@
  * Calls: PostgreSQL through the shared Kysely integration.
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@integrations/db/client';
-import { databaseStatus } from '@integrations/status';
 import { compilePrompt, publicPromptPreview, type AiTask } from '@integrations/prompt-compiler';
 import { loadBehaviorsWith } from '@integrations/ai-behaviors';
+import { requireAdminApi, forbidden } from '@/lib/api';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,13 +18,9 @@ const FIELDS = ['title', 'prompt', 'rules', 'memory', 'enabled'];
 const TASKS: AiTask[] = ['customer_reply', 'product_recommendation', 'handoff_reply', 'vision_describe', 'vision_rank', 'memory_summary', 'campaign_caption', 'campaign_image', 'campaign_image_verify'];
 
 export async function GET(req: NextRequest) {
-  const db = getDb();
-  if (!db) {
-    return NextResponse.json(
-      { error: 'integration_not_configured', missing: databaseStatus().missing },
-      { status: 503 },
-    );
-  }
+  const auth = await requireAdminApi(req);
+  if (!auth.ok) return auth.res;
+  const { db } = auth.ctx;
   try {
     const task = req.nextUrl.searchParams.get('task') as AiTask | null;
     if (task) {
@@ -47,13 +42,10 @@ export async function GET(req: NextRequest) {
  * one click (no deployment).
  */
 export async function PATCH(req: NextRequest) {
-  const db = getDb();
-  if (!db) {
-    return NextResponse.json(
-      { error: 'integration_not_configured', missing: databaseStatus().missing },
-      { status: 503 },
-    );
-  }
+  const auth = await requireAdminApi(req);
+  if (!auth.ok) return auth.res;
+  const { db, admin } = auth.ctx;
+  if (admin.role !== 'owner') return forbidden('Only the owner can edit raw prompts.');
   const body = await req.json().catch(() => ({}));
   const id = body?.id as string | undefined;
   if (!id) return NextResponse.json({ error: 'missing_id' }, { status: 400 });

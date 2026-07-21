@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAdminApi, badRequest, notFound } from '@/lib/api';
+import { requireAdminApi, badRequest, forbidden, notFound } from '@/lib/api';
 import { audit } from '@/lib/auth';
 
 export const runtime = 'nodejs';
@@ -9,6 +9,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: NextRequest) {
   const auth = await requireAdminApi(req);
   if (!auth.ok) return auth.res;
+  if (auth.ctx.admin.role !== 'owner') return forbidden();
   const { db } = auth.ctx;
   const key = req.nextUrl.searchParams.get('key');
   if (!key) return badRequest('missing_key');
@@ -32,6 +33,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await requireAdminApi(req);
   if (!auth.ok) return auth.res;
+  if (auth.ctx.admin.role !== 'owner') return forbidden();
   const { db, admin } = auth.ctx;
   const body = await req.json().catch(() => ({}));
   const versionId = Number(body?.versionId);

@@ -1,5 +1,6 @@
 import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
+import MobileNav from '@/components/MobileNav';
 import { getLocale } from '@/lib/i18n/server';
 import { getTheme } from '@/lib/theme-server';
 import { allIntegrationStatuses } from '@integrations/status';
@@ -22,9 +23,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <div className="relative flex min-w-0 flex-1 flex-col">
         <Topbar locale={locale} theme={theme} statuses={statuses} userEmail={userEmail} />
         <main className="scroll-thin safe-x relative flex-1 overflow-y-auto overflow-x-hidden">
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-48 cc-grid opacity-60" />
-          <div className="safe-b relative mx-auto max-w-[1400px] animate-fade-in p-4 sm:p-5 lg:p-6">{children}</div>
+          <div className="safe-b relative mx-auto max-w-[1480px] animate-fade-in p-3 pb-24 sm:p-5 sm:pb-24 md:pb-6 lg:p-7">{children}</div>
         </main>
+        <MobileNav locale={locale} theme={theme} userEmail={userEmail} statuses={statuses} />
       </div>
     </div>
   );

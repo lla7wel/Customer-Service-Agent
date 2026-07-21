@@ -148,6 +148,27 @@ export interface AiBehaviorVersions {
   title: string | null;
 }
 
+export interface AiTaskPrompts {
+  created_at: Generated<Timestamp>;
+  enabled: Generated<boolean>;
+  prompt: string;
+  task_key: string;
+  title: string;
+  updated_at: Generated<Timestamp>;
+  updated_by: string | null;
+}
+
+export interface AiTaskPromptVersions {
+  created_at: Generated<Timestamp>;
+  enabled: boolean;
+  id: Generated<Int8>;
+  note: string | null;
+  prompt: string;
+  saved_by: string | null;
+  task_key: string;
+  title: string;
+}
+
 export interface AiEvents {
   confidence: Numeric | null;
   conversation_id: string | null;
@@ -257,8 +278,12 @@ export interface CatalogMatchSuggestions {
 }
 
 export interface ContentAssets {
+  aspect_ratio: string | null;
+  asset_role: Generated<string>;
+  config_revision: number | null;
   content_item_id: string;
   created_at: Generated<Timestamp>;
+  generation_run_id: string | null;
   height: number | null;
   id: Generated<string>;
   kind: string;
@@ -266,9 +291,33 @@ export interface ContentAssets {
   position: Generated<number>;
   product_id: string | null;
   public_url: string | null;
+  selected_for_publish: Generated<boolean>;
   source_model: string | null;
   storage_path: string | null;
   width: number | null;
+  verification: Generated<Json>;
+}
+
+export interface ContentGenerationRuns {
+  attempt_count: Generated<number>;
+  config_fingerprint: string;
+  config_revision: number;
+  content_item_id: string;
+  created_at: Generated<Timestamp>;
+  created_by: string | null;
+  finished_at: Timestamp | null;
+  id: Generated<string>;
+  last_error: string | null;
+  prompt_trace_id: string | null;
+  quality_status: Generated<string>;
+  requested_model: string | null;
+  source_model: string | null;
+  stage: Generated<string>;
+  started_at: Timestamp | null;
+  status: Generated<string>;
+  updated_at: Generated<Timestamp>;
+  verification: Generated<Json>;
+  warnings: Generated<Json>;
 }
 
 export interface ContentComments {
@@ -293,24 +342,42 @@ export interface ContentComments {
 export interface ContentItems {
   approved_at: Timestamp | null;
   approved_by: string | null;
+  aspect_ratio: Generated<string>;
   caption: string | null;
   comment_automation: Generated<boolean>;
+  config_revision: Generated<number>;
   content_type: Generated<string>;
   created_at: Generated<Timestamp>;
   created_by: string | null;
+  creative_treatment: Generated<string>;
   id: Generated<string>;
   image_text: string | null;
+  image_text_approved: Generated<boolean>;
   image_text_mode: Generated<string>;
   last_error: string | null;
   legacy_campaign_id: string | null;
+  multi_product_layout: Generated<string>;
   output_mode: Generated<string>;
   platforms: Generated<string[]>;
   promotion_ends_at: Timestamp | null;
   purpose: Generated<string>;
   scheduled_for: Timestamp | null;
+  selected_generation_run_id: string | null;
   status: Generated<string>;
   title: string | null;
   updated_at: Generated<Timestamp>;
+}
+
+export interface BrandKit {
+  accent_color: Generated<string>;
+  created_at: Generated<Timestamp>;
+  id: Generated<number>;
+  logo_public_url: string | null;
+  logo_storage_path: string | null;
+  primary_color: Generated<string>;
+  updated_at: Generated<Timestamp>;
+  updated_by: string | null;
+  wordmark: Generated<string>;
 }
 
 export interface ContentProducts {
@@ -749,15 +816,19 @@ export interface DB {
   admin_sessions: AdminSessions;
   admin_users: AdminUsers;
   ai_behavior_versions: AiBehaviorVersions;
+  ai_task_prompts: AiTaskPrompts;
+  ai_task_prompt_versions: AiTaskPromptVersions;
   ai_behaviors: AiBehaviors;
   ai_events: AiEvents;
   analytics_daily: AnalyticsDaily;
+  brand_kit: BrandKit;
   business_facts: BusinessFacts;
   campaign_assets: CampaignAssets;
   campaign_products: CampaignProducts;
   campaigns: Campaigns;
   catalog_match_suggestions: CatalogMatchSuggestions;
   content_assets: ContentAssets;
+  content_generation_runs: ContentGenerationRuns;
   content_comments: ContentComments;
   content_items: ContentItems;
   content_products: ContentProducts;

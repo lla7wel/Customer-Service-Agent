@@ -4,7 +4,6 @@ import {
   Package,
   Clapperboard,
   SlidersHorizontal,
-  FlaskConical,
   Settings,
   type LucideIcon,
 } from 'lucide-react';
@@ -39,7 +38,6 @@ export const NAV: NavGroup[] = [
     titleKey: 'group_ai',
     items: [
       { href: '/ai-control', labelKey: 'nav_ai_control', icon: SlidersHorizontal },
-      { href: '/ai-playground', labelKey: 'nav_ai_playground', icon: FlaskConical },
     ],
   },
   {

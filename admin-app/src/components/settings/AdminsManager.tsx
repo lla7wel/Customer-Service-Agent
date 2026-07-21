@@ -151,7 +151,7 @@ export default function AdminsManager() {
           <button
             onClick={create}
             disabled={busy !== null || !form.username || form.password.length < 10}
-            className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-accent px-4 text-sm font-semibold text-black shadow-glow transition hover:brightness-110 disabled:opacity-50"
+            className="btn-primary min-h-11 px-4"
           >
             {busy === 'create' ? <Loader2 size={15} className="animate-spin" /> : <UserPlus size={15} />} إنشاء الحساب
           </button>

@@ -22,10 +22,19 @@ describe('migration runner', () => {
   it('creates the durable-processing and catalog-truth tables', async () => {
     for (const table of ['jobs', 'outbox_messages', 'inbound_events', 'content_items', 'content_publications',
       'content_comments', 'promotions', 'product_price_history', 'product_families', 'business_facts',
-      'admin_accounts', 'admin_sessions', 'admin_audit_log', 'ai_behavior_versions']) {
+      'admin_accounts', 'admin_sessions', 'admin_audit_log', 'ai_behavior_versions',
+      'content_generation_runs', 'brand_kit', 'ai_task_prompts', 'ai_task_prompt_versions']) {
       const r = await t.db.selectFrom(table as any).selectAll().limit(1).execute();
       expect(Array.isArray(r)).toBe(true);
     }
+  });
+
+  it('preserves legacy prompt fragments while seeding consolidated task prompts', async () => {
+    const fragments = await t.db.selectFrom('ai_behaviors').select('id').execute();
+    const tasks = await t.db.selectFrom('ai_task_prompts').select(['task_key', 'prompt']).execute();
+    expect(fragments.length).toBeGreaterThan(0);
+    expect(tasks.length).toBeGreaterThanOrEqual(9);
+    expect(tasks.find((row) => row.task_key === 'customer_reply')?.prompt).toMatch(/Libyan Arabic|العربية/i);
   });
 
   it('seeds the verified business facts', async () => {

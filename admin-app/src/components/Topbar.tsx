@@ -3,7 +3,6 @@ import LogoutButton from './LogoutButton';
 import LanguageSwitcher from './LanguageSwitcher';
 import ThemeToggle from './ThemeToggle';
 import SearchBar from './SearchBar';
-import MobileNav from './MobileNav';
 import type { Locale } from '@/lib/i18n/config';
 import type { Theme } from '@/lib/theme';
 import { translate } from '@/lib/i18n/dictionaries';
@@ -24,16 +23,16 @@ export default function Topbar({
   const t = (k: string) => translate(locale, k);
   const connectedCount = statuses.filter((s) => s.configured).length;
   return (
-    <header className="safe-t safe-x sticky top-0 z-20 flex h-16 items-center justify-between gap-2 border-b border-line/70 bg-bg/78 px-3 shadow-card backdrop-blur-xl sm:gap-3 sm:px-5">
-      <div className="flex flex-1 items-center gap-3">
-        <MobileNav locale={locale} />
-        <span className="text-sm font-semibold text-fg md:hidden">{t('app_subtitle')}</span>
-        <SearchBar placeholder={t('search_ph')} ar={locale === 'ar'} />
+    <header className="safe-t safe-x sticky top-0 z-20 flex h-16 items-center justify-between gap-3 border-b border-line bg-surface/95 px-4 backdrop-blur-xl sm:px-5">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-xs font-bold text-white md:hidden">EH</span>
+        <span className="min-w-0 truncate text-sm font-bold text-fg md:hidden">{t('app_subtitle')}</span>
+        <div className="hidden w-full md:block"><SearchBar placeholder={t('search_ph')} ar={locale === 'ar'} /></div>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="hidden items-center gap-2 md:flex">
         {/* integration health */}
-        <div className="hidden items-center gap-2 rounded-xl border border-line bg-surface/80 px-2.5 py-1.5 shadow-card backdrop-blur-md sm:flex">
+        <div className="hidden items-center gap-2 rounded-xl border border-line bg-surface2/60 px-2.5 py-1.5 lg:flex">
           <span className="inline-flex items-center gap-1 rounded-lg bg-accent/10 px-2 py-1 text-[11px] font-medium text-accent">
             <Zap size={12} />
             {connectedCount}/{statuses.length}
@@ -56,12 +55,12 @@ export default function Topbar({
         <LanguageSwitcher locale={locale} />
 
         {/* profile */}
-        <div className="flex items-center gap-2 rounded-xl border border-line bg-surface/80 py-1 pe-1 ps-2 shadow-card backdrop-blur-md">
+        <div className="flex items-center gap-2 rounded-xl border border-line bg-surface2/60 py-1 pe-1 ps-2">
           <ShieldCheck size={15} className="text-accent" />
           <span className="hidden text-xs text-muted sm:inline">
             {userEmail || (locale === 'ar' ? 'مشرف' : 'Admin')}
           </span>
-          <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-accent-grad text-[11px] font-bold text-black">
+          <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-accent text-[11px] font-bold text-white">
             {(userEmail?.[0] || 'A').toUpperCase()}
           </span>
           <LogoutButton label={locale === 'ar' ? 'تسجيل الخروج' : 'Sign out'} />

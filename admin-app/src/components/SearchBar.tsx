@@ -2,11 +2,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, Megaphone, MessageSquare, Package, Search, User } from 'lucide-react';
+import { Clapperboard, Loader2, MessageSquare, Package, Search, User } from 'lucide-react';
 
 interface SearchItem {
   id: string;
-  type: 'product' | 'conversation' | 'customer' | 'campaign';
+  type: 'product' | 'conversation' | 'customer' | 'content';
   title: string;
   subtitle: string;
   href: string;
@@ -16,10 +16,10 @@ const ICONS = {
   product: Package,
   conversation: MessageSquare,
   customer: User,
-  campaign: Megaphone,
+  content: Clapperboard,
 };
 
-/** Global search across products, conversations, customers and campaigns. */
+/** Global search across products, conversations, customers and Content Studio. */
 export default function SearchBar({ placeholder, ar = false }: { placeholder: string; ar?: boolean }) {
   const router = useRouter();
   const [q, setQ] = useState('');

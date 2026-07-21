@@ -45,7 +45,7 @@ export default function ChannelReadiness() {
         <button
           onClick={run}
           disabled={busy}
-          className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-accent px-4 text-sm font-semibold text-black shadow-glow transition hover:brightness-110 disabled:opacity-60"
+          className="btn-primary min-h-11 px-4"
         >
           {busy ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />} فحص الآن
         </button>

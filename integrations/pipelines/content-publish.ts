@@ -32,7 +32,7 @@ export async function startPublishing(db: Kysely<DB>, contentItemId: string): Pr
   return db.transaction().execute(async (trx) => {
     const item = await trx
       .selectFrom('content_items')
-      .select(['id', 'status', 'platforms', 'content_type'])
+      .select(['id', 'status', 'platforms', 'content_type', 'multi_product_layout', 'config_revision'])
       .where('id', '=', contentItemId)
       .forUpdate()
       .executeTakeFirst();
@@ -44,6 +44,9 @@ export async function startPublishing(db: Kysely<DB>, contentItemId: string): Pr
       .selectFrom('content_assets')
       .select(trx.fn.countAll<number>().as('n'))
       .where('content_item_id', '=', contentItemId)
+      .where('asset_role', '=', 'output')
+      .where('selected_for_publish', '=', true)
+      .where('config_revision', '=', item.config_revision)
       .executeTakeFirst();
     if (!Number(assetCount?.n ?? 0)) {
       await trx.updateTable('content_items')
@@ -55,7 +58,9 @@ export async function startPublishing(db: Kysely<DB>, contentItemId: string): Pr
     await trx.updateTable('content_items').set({ status: 'publishing' }).where('id', '=', contentItemId).execute();
 
     const platforms = (item.platforms ?? []).filter((p) => p === 'facebook' || p === 'instagram');
-    const format = item.content_type === 'story' ? 'story' : (Number(assetCount?.n) > 1 ? 'carousel' : 'feed');
+    const format = item.content_type === 'story'
+      ? 'story'
+      : (item.multi_product_layout === 'carousel' && Number(assetCount?.n) > 1 ? 'carousel' : 'feed');
     const publicationIds: string[] = [];
     for (const platform of platforms) {
       const existing = await trx
@@ -106,12 +111,14 @@ export type PublishOutcome = 'published' | 'retry' | 'failed' | 'skipped';
 
 /** Worker handler: publish ONE publication (one platform of one item). */
 export async function processPublication(db: Kysely<DB>, publicationId: string): Promise<PublishOutcome> {
-  // Claim (pending → publishing). A crashed 'publishing' row is also
-  // claimable: provider_children lets it resume without duplicate uploads.
+  // Atomic claim: only one worker can move pending → publishing. A genuinely
+  // crashed publication becomes claimable after its stale window; fresh
+  // concurrent calls cannot post twice.
   const claimed = await sql<any>`
     update content_publications
        set status = 'publishing', attempts = attempts + 1
-     where id = ${publicationId} and status in ('pending','publishing')
+     where id = ${publicationId}
+       and (status = 'pending' or (status = 'publishing' and updated_at < now() - interval '15 minutes'))
     returning *
   `.execute(db);
   const pub = claimed.rows[0];
@@ -128,6 +135,9 @@ export async function processPublication(db: Kysely<DB>, publicationId: string):
     .selectFrom('content_assets')
     .select(['id', 'public_url', 'position'])
     .where('content_item_id', '=', item.id)
+    .where('asset_role', '=', 'output')
+    .where('selected_for_publish', '=', true)
+    .where('config_revision', '=', item.config_revision)
     .orderBy('position', 'asc')
     .execute();
   const urls = assets.map((a) => a.public_url).filter((u): u is string => !!u && /^https:\/\//.test(u));

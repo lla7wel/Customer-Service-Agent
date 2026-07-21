@@ -1,0 +1,4 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { requireAdminApi, badRequest, forbidden } from '@/lib/api';
+export const runtime='nodejs'; export const dynamic='force-dynamic';
+export async function GET(req:NextRequest){const auth=await requireAdminApi(req);if(!auth.ok)return auth.res;if(auth.ctx.admin.role!=='owner')return forbidden();const key=req.nextUrl.searchParams.get('task');if(!key)return badRequest('missing_task');const rows=await auth.ctx.db.selectFrom('ai_task_prompt_versions as v').leftJoin('admin_accounts as a','a.id','v.saved_by').select(['v.id','v.task_key','v.title','v.prompt','v.enabled','v.note','v.created_at','a.username as saved_by_username']).where('v.task_key','=',key).orderBy('v.created_at','desc').limit(50).execute();return NextResponse.json({versions:rows});}

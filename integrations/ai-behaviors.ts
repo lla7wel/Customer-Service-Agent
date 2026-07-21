@@ -91,6 +91,27 @@ export async function loadBehaviorsWith(db: Kysely<DB>): Promise<BehaviorMap> {
   }
   const map: BehaviorMap = {};
   for (const b of rows) map[b.behavior_key] = b;
+  // 0023 consolidates the old fragments into one editable prompt per task.
+  // Keep the legacy rows loaded for rollback/history, while the compiler
+  // prefers these task:* records when present.
+  try {
+    const taskRows = await db.selectFrom('ai_task_prompts')
+      .select(['task_key','title','prompt','enabled','updated_at']).execute();
+    for (const row of taskRows) {
+      map[`task:${row.task_key}`] = {
+        behavior_key: `task:${row.task_key}`,
+        title: row.title,
+        prompt: row.prompt,
+        rules: null,
+        memory: null,
+        enabled: row.enabled,
+        updated_at: row.updated_at,
+      };
+    }
+  } catch {
+    // During a rolling migration the old compiler remains usable until 0023
+    // is applied; production deploys migrations before app/worker restart.
+  }
   return map;
 }
 

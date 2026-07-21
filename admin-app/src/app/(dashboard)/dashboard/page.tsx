@@ -197,7 +197,7 @@ export default async function DashboardPage() {
                 {recentAttention.map((c) => (
                   <li key={c.id}>
                     <Link href={`/inbox/${c.id}`} className="flex items-center justify-between gap-3 py-2.5 transition hover:bg-surface2/40">
-                      <p className="min-w-0 truncate text-sm text-fg" dir="auto">{c.last_message_preview || '—'}</p>
+                      <p className="min-w-0 whitespace-pre-wrap break-words text-sm text-fg" dir="auto">{c.last_message_preview || '—'}</p>
                       <span className="shrink-0 text-xs text-muted">{c.human_attention_reason ?? ''}</span>
                     </Link>
                   </li>
