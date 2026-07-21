@@ -5,6 +5,59 @@
  */
 import { sql, type Kysely } from 'kysely';
 import type { DB } from '../db/types';
+import { graphCall, igUserId, pageId, pageAccessToken } from '../providers/graph';
+
+interface ProviderMetric {
+  name?: string;
+  values?: Array<{ value?: unknown; end_time?: string }>;
+}
+
+const PROVIDER_METRIC_NAMES: Record<string, string> = {
+  page_post_engagements: 'facebook_page_engagements',
+  page_views_total: 'facebook_page_views',
+  reach: 'instagram_reach',
+  views: 'instagram_views',
+  total_interactions: 'instagram_interactions',
+};
+
+export function providerInsightRows(data: ProviderMetric[] | undefined): { day: string; metric: string; value: number }[] {
+  const rows: { day: string; metric: string; value: number }[] = [];
+  for (const series of data ?? []) {
+    const metric = series.name ? PROVIDER_METRIC_NAMES[series.name] : undefined;
+    if (!metric) continue;
+    for (const point of series.values ?? []) {
+      const value = Number(point.value);
+      if (!point.end_time || !Number.isFinite(value)) continue;
+      rows.push({ day: point.end_time.slice(0, 10), metric, value });
+    }
+  }
+  return rows;
+}
+
+async function refreshProviderInsights(
+  db: Kysely<DB>,
+  upsert: (rows: { day: string; metric: string; value: number }[]) => Promise<void>,
+  days: number,
+): Promise<void> {
+  if (!pageAccessToken() || !pageId()) return;
+  const readiness = await db.selectFrom('provider_readiness').select('ok').where('check_key', '=', 'insights').executeTakeFirst();
+  if (!readiness?.ok) return;
+  const until = Math.floor(Date.now() / 1000);
+  const since = until - days * 24 * 60 * 60;
+
+  const page = await graphCall<{ data?: ProviderMetric[] }>(`${pageId()}/insights`, {
+    params: { metric: 'page_post_engagements,page_views_total', period: 'day', since, until },
+    retries: 1,
+  }).catch(() => null);
+  if (page?.data) await upsert(providerInsightRows(page.data));
+
+  if (!igUserId()) return;
+  const instagram = await graphCall<{ data?: ProviderMetric[] }>(`${igUserId()}/insights`, {
+    params: { metric: 'reach,views,total_interactions', period: 'day', since, until },
+    retries: 1,
+  }).catch(() => null);
+  if (instagram?.data) await upsert(providerInsightRows(instagram.data));
+}
 
 /** Recompute daily rollups for the last `days` days (idempotent upserts). */
 export async function refreshAnalytics(db: Kysely<DB>, days = 14): Promise<void> {
@@ -74,4 +127,8 @@ export async function refreshAnalytics(db: Kysely<DB>, days = 14): Promise<void>
     select date(updated_at) as day, count(*) as n from content_comments
     where reply_status = 'failed' and updated_at > now() - interval '__DAYS__ days'
     group by 1`, 'comment_reply_failures');
+
+  // Provider analytics are read only after a real readiness check proves the
+  // token has Insights access. Missing permission remains missing—not fake 0.
+  await refreshProviderInsights(db, upsert, days);
 }

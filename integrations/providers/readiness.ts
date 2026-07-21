@@ -127,6 +127,41 @@ export async function checkInstagram(): Promise<ReadinessResult> {
   }
 }
 
+/** Prove that the Page token can return real owner-facing Insights data. */
+export async function checkInsights(): Promise<ReadinessResult> {
+  if (!pageAccessToken() || !pageId()) {
+    return { checkKey: 'insights', ok: false, summary: 'Insights require a connected Facebook Page.', detail: { remediation: 'Connect the Facebook Page first.' } };
+  }
+  try {
+    const until = Math.floor(Date.now() / 1000);
+    const since = until - 7 * 24 * 60 * 60;
+    const result = await graphCall<{ data?: unknown[] }>(`${pageId()}/insights`, {
+      params: { metric: 'page_post_engagements,page_views_total', period: 'day', since, until },
+      retries: 1,
+    });
+    const available = Array.isArray(result.data) && result.data.length > 0;
+    return {
+      checkKey: 'insights',
+      ok: available,
+      summary: available ? 'Facebook Page Insights access is working.' : 'The token cannot currently return Page Insights.',
+      detail: {
+        capabilities: available ? ['facebook_page_insights'] : [],
+        remediation: available ? null : 'Generate a Page token with pages_read_engagement and read_insights. The person authorizing it must have the Analyze task on the Page.',
+      },
+    };
+  } catch (e: any) {
+    return {
+      checkKey: 'insights',
+      ok: false,
+      summary: 'Page Insights access check failed.',
+      detail: {
+        error: e?.message ?? 'unknown',
+        remediation: 'Grant pages_read_engagement and read_insights, regenerate the long-lived Page token, then run this check again.',
+      },
+    };
+  }
+}
+
 export async function checkGemini(): Promise<ReadinessResult> {
   if (!env('GEMINI_API_KEY')) {
     return { checkKey: 'gemini', ok: false, summary: 'Gemini is not configured.', detail: { remediation: 'Set GEMINI_API_KEY.' } };
@@ -153,6 +188,7 @@ export async function runAllReadinessChecks(db: Kysely<DB>): Promise<ReadinessRe
     checkFacebookPage(),
     checkWebhookSubscription(),
     checkInstagram(),
+    checkInsights(),
     checkGemini(),
   ]);
   for (const r of results) {

@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
-import { runAllReadinessChecks, checkInstagram, checkFacebookPage, checkWebhookSubscription } from '../../integrations/providers/readiness';
+import { runAllReadinessChecks, checkInstagram, checkFacebookPage, checkWebhookSubscription, checkInsights } from '../../integrations/providers/readiness';
 import { createTestDatabase, type TestDb } from './setup';
 
 const jsonRes = (body: unknown, status = 200) =>
@@ -109,13 +109,23 @@ describe('truthful provider readiness (never fake "connected")', () => {
     expect(String(hooks.detail.remediation)).toContain('Webhooks');
   });
 
+  it('proves Insights with a real metric response and rejects an empty permission response', async () => {
+    process.env.META_PAGE_ACCESS_TOKEN = 'tok';
+    process.env.META_PAGE_ID = 'page123';
+    const fetchMock = vi.spyOn(globalThis, 'fetch' as any);
+    fetchMock.mockResolvedValueOnce(jsonRes({ data: [] }));
+    expect((await checkInsights()).ok).toBe(false);
+    fetchMock.mockResolvedValueOnce(jsonRes({ data: [{ name: 'page_post_engagements', values: [{ value: 4 }] }] }));
+    expect((await checkInsights()).ok).toBe(true);
+  });
+
   it('persists results WITHOUT leaking any secret', async () => {
     process.env.META_PAGE_ACCESS_TOKEN = 'super-secret-token-value';
     process.env.META_PAGE_ID = 'page123';
     vi.spyOn(globalThis, 'fetch' as any).mockImplementation(async () => jsonRes({ id: 'page123', name: 'EH' }));
     await runAllReadinessChecks(t.db);
     const rows = await t.db.selectFrom('provider_readiness').select(['check_key', 'ok', 'summary', 'detail']).execute();
-    expect(rows.length).toBeGreaterThanOrEqual(4);
+    expect(rows.length).toBeGreaterThanOrEqual(5);
     const serialized = JSON.stringify(rows);
     expect(serialized).not.toContain('super-secret-token-value');
   });

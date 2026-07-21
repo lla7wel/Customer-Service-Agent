@@ -60,6 +60,7 @@ export async function GET(req: NextRequest) {
     .select(db.fn.max('computed_at').as('at'))
     .executeTakeFirst();
 
+  const providerRows = series.filter((row) => ['facebook_page_engagements', 'facebook_page_views', 'instagram_reach', 'instagram_views', 'instagram_interactions'].includes(row.metric));
   return NextResponse.json({
     series,
     attention_count: Number(attention?.n ?? 0),
@@ -69,8 +70,9 @@ export async function GET(req: NextRequest) {
     content: Object.fromEntries(contentSummary.map((c) => [c.status, Number(c.n)])),
     analytics_computed_at: lastAnalyticsRun?.at ?? null,
     provider_insights: {
-      available: false,
-      note: 'Facebook/Instagram reach and engagement appear here once the Page token has read_insights and the readiness check passes.',
+      available: providerRows.length > 0,
+      series: providerRows,
+      note: providerRows.length ? null : 'Facebook/Instagram reach and engagement appear here once the Page token has read_insights and the readiness check passes.',
     },
   });
 }

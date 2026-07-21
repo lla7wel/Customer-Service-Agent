@@ -49,7 +49,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ contentI
   await db.updateTable('content_items').set({ status: 'generating', last_error: null }).where('id', '=', contentId).execute();
   await enqueue(db, {
     jobType: 'content_generate', payload: { generationRunId: run.id },
-    dedupeKey: `content_generate:${contentId}`, maxAttempts: 3, priority: 40,
+    dedupeKey: `content_generate:${contentId}`, maxAttempts: 2, priority: 40,
   });
   await audit(db, admin, 'content.generate_queued', { type: 'content_item', id: contentId, detail: { generation_run_id: run.id } });
   return NextResponse.json({ ok: true, run }, { status: 202 });

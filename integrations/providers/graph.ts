@@ -30,7 +30,7 @@ export class MetaApiError extends Error {
 }
 
 export function graphVersion(): string {
-  return envAny('META_GRAPH_VERSION') || 'v21.0';
+  return envAny('META_GRAPH_VERSION') || 'v25.0';
 }
 
 export function graphBase(): string {

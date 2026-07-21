@@ -56,11 +56,12 @@ export function marketingTextModel(): string {
 export function visionModel(): string {
   return envAny('GEMINI_VISION_MODEL') || 'gemini-2.5-flash';
 }
-/** High-accuracy, deliberately slower vision model for final Content Studio
- * product/text verification. This is isolated from customer image matching so
- * an operator cannot accidentally weaken creative QA by tuning the fast path. */
+/** Focused vision model for final Content Studio product/text verification.
+ * Verification never renders the creative, so the fast vision model preserves
+ * output quality while avoiding a long, expensive second reasoning pass. It is
+ * still independently configurable when a different reviewer is required. */
 export function creativeVerificationModel(): string {
-  return envAny('GEMINI_CREATIVE_VERIFICATION_MODEL') || 'gemini-2.5-pro';
+  return envAny('GEMINI_CREATIVE_VERIFICATION_MODEL') || 'gemini-2.5-flash';
 }
 
 /* ---- Image generation / editing (strongest available) -------------------- */

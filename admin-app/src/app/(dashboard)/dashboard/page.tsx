@@ -62,11 +62,14 @@ export default async function DashboardPage() {
     );
   }
 
-  const [counts, trend, topProducts, upcoming, recentAttention] = await Promise.all([
+  const [counts, trend, topProducts, upcoming, recentAttention, insightsReadiness] = await Promise.all([
     liveCounts(db),
     db.selectFrom('analytics_daily')
       .select(['day', 'metric', 'value'])
-      .where('metric', 'in', ['inbound_messages', 'ai_replies'])
+      .where('metric', 'in', [
+        'inbound_messages', 'ai_replies', 'facebook_page_engagements', 'facebook_page_views',
+        'instagram_reach', 'instagram_views', 'instagram_interactions',
+      ])
       .where('day', '>=', sql<any>`current_date - 14`)
       .orderBy('day', 'asc')
       .execute()
@@ -95,10 +98,22 @@ export default async function DashboardPage() {
       .orderBy('human_attention_at', 'desc')
       .limit(6)
       .execute(),
+    db.selectFrom('provider_readiness').select(['ok', 'checked_at']).where('check_key', '=', 'insights').executeTakeFirst(),
   ]);
 
   const inboundSeries = trend.filter((r) => r.metric === 'inbound_messages').map((r) => Number(r.value));
   const aiSeries = trend.filter((r) => r.metric === 'ai_replies').map((r) => Number(r.value));
+  const providerMetrics = [
+    { key: 'facebook_page_engagements', ar: 'تفاعل فيسبوك', en: 'Facebook engagement' },
+    { key: 'facebook_page_views', ar: 'مشاهدات صفحة فيسبوك', en: 'Facebook Page views' },
+    { key: 'instagram_reach', ar: 'وصول إنستغرام', en: 'Instagram reach' },
+    { key: 'instagram_views', ar: 'مشاهدات إنستغرام', en: 'Instagram views' },
+    { key: 'instagram_interactions', ar: 'تفاعل إنستغرام', en: 'Instagram interactions' },
+  ].map((metric) => ({
+    ...metric,
+    value: trend.filter((row) => row.metric === metric.key).reduce((sum, row) => sum + Number(row.value), 0),
+    available: trend.some((row) => row.metric === metric.key),
+  })).filter((metric) => metric.available);
   const problems = counts.deliveryProblems + counts.deadJobs + counts.failedPubs;
 
   return (
@@ -228,14 +243,23 @@ export default async function DashboardPage() {
           </Card>
           <Card>
             <SectionTitle icon={Activity} title={ar ? 'رؤى فيسبوك وإنستغرام' : 'Facebook & Instagram insights'} />
-            <p className="text-sm text-muted">
-              {ar
-                ? 'تظهر أرقام الوصول والتفاعل هنا فقط عندما تكون صلاحية read_insights مفعّلة ويمرّ فحص الجاهزية — لا نعرض أرقاماً وهمية.'
-                : 'Reach and engagement appear here only once the Page token has read_insights and the readiness check passes — no fabricated numbers.'}
-            </p>
-            <Link href="/settings?tab=channels" className="mt-2 inline-block text-sm font-medium text-accent hover:underline">
-              {ar ? 'فحص جاهزية القنوات ←' : 'Check channel readiness →'}
-            </Link>
+            {providerMetrics.length > 0 ? (
+              <ul className="space-y-2">
+                {providerMetrics.map((metric) => (
+                  <li key={metric.key} className="flex items-center justify-between gap-3 rounded-lg bg-surface2/60 px-3 py-2 text-sm">
+                    <span className="text-muted">{ar ? metric.ar : metric.en}</span>
+                    <b className="text-fg">{metric.value.toLocaleString()}</b>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted">
+                {insightsReadiness?.ok
+                  ? (ar ? 'الاتصال جاهز. تظهر الأرقام هنا بعد أول مزامنة تتضمن بيانات من Meta.' : 'Connected. Numbers appear after the first sync that contains Meta data.')
+                  : (ar ? 'فعّل صلاحية read_insights من صفحة القنوات لإظهار الوصول والمشاهدات والتفاعل الحقيقي.' : 'Enable read_insights in Channels to show real reach, views and engagement.')}
+              </p>
+            )}
+            <Link href="/settings?tab=channels" className="mt-2 inline-block text-sm font-medium text-accent hover:underline">{ar ? 'إعداد الرؤى والقنوات ←' : 'Set up insights and channels →'}</Link>
           </Card>
         </div>
       </div>

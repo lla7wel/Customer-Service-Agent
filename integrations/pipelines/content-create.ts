@@ -29,6 +29,14 @@ type ReferenceImage = { data: string; mimeType: string; label: string; productId
 export const MARKETING_PHRASE_MAX_TOKENS = 800;
 export const MARKETING_CAPTION_MAX_TOKENS = 1200;
 export const MARKETING_THINKING_BUDGET = 0;
+/**
+ * One premium render is normally enough. A second paid render is allowed only
+ * for a concrete, visible and correctable mismatch (wrong product/text/price/
+ * brand). "Unverifiable" is not a mismatch: a single catalog photo often cannot
+ * show packaging, closures or the reverse of a product, and paying for another
+ * render cannot make that source evidence appear.
+ */
+export const MAX_CREATIVE_ATTEMPTS = 2;
 
 async function loadItemProducts(db: Kysely<DB>, contentItemId: string) {
   return db
@@ -171,23 +179,34 @@ export async function generationFingerprint(db: Kysely<DB>, contentItemId: strin
 
 export function generationNeedsRetry(v: CampaignImageVerification, hasPhrase: boolean, hasPrice: boolean, hasBrand: boolean): boolean {
   const identityChecks = Object.values(v.identity_checks ?? {});
-  return v.product_status !== 'acceptable' || v.product_fidelity < 0.9
-    || identityChecks.length !== 5 || identityChecks.some((status) => status !== 'match')
-    || (hasPhrase && v.overlay_text_status !== 'likely_exact')
-    || (hasPrice && v.price_text_status !== 'likely_exact')
-    || (hasBrand && v.brand_mark_status !== 'likely_exact');
+  const concreteIdentityMismatch = identityChecks.some((status) => status === 'mismatch');
+  const concreteTextMismatch = (status: string | undefined) => status === 'mismatch' || status === 'missing';
+  return v.product_status === 'unacceptable' || concreteIdentityMismatch
+    || (v.product_status !== 'unverifiable' && v.product_fidelity < 0.75)
+    || (hasPhrase && concreteTextMismatch(v.overlay_text_status))
+    || (hasPrice && concreteTextMismatch(v.price_text_status))
+    || (hasBrand && concreteTextMismatch(v.brand_mark_status));
 }
 
 export function generationVerificationWarnings(v: CampaignImageVerification, hasPhrase: boolean, hasPrice: boolean): string[] {
-  const out = [...(v.concerns ?? [])];
+  // Only surface actionable visible failures. Raw verifier diagnostics remain
+  // stored on the asset/run for audit, but uncertainty about an attribute that
+  // is absent from the source photo must not become a red operator alert.
+  const out = (v.concerns ?? []).filter((concern) => {
+    const value = concern.toLowerCase();
+    return !value.includes('could not be verified')
+      && !value.includes('unverifiable')
+      && !value.includes('independent creative verifiers');
+  });
   const identityChecks = Object.entries(v.identity_checks ?? {});
-  if (v.product_status !== 'acceptable' || v.product_fidelity < 0.9 || identityChecks.length !== 5 || identityChecks.some(([, status]) => status !== 'match')) out.push('Product fidelity could not be fully verified.');
+  const identityMismatch = identityChecks.some(([, status]) => status === 'mismatch');
+  if (v.product_status === 'unacceptable' || identityMismatch || (v.product_status !== 'unverifiable' && v.product_fidelity < 0.75)) out.push('A visible product-identity mismatch was detected.');
   for (const [attribute, status] of identityChecks) {
-    if (status !== 'match') out.push(`Product identity check failed: ${attribute.replaceAll('_', ' ')} (${status}).`);
+    if (status === 'mismatch') out.push(`Product identity check failed: ${attribute.replaceAll('_', ' ')}.`);
   }
-  if (hasPhrase && v.overlay_text_status !== 'likely_exact') out.push('Arabic image text could not be verified as exact.');
-  if (hasPrice && v.price_text_status !== 'likely_exact') out.push('Price text could not be verified as exact.');
-  if (v.brand_mark_status && !['likely_exact', 'not_requested'].includes(v.brand_mark_status)) out.push('Brand mark could not be verified.');
+  if (hasPhrase && ['mismatch', 'missing'].includes(v.overlay_text_status)) out.push('Arabic image text does not match the approved phrase.');
+  if (hasPrice && ['mismatch', 'missing'].includes(v.price_text_status ?? '')) out.push('Price text does not match the verified prices.');
+  if (['mismatch', 'missing'].includes(v.brand_mark_status ?? '')) out.push('Brand mark does not match the requested brand mark.');
   return [...new Set(out)].slice(0, 12);
 }
 
@@ -271,23 +290,29 @@ export async function processContentGeneration(db: Kysely<DB>, runId: string): P
     }
 
     const references: ReferenceImage[] = [];
+    const referenceUrls = new Set<string>();
+    const addReference = (reference: ReferenceImage | null) => {
+      if (!reference || referenceUrls.has(reference.url)) return;
+      referenceUrls.add(reference.url);
+      references.push(reference);
+    };
     for (const p of products) {
       const url = primaryProductImageUrl(p as any);
       if (!url) continue;
       const ref = await loadReference(url, `${customerProductName(p as any)} — code ${p.product_code}`, p.product_id);
-      if (ref) references.push(ref);
+      addReference(ref);
     }
     for (const upload of uploads) {
       if (!upload.public_url) continue;
       const ref = await loadReference(upload.public_url, 'Admin-uploaded product identity reference', null);
-      if (ref) references.push(ref);
+      addReference(ref);
     }
     if (!references.length) throw new Error('No usable source images were found.');
 
     const brand = await db.selectFrom('brand_kit').selectAll().where('id', '=', 1).executeTakeFirst();
     if (brand?.logo_public_url) {
       const logo = await loadReference(brand.logo_public_url, 'OFFICIAL BRAND LOGO — reproduce exactly', null);
-      if (logo) references.push(logo);
+      addReference(logo);
     }
 
     const logo = references.find((x) => x.label === 'OFFICIAL BRAND LOGO — reproduce exactly');
@@ -313,8 +338,8 @@ export async function processContentGeneration(db: Kysely<DB>, runId: string): P
       let feedback: string[] = [];
       let final: { image: { mimeType: string; data: string }; model: string; verification: CampaignImageVerification; trace: string } | null = null;
 
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        await db.updateTable('content_generation_runs').set({ attempt_count: groupIndex * 3 + attempt, stage: 'creating' }).where('id', '=', runId).execute();
+      for (let attempt = 1; attempt <= MAX_CREATIVE_ATTEMPTS; attempt++) {
+        await db.updateTable('content_generation_runs').set({ attempt_count: groupIndex * MAX_CREATIVE_ATTEMPTS + attempt, stage: 'creating' }).where('id', '=', runId).execute();
         const exactPriceText = exactCreativePriceText(groupPrices);
         const exactCallToAction = item.purpose === 'price_drop' ? 'اطلبه على واتساب' : null;
         const creativeDirection = creativeDirectionForPurpose(item.purpose);
@@ -378,7 +403,7 @@ export async function processContentGeneration(db: Kysely<DB>, runId: string): P
           },
         };
         final = { image: generated.images[0], model: generated.model, verification, trace: envelope.traceId };
-        if (!generationNeedsRetry(verification, item.image_text_mode !== 'none', exactPriceText.length > 0, true) || attempt === 3) break;
+        if (!generationNeedsRetry(verification, item.image_text_mode !== 'none', exactPriceText.length > 0, true) || attempt === MAX_CREATIVE_ATTEMPTS) break;
         feedback = [
           'The prior result failed automated quality review. Correct these problems while preserving everything else:',
           ...generationVerificationWarnings(verification, item.image_text_mode !== 'none', exactPriceText.length > 0),

@@ -31,10 +31,13 @@ photographed, product-family-aware scene. It also renders the approved Arabic
 phrase, verified prices and the Brand Kit logo or fallback wordmark.
 
 Each output is checked for product fidelity, exact requested phrase, exact
-prices and the expected brand mark. A failed check causes up to two targeted
-correction attempts. Verification is probabilistic, so a remaining mismatch is
-stored as a visible warning and is never labelled verified. An admin may publish
-that revision only after explicitly acknowledging the warning.
+prices and the expected brand mark. One premium render is the normal path; a
+concrete visible mismatch allows one targeted correction. A detail that cannot
+be observed in the supplied source (for example hidden packaging) remains in the
+raw audit record but never triggers another paid render or a false operator
+alert. Verification is probabilistic, so a remaining visible mismatch is stored
+as a warning and is never labelled verified. An admin may publish that revision
+only after explicitly acknowledging the warning.
 
 Every Generate action creates a new preserved revision. A configuration change
 makes older outputs stale. Approval requires one selected current-revision

@@ -11,7 +11,7 @@ export function isMetaConfigured(): boolean {
 }
 
 function graphVersion(): string {
-  return envAny('META_GRAPH_VERSION') || 'v21.0';
+  return envAny('META_GRAPH_VERSION') || 'v25.0';
 }
 function graphBase(): string {
   return `https://graph.facebook.com/${graphVersion()}`;

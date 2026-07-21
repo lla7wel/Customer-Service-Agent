@@ -44,8 +44,8 @@ API** and **Meta's Graph API**.
   AI lifestyle scene or careful original-image treatment; price-drop or general purpose.
 - Final 2K reference-image creatives use the pinned professional image model.
   Product identity, exact Arabic phrase, verified prices and branding are checked
-  automatically, with two targeted retries and visible warnings when exactness
-  still cannot be established.
+  automatically. One render is the normal path; one targeted correction is used
+  only for a concrete visible mismatch, never for source-invisible uncertainty.
 - Every generation is a durable, preserved revision. Source uploads can never be
   published accidentally; only the selected output for the current configuration can.
 - Approve immediately or schedule in **Africa/Tripoli** time. A scheduled price
@@ -165,7 +165,7 @@ Nothing is hard-coded and no secret is ever committed.
 | `MEDIA_ROOT` / `PUBLIC_MEDIA_BASE_URL` | media | Image storage + public base URL |
 | `GEMINI_API_KEY` | AI | Text, vision, embedding and creative-generation calls |
 | `GEMINI_CAMPAIGN_IMAGE_MODEL` | creative | Pinned final Content Studio model (`gemini-3-pro-image`) |
-| `GEMINI_CREATIVE_VERIFICATION_MODEL` | creative QA | High-accuracy product/text verifier (`gemini-2.5-pro`) |
+| `GEMINI_CREATIVE_VERIFICATION_MODEL` | creative QA | Fast product/text verifier (`gemini-2.5-flash`) |
 | `META_PAGE_ID`, `META_PAGE_ACCESS_TOKEN`, `META_APP_SECRET`, `META_VERIFY_TOKEN` | Meta | Messenger + Page publishing |
 | `META_IG_USER_ID` | Instagram | Instagram DMs, publishing and comments |
 

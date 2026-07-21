@@ -10,8 +10,9 @@ import {
   MARKETING_CAPTION_MAX_TOKENS,
   MARKETING_PHRASE_MAX_TOKENS,
   MARKETING_THINKING_BUDGET,
+  MAX_CREATIVE_ATTEMPTS,
 } from '../../integrations/pipelines/content-create';
-import { campaignImageModel, creativeVerificationModel, mergeCampaignImageVerifications } from '../../integrations/gemini';
+import { campaignImageModel, creativeVerificationModel } from '../../integrations/gemini';
 
 const exactIdentityChecks = {
   silhouette_and_geometry: 'match' as const,
@@ -32,11 +33,11 @@ describe('content generation configuration', () => {
     expect(contentConfigFingerprint(value)).toBe(contentConfigFingerprint(value));
   });
 
-  it('uses a separate high-accuracy model for final creative verification', () => {
+  it('uses a separate fast model for final creative verification', () => {
     const previous = process.env.GEMINI_CREATIVE_VERIFICATION_MODEL;
     delete process.env.GEMINI_CREATIVE_VERIFICATION_MODEL;
     try {
-      expect(creativeVerificationModel()).toBe('gemini-2.5-pro');
+      expect(creativeVerificationModel()).toBe('gemini-2.5-flash');
     } finally {
       if (previous === undefined) delete process.env.GEMINI_CREATIVE_VERIFICATION_MODEL;
       else process.env.GEMINI_CREATIVE_VERIFICATION_MODEL = previous;
@@ -120,11 +121,26 @@ describe('content generation configuration', () => {
     expect(generationNeedsRetry({ ...base, product_fidelity: 0.5 }, true, true, true)).toBe(true);
     expect(generationNeedsRetry({ ...base, brand_mark_status: 'mismatch' }, true, true, true)).toBe(true);
     expect(generationNeedsRetry({ ...base, identity_checks: { ...exactIdentityChecks, silhouette_and_geometry: 'mismatch' } }, true, true, true)).toBe(true);
-    expect(generationNeedsRetry({ ...base, identity_checks: { ...exactIdentityChecks, included_components_and_count: 'unverifiable' } }, true, true, true)).toBe(true);
-    expect(generationNeedsRetry({ ...base, identity_checks: {} as any }, true, true, true)).toBe(true);
+    expect(generationNeedsRetry({ ...base, identity_checks: { ...exactIdentityChecks, included_components_and_count: 'unverifiable' }, product_status: 'unverifiable' }, true, true, true)).toBe(false);
+    expect(MAX_CREATIVE_ATTEMPTS).toBe(2);
   });
 
-  it('never describes an unverified result as exact', () => {
+  it('does not charge another render or alert for source-invisible attributes', () => {
+    const result = {
+      product_fidelity: 0.93,
+      product_status: 'unverifiable' as const,
+      overlay_text_status: 'likely_exact' as const,
+      price_text_status: 'likely_exact' as const,
+      brand_mark_status: 'likely_exact' as const,
+      observed_text: 'تخفيضات ولا أروع 🔥',
+      concerns: ['One or more immutable product-identity attributes could not be verified.'],
+      identity_checks: { ...exactIdentityChecks, packaging_and_closures: 'unverifiable' as const },
+    };
+    expect(generationNeedsRetry(result, true, true, true)).toBe(false);
+    expect(generationVerificationWarnings(result, true, true)).toEqual([]);
+  });
+
+  it('alerts on concrete text errors without turning unknown checks into errors', () => {
     const warnings = generationVerificationWarnings({
       product_fidelity: 0.91,
       product_status: 'acceptable',
@@ -135,35 +151,9 @@ describe('content generation configuration', () => {
       concerns: [],
       identity_checks: exactIdentityChecks,
     }, true, true);
-    expect(warnings).toContain('Arabic image text could not be verified as exact.');
-    expect(warnings).toContain('Price text could not be verified as exact.');
-    expect(warnings).toContain('Brand mark could not be verified.');
+    expect(warnings).toContain('Arabic image text does not match the approved phrase.');
+    expect(warnings).not.toContain('Price text does not match the verified prices.');
+    expect(warnings).not.toContain('Brand mark does not match the requested brand mark.');
   });
 
-  it('uses the conservative result when independent creative verifiers disagree', () => {
-    const exact = {
-      product_fidelity: 0.97,
-      product_status: 'acceptable' as const,
-      overlay_text_status: 'likely_exact' as const,
-      price_text_status: 'likely_exact' as const,
-      brand_mark_status: 'likely_exact' as const,
-      observed_text: 'راحة تردّ الروح',
-      concerns: [],
-      identity_checks: exactIdentityChecks,
-    };
-    const merged = mergeCampaignImageVerifications([
-      exact,
-      {
-        ...exact,
-        product_fidelity: 0.82,
-        product_status: 'unacceptable',
-        identity_checks: { ...exactIdentityChecks, included_components_and_count: 'mismatch' },
-        concerns: ['Generated image has three reeds; source has two.'],
-      },
-    ]);
-    expect(merged.product_status).toBe('unacceptable');
-    expect(merged.product_fidelity).toBe(0.4);
-    expect(merged.identity_checks.included_components_and_count).toBe('mismatch');
-    expect(merged.concerns).toContain('Independent creative verifiers did not fully agree; the conservative result is shown.');
-  });
 });

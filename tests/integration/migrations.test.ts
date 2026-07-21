@@ -104,6 +104,7 @@ describe('upgrade from a legacy production-like database', () => {
     expect(result.applied).toEqual(expect.arrayContaining([
       '0015_admin_accounts', '0016_durable_processing', '0017_catalog_truth',
       '0018_content_studio', '0019_ai_control_versions', '0020_readiness_and_analytics',
+      '0025_generation_efficiency',
     ]));
     expect(result.applied.some((v) => v < '0015')).toBe(false);
   });
