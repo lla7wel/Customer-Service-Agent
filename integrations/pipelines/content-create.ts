@@ -299,6 +299,7 @@ export async function processContentGeneration(db: Kysely<DB>, runId: string): P
       for (let attempt = 1; attempt <= 3; attempt++) {
         await db.updateTable('content_generation_runs').set({ attempt_count: groupIndex * 3 + attempt, stage: 'creating' }).where('id', '=', runId).execute();
         const exactPriceText = exactCreativePriceText(groupPrices);
+        const exactCallToAction = item.purpose === 'price_drop' ? 'اطلبه على واتساب' : null;
         const creativeDirection = creativeDirectionForPurpose(item.purpose);
         const envelope = compilePrompt(behaviors, 'campaign_image', {
           task: 'content_studio_professional_visual',
@@ -309,6 +310,7 @@ export async function processContentGeneration(db: Kysely<DB>, runId: string): P
           products: products.filter((p) => !groupProductIds.length || groupProductIds.includes(p.product_id)).map((p) => ({ id: p.product_id, code: p.product_code, name: customerProductName(p as any), category: p.category })),
           exact_arabic_phrase: item.image_text_mode === 'none' ? null : phrase,
           exact_price_text: exactPriceText,
+          exact_call_to_action: exactCallToAction,
           creative_direction: creativeDirection,
           brand: brand?.logo_public_url ? 'Use the supplied official logo reference exactly.' : `Render the restrained text wordmark exactly: ${brand?.wordmark || 'ENGLISH HOME LIBYA'}`,
           instruction: item.creative_treatment === 'use_original'
@@ -333,9 +335,10 @@ export async function processContentGeneration(db: Kysely<DB>, runId: string): P
         const verifyEnvelope = compilePrompt(behaviors, 'campaign_image_verify', {
           requested_phrase: item.image_text_mode === 'none' ? null : phrase,
           requested_prices: exactPriceText,
+          requested_call_to_action: exactCallToAction,
           requested_brand: brand?.logo_public_url ? 'official supplied logo' : (brand?.wordmark || 'ENGLISH HOME LIBYA'),
           products: products.filter((p) => !groupProductIds.length || groupProductIds.includes(p.product_id)).map((p) => ({ id: p.product_id, code: p.product_code, name: customerProductName(p as any) })),
-          instruction: 'Compare every supplied product reference side by side with the generated visual. Audit every required identity field separately. Product beauty or category similarity is irrelevant. Read the Arabic phrase, every price, and the brand mark character by character. Report every mismatch, obstruction, crop, or uncertainty conservatively.',
+          instruction: 'Compare every supplied product reference side by side with the generated visual. Audit every required identity field separately. Product beauty or category similarity is irrelevant. Read the Arabic phrase, requested call to action, every price, and the brand mark character by character. The requested call to action is allowed text, not an unrequested addition. Report every mismatch, obstruction, crop, or uncertainty conservatively.',
         });
         await db.updateTable('content_generation_runs').set({ stage: 'verifying_text' }).where('id', '=', runId).execute();
         const checked = await verifyCampaignImage({
@@ -386,7 +389,7 @@ export async function processContentGeneration(db: Kysely<DB>, runId: string): P
         width: item.aspect_ratio === '9:16' ? 1536 : 1856,
         height: item.aspect_ratio === '9:16' ? 2752 : 2304,
         aspect_ratio: item.aspect_ratio, position: position++, source_model: visual.model,
-        overlay: JSON.stringify({ phrase, prices, brand: brand?.wordmark || 'ENGLISH HOME LIBYA', rendered_by_model: true }),
+        overlay: JSON.stringify({ phrase, prices, call_to_action: item.purpose === 'price_drop' ? 'اطلبه على واتساب' : null, brand: brand?.wordmark || 'ENGLISH HOME LIBYA', rendered_by_model: true }),
         verification: JSON.stringify(visual.verification),
       } as const;
       const existing = await db.selectFrom('content_assets').select('id')
