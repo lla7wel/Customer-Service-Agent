@@ -5,7 +5,7 @@ import { envAny } from './env';
  * built on this: if `configured` is false, the UI shows a setup card and server
  * endpoints return 503 — nothing is ever faked.
  */
-export type IntegrationKey = 'database' | 'gemini' | 'meta' | 'cron';
+export type IntegrationKey = 'database' | 'gemini' | 'meta';
 
 export interface IntegrationStatus {
   key: IntegrationKey;
@@ -64,19 +64,10 @@ export function metaStatus(): IntegrationStatus {
   };
 }
 
-export function cronStatus(): IntegrationStatus {
-  const secret = envAny('CRON_SECRET', 'CLOUDFLARE_WEBHOOK_SECRET');
-  return {
-    key: 'cron',
-    label: 'Scheduler',
-    configured: !!secret,
-    missing: secret ? [] : ['CRON_SECRET'],
-    hint: 'Shared secret for the Content Studio scheduler endpoint.',
-  };
-}
-
 export function allIntegrationStatuses(): IntegrationStatus[] {
-  return [databaseStatus(), geminiStatus(), metaStatus(), cronStatus()];
+  // Scheduling is a proven worker-health state, exposed separately by
+  // /api/health. It is not an external integration and requires no cron secret.
+  return [databaseStatus(), geminiStatus(), metaStatus()];
 }
 
 /** The public base URL of the deployed app (used for Meta webhook callbacks). */
