@@ -20,10 +20,10 @@ export async function dhashFromBytes(bytes: Buffer | Uint8Array): Promise<string
     // node_modules (jimp lives in admin-app/ and scripts/, not in integrations/).
     // @ts-ignore — jimp is resolved by the consumer; no types needed here.
     const mod: any = await import('jimp');
-    const Jimp = mod.default ?? mod;
+    const Jimp = mod.Jimp ?? mod.default ?? mod;
     const img = await Jimp.read(Buffer.from(bytes));
     // 9x8 grayscale → compare each pixel to its right neighbor = 8x8 = 64 bits.
-    img.greyscale().resize(9, 8);
+    img.greyscale().resize({ w: 9, h: 8 });
     const data: Buffer = img.bitmap.data;
     const w = img.bitmap.width;
     let bits = '';
@@ -40,13 +40,13 @@ export async function dhashFromBytes(bytes: Buffer | Uint8Array): Promise<string
   }
 }
 
-/** Download an image URL and fingerprint it. Returns null on any failure. */
+/** Download an image URL (SSRF-safe) and fingerprint it. Null on any failure. */
 export async function dhashFromUrl(url: string): Promise<string | null> {
   try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
-    return dhashFromBytes(buf);
+    const { fetchImageSafely } = await import('./safe-fetch');
+    const result = await fetchImageSafely(url);
+    if (!result.ok) return null;
+    return dhashFromBytes(result.data);
   } catch {
     return null;
   }

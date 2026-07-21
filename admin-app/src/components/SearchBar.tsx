@@ -86,7 +86,7 @@ export default function SearchBar({ placeholder, ar = false }: { placeholder: st
       onSubmit={(e) => {
         e.preventDefault();
         if (rows[0]) go(rows[0].href);
-        else router.push(`/products${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''}`);
+        else router.push(`/catalog${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''}`);
       }}
       className="relative hidden w-full max-w-lg md:block"
     >

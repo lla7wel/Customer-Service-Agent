@@ -2,8 +2,7 @@ import {
   LayoutDashboard,
   Inbox,
   Package,
-  ClipboardCheck,
-  Megaphone,
+  Clapperboard,
   SlidersHorizontal,
   FlaskConical,
   Settings,
@@ -20,29 +19,20 @@ export interface NavGroup {
   items: NavItem[];
 }
 
-/** Sidebar structure for the control-center sections (one-person operator). */
+/** The seven top-level areas of the control center (Arabic-first, phone-first). */
 export const NAV: NavGroup[] = [
   {
     titleKey: 'group_overview',
-    items: [{ href: '/dashboard', labelKey: 'nav_dashboard', icon: LayoutDashboard }],
-  },
-  {
-    titleKey: 'group_inbox',
     items: [
+      { href: '/dashboard', labelKey: 'nav_dashboard', icon: LayoutDashboard },
       { href: '/inbox', labelKey: 'nav_inbox', icon: Inbox },
     ],
   },
   {
     titleKey: 'group_catalog',
     items: [
-      { href: '/products', labelKey: 'nav_products', icon: Package },
-      { href: '/catalog-review', labelKey: 'nav_catalog_review', icon: ClipboardCheck },
-    ],
-  },
-  {
-    titleKey: 'group_marketing',
-    items: [
-      { href: '/campaigns', labelKey: 'nav_campaigns', icon: Megaphone },
+      { href: '/catalog', labelKey: 'nav_catalog', icon: Package },
+      { href: '/content-studio', labelKey: 'nav_content_studio', icon: Clapperboard },
     ],
   },
   {

@@ -16,9 +16,12 @@ const NEEDS_ACTION = ['needs_human', 'waiting_for_order_confirmation', 'issue_re
 
 const FILTERS: { id: string; en: string; ar: string }[] = [
   { id: 'all', en: 'All', ar: 'الكل' },
-  { id: 'action', en: 'Needs action', ar: 'يحتاج إجراء' },
+  { id: 'attention', en: 'Needs team', ar: 'تحتاج الفريق' },
+  { id: 'takeover', en: 'Taken over', ar: 'موظف مستلم' },
   { id: 'ai', en: 'AI handling', ar: 'الذكاء يتعامل' },
-  { id: 'human', en: 'Human active', ar: 'موظف نشط' },
+  { id: 'errors', en: 'Delivery errors', ar: 'أخطاء إرسال' },
+  { id: 'messenger', en: 'Messenger', ar: 'ماسنجر' },
+  { id: 'instagram', en: 'Instagram', ar: 'إنستغرام' },
   { id: 'resolved', en: 'Resolved', ar: 'محلولة' },
 ];
 
@@ -27,6 +30,8 @@ interface Row {
   channel: string;
   status: string;
   ai_enabled: boolean;
+  human_attention: boolean;
+  human_attention_reason: string | null;
   detected_intent: string | null;
   context_summary: string | null;
   last_message_at: string | null;
@@ -49,7 +54,7 @@ export default async function InboxPage(props: { searchParams: Promise<{ filter?
 
   let query = supabase
     .selectFrom('conversations')
-    .select(['id', 'channel', 'status', 'ai_enabled', 'detected_intent', 'context_summary', 'last_message_at', 'last_message_preview', 'unread_count'])
+    .select(['id', 'channel', 'status', 'ai_enabled', 'human_attention', 'human_attention_reason', 'detected_intent', 'context_summary', 'last_message_at', 'last_message_preview', 'unread_count'])
     .select((eb) => [
       jsonObjectFrom(
         eb.selectFrom('customers').select('display_name').whereRef('customers.id', '=', 'conversations.customer_id'),
@@ -57,10 +62,19 @@ export default async function InboxPage(props: { searchParams: Promise<{ filter?
     ])
     .orderBy('last_message_at', (ob) => ob.desc().nullsLast())
     .limit(100);
-  if (filter === 'action') query = query.where('status', 'in', [...NEEDS_ACTION]);
-  else if (filter === 'ai') query = query.where('status', '=', 'ai_handling');
-  else if (filter === 'human') query = query.where('status', '=', 'human_active');
-  else if (filter === 'resolved') query = query.where('status', 'in', ['resolved', 'completed']);
+  if (filter === 'attention' || filter === 'action') query = query.where('human_attention', '=', true);
+  else if (filter === 'takeover') query = query.where('ai_enabled', '=', false).where('status', 'not in', ['resolved', 'completed', 'cancelled']);
+  else if (filter === 'ai') query = query.where('ai_enabled', '=', true).where('status', 'not in', ['resolved', 'completed', 'cancelled']);
+  else if (filter === 'messenger') query = query.where('channel', '=', 'messenger');
+  else if (filter === 'instagram') query = query.where('channel', '=', 'instagram');
+  else if (filter === 'errors') {
+    query = query.where(({ exists, selectFrom }) => exists(
+      selectFrom('outbox_messages')
+        .select('outbox_messages.id')
+        .whereRef('outbox_messages.conversation_id', '=', 'conversations.id')
+        .where('outbox_messages.status', 'in', ['failed', 'uncertain', 'dead']),
+    ));
+  } else if (filter === 'resolved') query = query.where('status', 'in', ['resolved', 'completed']);
 
   let rows: Row[] = [];
   let error: { message: string } | null = null;
@@ -120,7 +134,7 @@ export default async function InboxPage(props: { searchParams: Promise<{ filter?
         <Card pad={false} className="divide-y divide-line overflow-hidden">
           {rows.map((c) => {
             const name = c.customers?.display_name || c.context_summary?.slice(0, 40) || `#${c.id.slice(0, 8)}`;
-            const needsAction = (NEEDS_ACTION as readonly string[]).includes(c.status);
+            const needsAction = c.human_attention || (NEEDS_ACTION as readonly string[]).includes(c.status);
             return (
               <Link key={c.id} href={`/inbox/${c.id}`} className="group flex items-center gap-3 px-4 py-3 transition hover:bg-surface2/50">
                 <span className="relative inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-line bg-surface2 text-sm font-semibold text-fg shadow-card">
@@ -135,9 +149,19 @@ export default async function InboxPage(props: { searchParams: Promise<{ filter?
                   <p className="truncate text-xs text-muted" dir="auto">
                     {c.last_message_preview || (ar ? 'بدون رسائل' : 'No messages')}
                   </p>
-                  <p className="mt-1 flex items-center gap-1 text-[11px] text-faint">
-                    <Bot size={11} className={c.ai_enabled ? 'text-success' : 'text-faint'} />
-                    {c.ai_enabled ? (ar ? 'AI مفعّل' : 'AI enabled') : (ar ? 'AI متوقف' : 'AI paused')}
+                  <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-faint">
+                    <span className="inline-flex items-center gap-1">
+                      <Bot size={11} className={c.ai_enabled ? 'text-success' : 'text-faint'} />
+                      {c.ai_enabled ? (ar ? 'AI مفعّل' : 'AI enabled') : (ar ? 'AI متوقف' : 'AI paused')}
+                    </span>
+                    <span className={`rounded-full px-1.5 py-px text-[10px] font-semibold ${c.channel === 'instagram' ? 'bg-fuchsia-500/15 text-fuchsia-400' : 'bg-sky-500/15 text-sky-400'}`}>
+                      {c.channel === 'instagram' ? (ar ? 'إنستغرام' : 'Instagram') : (ar ? 'ماسنجر' : 'Messenger')}
+                    </span>
+                    {c.human_attention && (
+                      <span className="rounded-full bg-warning/15 px-1.5 py-px text-[10px] font-semibold text-warning">
+                        {ar ? 'يحتاج الفريق' : 'Needs team'}{c.human_attention_reason ? ` · ${c.human_attention_reason}` : ''}
+                      </span>
+                    )}
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1.5">

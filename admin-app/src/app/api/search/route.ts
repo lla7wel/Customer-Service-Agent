@@ -82,7 +82,7 @@ export async function GET(req: NextRequest) {
       type: 'product',
       title: c.name,
       subtitle: [c.product_code, c.price != null ? `${c.price} د.ل` : null].filter(Boolean).join(' · '),
-      href: `/products/${c.id}`,
+      href: `/catalog/${c.id}`,
     });
   }
   for (const c of conversations as any[]) {

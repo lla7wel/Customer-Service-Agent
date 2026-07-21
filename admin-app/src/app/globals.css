@@ -397,6 +397,13 @@
   transform: translateZ(34px);
   animation: float-soft 6s ease-in-out infinite;
 }
+/* Respect the OS "reduce motion" setting: no decorative motion anywhere. */
 @media (prefers-reduced-motion: reduce) {
   .login-card3d, .login-orb, .login-logo3d { animation: none; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

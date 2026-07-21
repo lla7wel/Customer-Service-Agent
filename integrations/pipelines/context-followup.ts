@@ -139,6 +139,23 @@ export function createLastImageContext(args: {
   };
 }
 
+/**
+ * How long a remembered image context may be reused for a bare follow-up like
+ * "بكم؟" (EH-035). Beyond this the customer is almost certainly talking about
+ * something else, and reusing it would quote the wrong product's price.
+ */
+export const IMAGE_CONTEXT_TTL_MINUTES = 90;
+
+export function isImageContextFresh(
+  context: LastImageContext | null,
+  ttlMinutes = IMAGE_CONTEXT_TTL_MINUTES,
+): boolean {
+  if (!context) return false;
+  if (!context.created_at) return false;
+  const age = Date.now() - new Date(context.created_at).getTime();
+  return Number.isFinite(age) && age >= 0 && age <= ttlMinutes * 60_000;
+}
+
 export function normalizeLastImageContext(raw: unknown): LastImageContext | null {
   const obj = raw && typeof raw === 'object' ? raw as any : null;
   if (!obj) return null;

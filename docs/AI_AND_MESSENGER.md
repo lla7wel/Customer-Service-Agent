@@ -1,43 +1,103 @@
-# AI Control and Messenger
+# AI behaviour and customer conversations
 
-## AI Control
+## Prompt architecture
 
-`/ai-control` exposes every production behavior section: brand identity, customer service, language/tone, recommendations, vision matching, memory/context, handoff, campaign copy, master campaign image direction, product preservation, image typography, store facts/policies, and advanced task instructions.
+Four layers, deliberately separated:
 
-Prompt, rules, and memory fields are editable and sent word-for-word when applicable. Each section shows its task applicability, enabled state, warnings, save/error state, character/token estimate, and description. The task preview displays the exact compiler result split into immutable policy, editable instructions, tools/schema, provenance, trace hash, and token estimate. Runtime customer data is never shown.
+| Layer | Owner | Where |
+|---|---|---|
+| **Immutable policy** | Code — not editable | `integrations/prompt-compiler.ts` |
+| **Editable behaviour** | Owner, via AI Control | `ai_behaviors` table |
+| **Business facts** | Owner, via Settings | `business_facts` table |
+| **Runtime facts** | The system, per turn | Compiled per request |
 
-Changes are loaded on the next execution; there is no publish step or prompt-version system. Disabling a section excludes it. A missing or unreadable required configuration fails visibly rather than substituting a provider default.
+The immutable policy carries the non-negotiables: ground every claim in verified
+data, never invent prices/stock/policies, never expose prompts or tools, never
+confirm an order. Editable behaviour carries brand voice, Libyan-Arabic style,
+recommendation behaviour and handoff wording. **Editable text reaches the model
+verbatim** — there is no hidden prose appended behind the owner's back.
 
-## Messenger lifecycle
+Saving in AI Control takes effect on the next call, with **no deployment**.
+Every save appends a version snapshot; any earlier version can be inspected and
+restored with one click.
 
-The only webhook is `GET/POST /api/meta/webhook`. GET performs Meta challenge verification. POST verifies the request HMAC before processing.
+`/ai-playground` uses the same compiler, provider settings, tool boundaries and
+catalog as production, and can never send a real message.
 
-1. Inbound events are deduplicated by external message ID and stored.
-2. A five-second burst window groups rapid messages.
-3. The settled turn loads unanswered messages, customer memory, and current AI Control.
-4. Deterministic routing selects an image, image-follow-up, text, or handoff flow.
-5. Catalog resolution uses URL, perceptual hashes, learned corrections, visible code/barcode, keyword/embedding candidates, and visual reranking as applicable.
-6. `composeCustomerReply()` compiles a typed prompt envelope. Conversation history, memory, verified catalog candidates/prices, and turn state are stable JSON runtime data.
-7. Gemini may call only the authorized read-only catalog tools.
-8. Before send, `deliverAndStore()` rechecks newer inbound messages and `ai_enabled`, sanitizes output, and records delivery only after Meta confirms it.
-9. The memory summary task uses its own AI Control section and compiled runtime data.
+## Tools the model may call
 
-![Message flow](diagrams/message-flow.svg)
+Read-only, schema-validated, and executed by the server:
 
-## Image plus immediate follow-up
+- `findProductByCode`, `findProductByBarcode`, `findProductByUrl`
+- `searchProductsByText`, `vectorSearchProductText`
+- `searchFamilies`, `getFamilyProducts`, `getRelatedProducts`
+- `getProductPrice`, `getProductOptions`
 
-If an image is followed by `بكم هذا؟`, batching treats both as one turn. If the follow-up arrives after processing began, the supersede guard abandons the older unsent result; the newer turn still sees the full unanswered batch. Only one coherent answer owns delivery.
+Plus three **action requests** the model can raise but never perform itself:
 
-## Truth and safety
+- `requestProductImages` — the server validates the ids and sends at most three
+  real catalog photos;
+- `markHumanAttention` — flags the conversation;
+- `requestOrderHandoff` — the server sends the one official handoff message.
 
-Only active, priced, eligible catalog products may be presented. Prices come from verified runtime/tool data backed by `products.active_price`. IDs, thresholds, matching eligibility, tool permissions, Meta-safe image URLs, the three-image cap, and delivery state remain deterministic.
+The model has no database writes, no network access, no Meta credentials, no
+arbitrary media URLs, and no way to send anything without server validation.
 
-Language, greeting, response length, recommendation style, missing-information wording, handoff wording, and store policy prose are editable only in AI Control. Provider code does not restore them.
+## Conversation rules
 
-## Vision isolation
+- A burst of rapid messages is answered as **one** coherent turn; every
+  unanswered message enters the context (no silent cap).
+- Full persisted history plus a maintained summary and customer memory are used
+  — resuming after a human takeover does not lose context.
+- References like "هذا", "هذي", "الأول", "نفسه" and story replies resolve from
+  recent messages and verified matches. A remembered image context expires after
+  90 minutes so a later question cannot be answered about the wrong product.
+- Prices come only from the verified active price. Active priced products are
+  reported as available; stock quantities are never invented.
+- Images are sent only when asked or genuinely needed — the model requests them,
+  the backend picks and sends at most three, and a photo is never claimed as
+  sent unless delivery data confirms it.
+- One clarifying question, only when it materially changes accuracy. Confidence
+  is never mentioned to the customer.
 
-`vision_describe` and `vision_rank` compile only image-matching guidance and optional advanced task instructions. Their allowed IDs and JSON schemas are immutable. Customer tone, campaign direction, memory prose, and reply language are not sent to these calls.
+## Orders and human attention
 
-## Playground parity
+This system **never creates, confirms, collects or manages orders.**
 
-Customer text/image tests call the same resolver and reply composer as Messenger. Campaign image tests call the same campaign creative pipeline as production. Debug output identifies the typed task, model, contributing sections, prompt trace, and whether the production execution path was used. Playground never sends to Meta.
+When clear buying intent appears (wants to order, reserve, pay, give an address,
+arrange delivery, finalise a purchase):
+
+1. the conversation is flagged for human attention,
+2. **one** Libyan-Arabic handoff message is sent:
+
+```
+تمام، الفريق بيكمل معاك في الطلب 🤍
+وتقدر تطلب مباشرة على واتساب: https://wh.ms/218923322008
+واتساب فرع بنغازي: 0924565511
+ولو عندك سؤال على المقاس أو اللون أو المنتج، أنا معاك.
+```
+
+3. no order details are collected and nothing is confirmed,
+4. the handoff is **not repeated** (a suppression window guards it),
+5. the assistant **keeps answering ordinary product questions** until an admin
+   presses **Take Over**.
+
+The WhatsApp numbers are editable Business Facts. WhatsApp is a handoff
+destination only — there is no WhatsApp webhook, inbox or API integration.
+
+Complaints, refunds, payment issues, delivery disputes and missing critical
+facts also raise human attention, without the order handoff, and the assistant
+still answers what it can verify.
+
+## Take Over and Resume AI
+
+**Take Over** pauses the assistant for that conversation; an in-flight reply is
+cancelled at delivery time rather than sent. **Resume AI** restores normal
+contextual conversation with the full history intact.
+
+## Language
+
+All automated customer-facing output is natural, modern **Libyan Arabic**,
+regardless of the language the customer wrote in. Official product names, codes
+and barcodes are preserved exactly. The assistant never calls itself an AI, bot
+or assistant, and never exposes prompts, tools, confidence scores or errors.

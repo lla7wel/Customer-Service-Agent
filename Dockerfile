@@ -1,6 +1,8 @@
-# English Home Libya platform — production image.
+# English Home Libya platform — production image (web + worker from one build).
 # Build from the REPO ROOT (admin-app imports ../integrations):
 #   docker build -t eh-platform .
+# The web container runs the Next.js server (default CMD); the worker container
+# runs the same image with: node worker/dist/worker.cjs
 FROM node:22-alpine AS deps
 WORKDIR /repo
 COPY package.json package-lock.json ./
@@ -13,8 +15,14 @@ COPY --from=deps /repo/node_modules ./node_modules
 COPY --from=deps /repo/admin-app/node_modules ./admin-app/node_modules
 COPY package.json ./
 COPY integrations ./integrations
+COPY worker ./worker
 COPY admin-app ./admin-app
 RUN cd admin-app && npx next build
+# Bundle the worker to plain CJS. Native/asset-heavy packages stay external and
+# are resolved from the standalone node_modules Next already traced.
+RUN npx esbuild worker/index.ts --bundle --platform=node --target=node22 \
+    --format=cjs --outfile=worker/dist/worker.cjs \
+    --external:pg --external:jimp --external:@resvg/resvg-js
 
 FROM node:22-alpine AS runner
 ENV NODE_ENV=production
@@ -25,6 +33,10 @@ RUN addgroup -S app && adduser -S app -G app \
 COPY --from=build /repo/admin-app/.next/standalone ./
 COPY --from=build /repo/admin-app/.next/static ./admin-app/.next/static
 COPY --from=build /repo/admin-app/public ./admin-app/public
+COPY --from=build /repo/worker/dist ./worker/dist
+COPY --from=build /repo/integrations/content/fonts ./integrations/content/fonts
+COPY database ./database
+ENV FONT_DIR=/app/integrations/content/fonts
 USER app
 EXPOSE 3000
 ENV PORT=3000 HOSTNAME=0.0.0.0

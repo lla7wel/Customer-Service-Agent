@@ -1,88 +1,77 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@integrations/db/client';
-import { databaseStatus } from '@integrations/status';
+import { requireAdminApi, badRequest, notFound } from '@/lib/api';
+import { audit } from '@/lib/auth';
+import { changePriceManual } from '@integrations/catalog/pricing';
 import { lockEditedFields } from '@integrations/product-locks';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 /**
- * Price/Product Review action: admin completes a staged (draft) product by
- * entering a price AND confirming an Arabic/English customer-facing name, which
- * promotes it into the live catalog.
+ * Manual admin price change — the ONLY manual price write path.
  *
- *   - sets base_price (+ active_price = campaign_price if a campaign is active)
- *   - sets english_name / arabic_name / libyan_display_name when provided
- *   - REQUIRES at least one Arabic/English name to exist before activating
- *     (Turkish source_name does NOT count — customer-facing language must be AR/EN)
- *   - sets status = 'active' (customer-visible)
- *   - logs the change to activity_logs
- *
- * The admin app is the source of truth — a later scraper sync never overwrites these.
+ * Routes through the pricing engine: versioned history, promotion precedence
+ * (a later manual price permanently supersedes an open promotion), and a
+ * base_price lock so CSV imports never overwrite an admin decision.
+ * Optionally completes customer-facing names and activates the product —
+ * activation REQUIRES a price and an Arabic/English name (EH-027).
  */
 export async function POST(req: NextRequest, props: { params: Promise<{ productId: string }> }) {
+  const auth = await requireAdminApi(req);
+  if (!auth.ok) return auth.res;
+  const { db, admin } = auth.ctx;
   const params = await props.params;
-  const db = getDb();
-  if (!db) {
-    return NextResponse.json(
-      { error: 'integration_not_configured', missing: databaseStatus().missing },
-      { status: 503 },
-    );
-  }
 
   const body = await req.json().catch(() => ({}));
-  const price = Number(body?.base_price);
-  if (!Number.isFinite(price) || price <= 0) {
-    return NextResponse.json({ error: 'invalid_price' }, { status: 400 });
-  }
+  const price = Number(body?.base_price ?? body?.price);
+  if (!Number.isFinite(price) || price <= 0) return badRequest('invalid_price');
+
+  const product = await db
+    .selectFrom('products')
+    .select(['id', 'english_name', 'arabic_name', 'libyan_display_name', 'status', 'admin_locked_fields'])
+    .where('id', '=', params.productId)
+    .executeTakeFirst();
+  if (!product) return notFound('product_not_found');
 
   const englishName = typeof body?.english_name === 'string' ? body.english_name.trim() : '';
   const arabicName = typeof body?.arabic_name === 'string' ? body.arabic_name.trim() : '';
   const libyanName = typeof body?.libyan_display_name === 'string' ? body.libyan_display_name.trim() : '';
 
-  let product;
-  try {
-    product = await db
-      .selectFrom('products')
-      .select(['id', 'active_campaign_id', 'campaign_price', 'english_name', 'arabic_name', 'libyan_display_name', 'admin_locked_fields'])
-      .where('id', '=', params.productId)
-      .executeTakeFirst();
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? 'query_failed' }, { status: 500 });
-  }
-  if (!product) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+  const nameUpdate: Record<string, unknown> = {};
+  if (englishName) nameUpdate.english_name = englishName;
+  if (arabicName) nameUpdate.arabic_name = arabicName;
+  if (libyanName) nameUpdate.libyan_display_name = libyanName;
 
-  // A customer-facing Arabic/English name is required to activate.
-  const willHaveName =
+  const willHaveName = !!(
     englishName || arabicName || libyanName ||
-    product.english_name || product.arabic_name || product.libyan_display_name;
-  if (!willHaveName) {
-    return NextResponse.json({ error: 'name_required' }, { status: 400 });
+    product.english_name || product.arabic_name || product.libyan_display_name
+  );
+  const activate = body?.activate !== false && willHaveName;
+  if (body?.activate === true && !willHaveName) {
+    return badRequest('name_required', 'An Arabic or English customer-facing name is required before activation.');
   }
 
-  const onCampaign = product.active_campaign_id != null && product.campaign_price != null;
-  const activePrice = onCampaign ? product.campaign_price : price;
+  await changePriceManual(db, {
+    productId: params.productId,
+    newPrice: price,
+    adminId: admin.id === '00000000-0000-0000-0000-000000000000' ? null : admin.id,
+    note: typeof body?.note === 'string' ? body.note.slice(0, 300) : undefined,
+  });
 
-  const update: Record<string, unknown> = { base_price: price, active_price: activePrice, status: 'active' };
-  if (englishName) update.english_name = englishName;
-  if (arabicName) update.arabic_name = arabicName;
-  if (libyanName) update.libyan_display_name = libyanName;
-
-  // Admin review is an admin decision: lock the price/name/status it sets.
-  update.admin_locked_fields = JSON.stringify(lockEditedFields(product.admin_locked_fields, update));
-
-  try {
-    await db.updateTable('products').set(update as any).where('id', '=', params.productId).execute();
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? 'update_failed' }, { status: 500 });
+  if (Object.keys(nameUpdate).length || (activate && product.status !== 'active')) {
+    const update = { ...nameUpdate, ...(activate ? { status: 'active' } : {}) };
+    await db.updateTable('products')
+      .set({
+        ...update,
+        admin_locked_fields: JSON.stringify(lockEditedFields(product.admin_locked_fields, update)),
+      } as any)
+      .where('id', '=', params.productId)
+      .execute();
   }
 
-  await db.insertInto('activity_logs').values({
-    actor_type: 'human',
-    action: 'price_review_complete',
-    entity_type: 'product',
-    entity_id: params.productId,
-    summary: `Activated product: price ${price} LYD${englishName ? `, en="${englishName}"` : ''}${arabicName ? `, ar="${arabicName}"` : ''}`,
-  }).execute();
-
-  return NextResponse.json({ ok: true, active_price: activePrice });
+  await audit(db, admin, 'price.change', {
+    type: 'product', id: params.productId,
+    detail: { new_price: price, activated: activate && product.status !== 'active' },
+  });
+  return NextResponse.json({ ok: true });
 }

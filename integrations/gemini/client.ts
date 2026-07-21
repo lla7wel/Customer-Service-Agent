@@ -122,6 +122,10 @@ export const DEFAULT_TEXT_TIMEOUT_MS = 30_000;
  *  back rather than let one attempt eat the whole request budget. Two attempts
  *  (≈25s + a ≈30s working fallback) then comfortably fit a 90s function budget. */
 export const DEFAULT_IMAGE_TIMEOUT_MS = 25_000;
+/** Default timeout for a single embedding call. */
+export const DEFAULT_EMBED_TIMEOUT_MS = 12_000;
+/** Default timeout for ONE round of the tool-calling loop. */
+export const DEFAULT_TOOL_ROUND_TIMEOUT_MS = 30_000;
 
 /**
  * Build an AbortSignal that fires when EITHER the caller's signal aborts or the
@@ -353,11 +357,19 @@ export async function embedText(
       taskType,
       outputDimensionality: embeddingDim(),
     };
-    const res = await fetch(`${BASE}/models/${model}:embedContent?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    // Bounded: an embedding call must never hang a customer turn (EH-004).
+    const to = timeoutSignal(DEFAULT_EMBED_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch(`${BASE}/models/${model}:embedContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: to.signal,
+      });
+    } finally {
+      to.cleanup();
+    }
     if (!res.ok) return { values: null, model };
     const data = (await res.json()) as any;
     // embedContent → data.embedding.values ; some variants → data.embeddings[0].values
@@ -433,12 +445,27 @@ export async function generateContentWithTools(
 
   for (let i = 0; i <= maxRounds; i++) {
     rounds = i;
-    const res = await fetch(`${BASE}/models/${model}:generateContent?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ...baseBody, contents }),
-      signal: opts.signal,
-    });
+    // Every round is individually bounded so a stalled provider can never hang
+    // a customer turn or a worker job (EH-004).
+    const to = timeoutSignal(opts.timeoutMs ?? DEFAULT_TOOL_ROUND_TIMEOUT_MS, opts.signal);
+    let res: Response;
+    try {
+      res = await fetch(`${BASE}/models/${model}:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ...baseBody, contents }),
+        signal: to.signal,
+      });
+    } catch (e: any) {
+      if (to.timedOut()) {
+        const err = new Error(`Gemini tool call timed out after ${opts.timeoutMs ?? DEFAULT_TOOL_ROUND_TIMEOUT_MS}ms`);
+        (err as any).timeout = true;
+        throw err;
+      }
+      throw e;
+    } finally {
+      to.cleanup();
+    }
     const data = (await res.json()) as any;
     if (!res.ok) {
       const msg = data?.error?.message || `Gemini HTTP ${res.status}`;

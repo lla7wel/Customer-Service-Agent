@@ -34,3 +34,22 @@ scripts/dist/
 # --- IMPORTANT: the scraper is a SEPARATE project. It is NOT part of this repo.
 # ../english-home-tr-scraper is intentionally untouched and not tracked here.
 .vercel
+
+# --- Backups / generated runtime artifacts ---
+backups/
+worker/dist/
+compose-sample.jpg
+
+# --- Owner-private documents (not for the public repo) ---
+CHAT_HANDOFF.md
+docs/system-audit/
+docs/owner-decisions/
+
+# --- Local editor/agent tooling ---
+.claude/
+
+# --- Test artifacts ---
+test-results/
+playwright-report/
+blob-report/
+.playwright/

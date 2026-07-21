@@ -1,12 +1,19 @@
-import { NextResponse } from 'next/server';
-import { SESSION_COOKIE } from '@/lib/auth';
+import { NextRequest, NextResponse } from 'next/server';
+import { SESSION_COOKIE, verifySessionToken, revokeSession, sessionCookieOptions } from '@/lib/auth';
+import { getDb } from '@integrations/db/client';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-/** Clear the admin session cookie. */
-export async function POST() {
+/** Sign out: revoke the DB session and clear the cookie. */
+export async function POST(req: NextRequest) {
+  const token = req.cookies.get(SESSION_COOKIE)?.value;
+  const parsed = await verifySessionToken(token);
+  const db = getDb();
+  if (parsed && db) {
+    await revokeSession(db, parsed.sessionId).catch(() => {});
+  }
   const res = NextResponse.json({ ok: true });
-  res.cookies.set(SESSION_COOKIE, '', { httpOnly: true, path: '/', maxAge: 0 });
+  res.cookies.set(SESSION_COOKIE, '', { ...sessionCookieOptions(), maxAge: 0 });
   return res;
 }

@@ -28,25 +28,22 @@ export interface FetchImageBase64Diagnostic {
   error?: string;
 }
 
-/** Hard cap so a huge image can't blow up Gemini cost/latency (20 MB). */
-const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+/** Hard cap so a huge image can't blow up Gemini cost/latency (12 MB). */
+const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 
-export async function fetchImageBase64Detailed(url: string, timeoutMs = 8000): Promise<FetchImageBase64Diagnostic> {
-  // Abort a slow image download so it never blocks the whole agent turn.
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, { signal: controller.signal });
-    if (!res.ok) return { ok: false, status: res.status };
-    const mimeType = res.headers.get('content-type') || 'image/jpeg';
-    const buf = await res.arrayBuffer();
-    if (buf.byteLength > MAX_IMAGE_BYTES) {
-      return { ok: false, status: res.status, bytesSize: buf.byteLength, error: 'image_too_large' };
-    }
-    return { ok: true, data: arrayBufferToBase64(buf), mimeType, status: res.status, bytesSize: buf.byteLength };
-  } catch (e: any) {
-    return { ok: false, error: e?.name === 'AbortError' ? 'image_download_timeout' : (e?.message ?? 'image_download_failed') };
-  } finally {
-    clearTimeout(timer);
-  }
+/**
+ * SSRF-safe remote image download → base64 (EH-019). All protocol/DNS/private
+ * -range/redirect/size/MIME/magic-byte enforcement lives in util/safe-fetch;
+ * this wrapper keeps the diagnostic shape the pipelines already consume.
+ */
+export async function fetchImageBase64Detailed(url: string, timeoutMs = 10_000): Promise<FetchImageBase64Diagnostic> {
+  const { fetchImageSafely } = await import('./safe-fetch');
+  const result = await fetchImageSafely(url, { maxBytes: MAX_IMAGE_BYTES, timeoutMs });
+  if (!result.ok) return { ok: false, error: result.reason };
+  return {
+    ok: true,
+    data: result.data.toString('base64'),
+    mimeType: result.contentType || 'image/jpeg',
+    bytesSize: result.data.byteLength,
+  };
 }

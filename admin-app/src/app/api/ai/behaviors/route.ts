@@ -41,7 +41,11 @@ export async function GET(req: NextRequest) {
   }
 }
 
-/** Update one behavior by id. Changes take effect on the next AI call. */
+/**
+ * Update one behavior by id. Changes take effect on the next AI call. Every
+ * save appends a version snapshot so any earlier state can be restored with
+ * one click (no deployment).
+ */
 export async function PATCH(req: NextRequest) {
   const db = getDb();
   if (!db) {
@@ -66,7 +70,20 @@ export async function PATCH(req: NextRequest) {
   }
 
   try {
-    await db.updateTable('ai_behaviors').set(update as any).where('id', '=', id).execute();
+    const updated = await db.updateTable('ai_behaviors').set(update as any).where('id', '=', id)
+      .returning(['behavior_key', 'title', 'prompt', 'rules', 'memory', 'enabled'])
+      .executeTakeFirst();
+    if (updated) {
+      await db.insertInto('ai_behavior_versions').values({
+        behavior_key: updated.behavior_key,
+        title: updated.title,
+        prompt: updated.prompt,
+        rules: updated.rules,
+        memory: updated.memory,
+        enabled: updated.enabled,
+        note: `edit (${Object.keys(update).join(', ')})`,
+      }).execute();
+    }
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? 'update_failed' }, { status: 500 });
   }

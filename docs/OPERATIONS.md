@@ -1,122 +1,119 @@
-# EH-SYSTEM1 — Operations Guide
+# Operations runbook
 
-Day-to-day operator guide for the English Home Libya command center.
+## Services
 
----
+`docker compose up -d` starts four containers:
 
-## Daily workflow
+| Service | Role |
+|---|---|
+| `postgres` | All durable data |
+| `app` | Next.js UI + API, and the Meta webhook endpoint |
+| `worker` | Every background job (AI turns, delivery, publishing, comments, promotions, analytics, readiness) |
+| `caddy` | TLS termination and public media serving |
 
-1. Open **Dashboard** — check integration status (Database / Gemini / Meta) and the "Needs action" count.
-2. Open **Inbox** — the "Needs action" filter surfaces conversations that require human attention (`status = needs_human` or AI paused). Work through them.
-3. Check **Campaigns** — any scheduled campaigns near their publish time?
-4. Check **Catalog Review → Matches** — approve pending catalog matches so products get images.
-5. Check **Catalog Review → Prices** — activate any priced-but-not-yet-active products.
+The worker schedules its own recurring work. **No host cron is required** — the
+only host job worth installing is the nightly backup.
 
----
+## First deployment
 
-## Inbox workflow
+```bash
+cp .env.example .env            # fill in real values
+docker compose build
 
-### Reading conversations
+# 1. Back up first if there is anything to lose
+./scripts/backup.sh
 
-The inbox list sorts needs-human conversations first, then by last message time. Click a conversation to open the thread. The right rail shows:
-- **AI Controls** — pause/resume toggle, AI status for this conversation.
-- **Customer info** — name, channel, tags.
-- **Customer memory** — what the AI remembers about this customer (recent products, preferences, known contact info).
-- **Product candidates** — products the AI matched or you searched for.
+# 2. Inspect what a migration would do — changes nothing
+DATABASE_URL=... npm run db:preflight
 
-### Pausing and resuming AI
+# 3. Apply migrations
+DATABASE_URL=... npm run db:migrate
 
-- **Pause AI** (toggle in right rail or AI Controls panel): sets `ai_enabled = false` on the conversation. The AI stops generating replies. The inbox badge changes to show "AI paused".
-- **Resume AI**: sets `ai_enabled = true`. The AI resumes auto-replying on the next customer message.
+# 4. Create the first owner (no default password exists anywhere)
+node -e "require('bcryptjs').hash('a-strong-password',12).then(console.log)"
+# put it in OWNER_PASSWORD_HASH, set OWNER_USERNAME, then:
+npm run bootstrap:owner --prefix scripts
 
-Conversations automatically land in needs-human status (and AI paused) when the AI detects: order requests, payment/refund/exchange/complaint questions, delivery details not in the catalog, unsafe image matches, or a missing-price product.
+# 5. Start everything
+docker compose up -d
+```
 
-### Sending a manual reply
+Then open **Settings → Channels** and press *فحص الآن* to verify what is actually
+connected.
 
-Type in the composer at the bottom of the thread and hit Send. The message is stored immediately and Meta send is attempted. A sent indicator appears when delivery is confirmed; a failed indicator appears (with the error in `ai_meta.delivery_error`) if Meta rejects the send. A failed send is never shown as delivered.
+## Upgrades
 
-### Attaching a product
+```bash
+./scripts/backup.sh             # database + media, always
+git pull
+docker compose build
+DATABASE_URL=... npm run db:preflight    # review the plan
+DATABASE_URL=... npm run db:migrate
+docker compose up -d
+curl -s https://<app-domain>/api/health | jq
+```
 
-Click the product search in the right rail, search by name/code/keyword. Click a product to attach it to the conversation. This adds a `conversation_attachments` row so the AI and subsequent turns know what product you're discussing.
+The migration runner is forward-only and idempotent. It takes an advisory lock,
+so two concurrent deploys cannot race. On a database whose ledger is incomplete
+it **probes** each unrecorded migration and backfills the ledger only when the
+effects are already present — it never re-applies a migration blindly and never
+rewrites history.
 
-### AI Suggest
+## Backups
 
-The "AI Suggest" button in the composer generates a suggested reply using the same Gemini pipeline as the auto-reply (same behavior, same tools, same temperature). The suggestion is stored as `is_internal_suggestion = true` — it is not sent. You can edit it in the composer before sending.
+Media is not rebuildable; it is backed up with the database.
 
-### Sending a product photo
+```bash
+./scripts/backup.sh                        # → backups/<timestamp>/{db.dump,media.tar.gz}
+./scripts/backup.sh --db-only
+./scripts/restore.sh backups/<ts> --yes    # destructive; --yes is mandatory
+```
 
-Each product candidate card has a **Send image** button (a small image icon). Click it to send that product's catalog photo plus a short Libyan-Arabic caption to the customer via Messenger. The button is disabled when the product has no usable image. A sent/failed indicator appears on the resulting message — a failed send is never shown as delivered.
+Install the nightly job from `deploy/crontab.example`.
 
-The AI also sends product photos on its own when a customer asks to see them (`ابعثلي صورته`, `وريني الألوان`, `نبي نشوفهم`). It sends at most 3 photos and only for products that have a public image. See `AI_AND_MESSENGER.md` → Product image sending.
+## Monitoring
 
-### Correcting an image match
+- `GET /api/health` — returns 503 unless the database really answers a query.
+  It reports proven state: database reachability and whether the worker has
+  touched a job in the last 10 minutes. It never claims a dependency works
+  without testing it.
+- **Settings → Activity** shows the admin audit log, failed/uncertain deliveries,
+  dead jobs and integration errors.
+- **Dashboard** surfaces conversations needing the team and operational problems.
 
-If the AI matched the wrong product for a customer image, click "Correct" on the candidate. Pick the right product. This stores a correction in `image_match_corrections` and a perceptual hash fingerprint in `product_fingerprints` so the same image hashes correctly in future.
-
----
-
-## Catalog review workflow
-
-### Catalog Match tab (`/catalog-match`)
-
-Shows pending matches between scraper-discovered products and Libya catalog products. States: Possible → Approved / Rejected / No match.
-
-- **Approve** a match: the scraper product's images are linked to the CSV catalog product.
-- **Reject** a match: marks it as wrong so it is not re-suggested.
-- **Bulk approve**: approves all high-confidence pending matches at once.
-- **Image search**: search for a product by uploading or pasting an image URL.
-
-### Image Review tab (`/image-review`)
-
-Shows image-match correction history. Admin corrections feed fingerprint learning — the same image hash routes directly to the correct product on subsequent matches.
-
-### Prices tab (`/price-review`)
-
-Shows products with a price but not yet activated (`status != active`). Review each product and click Activate to make it customer-visible. Once active with a price, the AI can quote it to customers.
-
----
-
-## Campaign workflow
-
-1. **Campaigns → New** — enter an internal name, objective, caption, exact image text, and any needed aspect/channel.
-2. **Attach products/source images** — these are the verified identity references.
-3. **Generate** — current master creative, preservation, and typography instructions are loaded from AI Control.
-4. **Review** — inspect product-fidelity and text warnings; approve or regenerate. Verification is probabilistic and human approval is required.
-5. **Schedule or publish** — the scheduler refreshes pricing before publication.
-
----
-
-## AI Control
-
-`/ai-control` shows every behavior row and all prompt/rules/memory fields. It
-includes task applicability, enable/disable state, warnings, save feedback, and
-the effective production compiler preview with provenance and trace ID.
-
-Changes take effect on the next applicable execution. Catalog/price truth,
-valid IDs, permissions, schemas, race guards and privacy remain immutable.
-Language, brand, tone, response shape, handoff wording, campaign art direction,
-preservation and typography are editable here and are not duplicated in code.
-
----
-
-## AI Playground
-
-`/ai-playground` runs the same compiler, model router and core production paths and shows:
-- **Customer reply** — the message the customer would receive.
-- **Technical debug** — task, production-path parity, contributing AI Control sections, prompt trace, model, candidates and tool calls.
-
-Use this to verify AI behavior before live deployment and to reproduce issues reported in production.
-
----
-
-## How to know if something is broken
+### What to check when something looks wrong
 
 | Symptom | Where to look |
-|---------|---------------|
-| AI replies show "AI · Internal" (inbox badge) | No customer message was sent. Check `integration_logs` for Meta send errors. See `TROUBLESHOOTING.md`. |
-| No AI reply at all | Check if AI is paused on the conversation. Check `ai_events` for errors. |
-| Wrong product matched from image | Go to Image Review, correct the match. Fingerprint is saved for future. |
-| Dashboard shows "Not connected" | An env var is missing. Check `.env` on the VPS and `docker compose up -d`. |
-| Campaign not publishing | Check `activity_logs` and `integration_logs` for the campaign scheduler run. Verify Meta credentials. |
-| Customer gets a price quote that is wrong | Check `products.active_price` for that product. The AI reads this column directly — if it is wrong, the catalog is wrong. |
-| AI didn't send a photo when asked | The product likely has no public image. Check `product_images.public_url`; upload an image from the product page. Verify the URL is HTTPS. |
+|---|---|
+| Customers not getting replies | Settings → Activity: dead jobs; is the `worker` container running? |
+| A reply shows "غير مؤكد" (uncertain) | The provider call timed out; an admin decides whether to retry |
+| Content stuck in `publishing` | The publication row's `last_error`; retry the failed platform only |
+| Instagram actions failing | Settings → Channels — it names the missing permission or linkage |
+| Prices look wrong | The product's price-history panel shows every change and its source |
+
+## Worker behaviour
+
+- Jobs are claimed with `FOR UPDATE SKIP LOCKED` plus a lease; a crashed
+  worker's lease is reaped and the job returns to the queue.
+- Failures retry with bounded exponential backoff and then become `dead` —
+  visible, never silent.
+- Retention sweeps run every six hours (processed events 30 days, completed jobs
+  7 days, login attempts and expired sessions 14 days, integration logs 60 days).
+
+## Catalog maintenance
+
+```bash
+npm run bootstrap:families --prefix scripts   # build/refresh product families
+npm run embeddings --prefix scripts           # semantic search vectors
+npm run fingerprints --prefix scripts         # image fingerprints for photo matching
+```
+
+CSV imports run from **Catalog → استيراد CSV** in the app; they update unlocked
+fields automatically and can never overwrite an admin-locked field.
+
+## Scaling notes
+
+Sized for ~20–30 conversations and 10–20 content items per day with three
+admins. More than one worker container can run safely — job claiming is
+transactional. There is intentionally no Redis, no Kubernetes and no distributed
+queue.

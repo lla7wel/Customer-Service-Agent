@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, CircleAlert, Eye, Loader2, Save, ShieldCheck } from 'lucide-react';
+import { Check, CircleAlert, Eye, History, Loader2, RotateCcw, Save, ShieldCheck } from 'lucide-react';
 import { Card } from '@/components/ui';
 import type { AiBehavior } from '@integrations/db/rows';
 import type { Locale } from '@/lib/i18n/config';
@@ -136,7 +136,87 @@ function BehaviorCard({ behavior, ar, onSaved }: { behavior: AiBehavior; ar: boo
         <div className="text-[11px] text-warning">{warnings.join(' · ')}</div>
         <div className="flex items-center gap-2">{error && <span className="text-xs text-danger">{error}</span>}<span className="text-[11px] text-faint">{chars} chars · ~{Math.ceil(chars / 4)} tokens</span><button onClick={save} disabled={state === 'saving'} className="btn-primary">{state === 'saving' ? <Loader2 size={14} className="animate-spin" /> : state === 'saved' ? <Check size={14} /> : <Save size={14} />}{state === 'saved' ? (ar ? 'تم الحفظ' : 'Saved') : (ar ? 'حفظ' : 'Save')}</button></div>
       </div>
+      <VersionHistory behaviorKey={behavior.behavior_key} currentPrompt={prompt} ar={ar} onRestored={() => { router.refresh(); onSaved(); }} />
     </Card>
+  );
+}
+
+interface VersionRow {
+  id: number; title: string | null; prompt: string | null; rules: string | null; memory: string | null;
+  enabled: boolean; note: string | null; created_at: string; saved_by_username: string | null;
+}
+
+/** Version history with diff-at-a-glance and one-click restore (no deploy). */
+function VersionHistory({ behaviorKey, currentPrompt, ar, onRestored }: {
+  behaviorKey: string; currentPrompt: string; ar: boolean; onRestored: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [versions, setVersions] = useState<VersionRow[] | null>(null);
+  const [busy, setBusy] = useState<number | null>(null);
+
+  const load = async () => {
+    const res = await fetch(`/api/ai/behaviors/versions?key=${encodeURIComponent(behaviorKey)}`);
+    const data = await res.json().catch(() => ({}));
+    setVersions(data.versions ?? []);
+  };
+
+  const restore = async (versionId: number) => {
+    setBusy(versionId);
+    await fetch('/api/ai/behaviors/versions', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ versionId }),
+    });
+    setBusy(null);
+    onRestored();
+    await load();
+  };
+
+  return (
+    <div className="mt-3 border-t border-line pt-2">
+      <button
+        onClick={() => { setOpen((v) => !v); if (!versions) void load(); }}
+        className="flex items-center gap-1.5 text-xs font-medium text-muted transition hover:text-fg"
+      >
+        <History size={13} /> {ar ? 'سجل النسخ والاستعادة' : 'Version history & restore'}
+      </button>
+      {open && (
+        versions === null ? <Loader2 size={14} className="mt-2 animate-spin text-muted" /> : versions.length === 0 ? (
+          <p className="mt-2 text-xs text-faint">{ar ? 'لا توجد نسخ محفوظة بعد.' : 'No saved versions yet.'}</p>
+        ) : (
+          <ul className="mt-2 max-h-56 space-y-1.5 overflow-y-auto">
+            {versions.map((v) => {
+              const changed = (v.prompt ?? '') !== currentPrompt;
+              return (
+                <li key={v.id} className="rounded-lg border border-line bg-surface2/50 px-2.5 py-1.5 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-muted">
+                      #{v.id} · {v.note ?? '—'}{v.saved_by_username ? ` · ${v.saved_by_username}` : ''}
+                      {!changed && <span className="ms-1 text-success">({ar ? 'مطابق للحالي' : 'same as current'})</span>}
+                    </span>
+                    <span className="flex shrink-0 items-center gap-2">
+                      <span className="text-faint" dir="ltr">{new Date(v.created_at).toLocaleString('en-GB')}</span>
+                      <button
+                        onClick={() => restore(v.id)}
+                        disabled={busy !== null}
+                        className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 font-medium text-fg transition hover:bg-surface2"
+                      >
+                        {busy === v.id ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />}
+                        {ar ? 'استعادة' : 'Restore'}
+                      </button>
+                    </span>
+                  </div>
+                  {changed && v.prompt && (
+                    <details className="mt-1">
+                      <summary className="cursor-pointer text-faint">{ar ? 'عرض نص هذه النسخة' : 'Show this version'}</summary>
+                      <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-surface p-2 text-[11px]" dir="auto">{v.prompt}</pre>
+                    </details>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )
+      )}
+    </div>
   );
 }
 

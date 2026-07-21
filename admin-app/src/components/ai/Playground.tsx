@@ -2,19 +2,18 @@
 
 import { useState } from 'react';
 import {
-  MessageSquare, ScanSearch, Megaphone, Wand2, Upload, Play, X, CircleAlert,
+  MessageSquare, ScanSearch, Megaphone, Upload, Play, X, CircleAlert,
   Sparkles, Bug, Send,
 } from 'lucide-react';
 import { Card } from '@/components/ui';
 import type { Locale } from '@/lib/i18n/config';
 
-type Mode = 'customer' | 'image_matching' | 'campaign_caption' | 'campaign_image';
+type Mode = 'customer' | 'image_matching' | 'campaign_caption';
 
 const MODES: { id: Mode; en: string; ar: string; icon: any; needsImage?: boolean; allowsImage?: boolean; ph_en: string; ph_ar: string }[] = [
   { id: 'customer', en: 'Customer turn', ar: 'محادثة عميل', icon: MessageSquare, allowsImage: true, ph_en: 'Customer message, product name, code, barcode, or link…', ph_ar: 'رسالة العميل، اسم منتج، كود، باركود، أو رابط…' },
   { id: 'image_matching', en: 'Image → product', ar: 'مطابقة صورة', icon: ScanSearch, needsImage: true, ph_en: 'Optional text with the image…', ph_ar: 'نص إضافي مع الصورة (اختياري)…' },
   { id: 'campaign_caption', en: 'Campaign caption', ar: 'كابشن حملة', icon: Megaphone, ph_en: 'Campaign description / prompt…', ph_ar: 'وصف الحملة / البرومبت…' },
-  { id: 'campaign_image', en: 'Campaign image', ar: 'صورة حملة', icon: Wand2, needsImage: true, ph_en: 'Campaign objective…', ph_ar: 'هدف الحملة…' },
 ];
 
 export default function Playground({ locale }: { locale: Locale }) {
@@ -28,8 +27,6 @@ export default function Playground({ locale }: { locale: Locale }) {
   const [previousImageContext, setPreviousImageContext] = useState<any | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [campaignImageText, setCampaignImageText] = useState('');
-  const [campaignRatio, setCampaignRatio] = useState('1:1');
 
   const active = MODES.find((m) => m.id === mode)!;
 
@@ -55,7 +52,6 @@ export default function Playground({ locale }: { locale: Locale }) {
           mode,
           text,
           image: image ? { data: image.data, mime: image.mime } : null,
-          campaign: mode === 'campaign_image' ? { objective: text, image_text: campaignImageText, aspect_ratio: campaignRatio, target_channel: 'facebook_instagram' } : undefined,
           previousImageContext: !image && mode === 'customer' ? previousImageContext : null,
         }),
       });
@@ -105,7 +101,6 @@ export default function Playground({ locale }: { locale: Locale }) {
           </span>
         </div>
         <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} dir="auto" placeholder={ar ? active.ph_ar : active.ph_en} className="input resize-y" />
-        {mode === 'campaign_image' && <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]"><label><span className="mb-1 block text-xs text-muted">{ar ? 'النص المطلوب داخل الصورة بالضبط' : 'Exact text requested inside image'}</span><input value={campaignImageText} onChange={(e) => setCampaignImageText(e.target.value)} className="input" dir="auto" /></label><label><span className="mb-1 block text-xs text-muted">{ar ? 'النسبة' : 'Ratio'}</span><select value={campaignRatio} onChange={(e) => setCampaignRatio(e.target.value)} className="input"><option>1:1</option><option>4:5</option><option>9:16</option><option>16:9</option></select></label></div>}
         {(active.needsImage || active.allowsImage) && (
           <div className="mt-3">
             {image ? (

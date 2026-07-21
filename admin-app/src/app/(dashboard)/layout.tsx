@@ -4,7 +4,7 @@ import { getLocale } from '@/lib/i18n/server';
 import { getTheme } from '@/lib/theme-server';
 import { allIntegrationStatuses } from '@integrations/status';
 import { cookies } from 'next/headers';
-import { SESSION_COOKIE, verifySessionToken } from '@/lib/auth';
+import { SESSION_COOKIE, requireAdmin } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,7 +13,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const theme = await getTheme();
   const statuses = allIntegrationStatuses();
 
-  const userEmail = await verifySessionToken((await cookies()).get(SESSION_COOKIE)?.value);
+  const admin = await requireAdmin((await cookies()).get(SESSION_COOKIE)?.value);
+  const userEmail = admin ? (admin.displayName || admin.username) : null;
 
   return (
     <div className="premium-shell flex h-dvh overflow-hidden">

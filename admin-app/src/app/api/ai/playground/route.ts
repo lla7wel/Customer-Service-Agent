@@ -4,10 +4,9 @@
  * reply. Never sends to customers; only ai_events may be written elsewhere.
  *
  * Modes:
- *   - text/code/barcode/url (+ optional image)  → full Messenger-style turn
+ *   - text/code/barcode/url (+ optional image)  → full DM-style turn
  *   - image_matching                            → canonical image matcher
- *   - campaign_caption                          → caption generator
- *   - campaign_image                            → image generate/edit
+ *   - campaign_caption                          → Content Studio caption generator
  *   - behavior-key quick tests (customer_service, product_recommendation, …)
  */
 import { NextRequest, NextResponse } from 'next/server';
@@ -19,7 +18,6 @@ import { composeCustomerReply } from '@integrations/pipelines/compose-reply';
 import { getDb } from '@integrations/db/client';
 import { loadBehaviors } from '@/lib/ai-behaviors';
 import { compilePrompt, type AiTask } from '@integrations/prompt-compiler';
-import { generateCampaignCreative } from '@integrations/pipelines/campaign-creative';
 import {
   getCustomerMemory, buildMemoryContext,
 } from '@integrations/tools';
@@ -74,14 +72,6 @@ export async function POST(req: NextRequest) {
       const r = await caption({ prompt: envelope.runtimeData, systemPrompt: envelope.effectiveSystemInstruction, temperature: envelope.generationSettings.temperature });
       if (!r.ok) return notConfigured(r);
       return NextResponse.json({ reply: r.text, debug: { mode, task: envelope.task, production_path: true, prompt_trace_id: envelope.traceId, ai_control_sections: envelope.contributors.map((c) => c.behaviorKey), gemini_calls: [{ fn: 'caption', model: r.model, latency_ms: r.latencyMs }], total_latency_ms: Date.now() - started } });
-    }
-
-    // --- Campaign image -------------------------------------------------------
-    if (mode === 'campaign_image') {
-      if (!image) return NextResponse.json({ error: 'source_image_required' }, { status: 400 });
-      const campaign = body?.campaign && typeof body.campaign === 'object' ? body.campaign : {};
-      const r = await generateCampaignCreative({ behaviors, sourceImageBase64: image.data, sourceMimeType: image.mime, objective: String(campaign.objective || text || ''), caption: String(campaign.caption || ''), imageText: String(campaign.image_text || ''), aspectRatio: String(campaign.aspect_ratio || '1:1'), targetChannel: String(campaign.target_channel || 'facebook_instagram'), products: [] });
-      return NextResponse.json({ reply: 'Image generated for review.', image: `data:${r.image.mimeType};base64,${r.image.data}`, model: r.model, requestedModel: r.requestedModel, fallbackUsed: r.fallbackUsed, verification: r.verification, debug: { mode, task: 'campaign_image', production_path: true, prompt_trace_id: r.promptTraceId, ai_control_sections: r.contributors, gemini_calls: [{ fn: 'generateCampaignCreative', model: r.model, requested_model: r.requestedModel, fallback_used: r.fallbackUsed, attempts: r.attempts }], total_latency_ms: Date.now() - started } });
     }
 
     // --- Image recognition workflow ------------------------------------------

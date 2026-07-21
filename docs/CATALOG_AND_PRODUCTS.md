@@ -1,150 +1,118 @@
-# EH-SYSTEM1 — Catalog and Products
+# Catalog, pricing and imports
 
----
+The catalog is the durable source of customer-facing truth. Everything the
+assistant says about a product comes from here.
 
 ## Price truth
 
-**The Libya CSV catalog is the only price authority.**
+There are exactly **two** authoritative price sources:
 
-- `products.base_price` — set by `scripts/catalog:csv` import, or by admin override via `/api/products/[id]/price`.
-- `products.active_price` — the price customers see. Equals `base_price` when no campaign is active, or `campaign_price` when a campaign overrides it.
-- `products.campaign_price` — cached by `fn_refresh_product_pricing()` when a campaign is active.
+1. **Manual admin edits** (Catalog → product → price)
+2. **CSV imports**
 
-**Never trust:** Turkish scraper prices, AI-extracted prices, or customer-stated prices. The pipeline hard-guards this — Gemini reads `active_price` from the database via the `getProductPrice` tool and never invents one.
+The AI never writes a price. Every change is versioned in
+`product_price_history` with its source, the admin who made it and any linked
+content item.
 
----
+### Precedence
 
-## Product fields
+- An admin edit **locks** `base_price`; no later CSV import can overwrite it.
+- A later manual price permanently supersedes an open promotion.
+- A later CSV price retargets an open promotion's restore value, so expiry
+  restores to the newer price rather than an outdated one.
+- Overlapping promotions on one product are impossible (partial unique index).
 
-| Column | Source | Notes |
-|--------|--------|-------|
-| `product_code` | CSV / scraper (canonical) | Leading zeros stripped for dedup |
-| `barcode` | CSV / scraper | |
-| `english_name` | CSV | Customer/admin-facing |
-| `arabic_name` | CSV | Customer/admin-facing |
-| `libyan_display_name` | CSV / admin | Used by `customerProductName()` first |
-| `source_name` | Scraper | Turkish name — reference only, never shown to customers |
-| `base_price` | CSV / admin | Libya Dinar (LYD) |
-| `active_price` | Computed | `base_price` or `campaign_price` |
-| `status` | Import / admin | `active` = customer-visible; `draft` = hidden pending review |
-| `text_embedding` | Script | 768-dim Gemini embedding for semantic search (JSONB float array) |
-| `admin_locked_fields` | App | JSONB set of field names that import scripts must not overwrite |
-| `raw` | Scraper | Full JSON import record — not read at runtime; kept for provenance |
-| `website_url` | Scraper | Turkish product URL — identity/recognition signal |
+### Promotions
 
-A product is **customer-visible** only when `status = 'active' AND active_price IS NOT NULL`. The AI never surfaces draft or unpriced products to customers.
+A price-drop content item carries only the **new** price; the "before" price is
+read from verified history at render and publish time.
 
----
+- **Permanent** drop (no end date) → becomes the new base price.
+- **Temporary** promotion (end date) → the active price changes; when it expires
+  the prior verified price is restored automatically, unless a newer manual or
+  CSV price already superseded it.
 
-## Turkish scraper identity
+Activation happens only when a platform actually publishes. A completely failed
+publish never changes a price. See [CONTENT_STUDIO.md](CONTENT_STUDIO.md).
 
-The scraper (`../english-home-tr-scraper`) is a separate project. This app never runs it. The scraper provides:
-- Product code, barcode, English name, website URL, images, category.
+## Availability
 
-These are **identity signals** — they help match and recognize products. They do not override prices, status, or Arabic names.
+There is **no inventory or ERP system**. An active product with a verified
+active price is treated as available and the assistant may say so confidently.
+Stock quantities, reservations and delivery timing are never invented.
 
-When a scraper product is imported:
-- If a catalog product with the same canonical code/barcode already exists, the scraper row attaches its images and source metadata to it.
-- If no catalog match exists, the scraper row creates a `draft` product with no price, no Arabic name — it appears in **Catalog Review → Prices** for the admin to complete.
+`integrations/catalog/` contains an availability-provider boundary for a future
+ERP integration. It is intentionally inactive; its behaviour today is simply
+"active + priced = available".
 
----
+## Field locks
 
-## Import scripts (local only)
+`products.admin_locked_fields` is a map of `field → true`. Once an admin edits a
+field it is locked, and every automated writer routes its updates through
+`stripLockedFields` so it can never silently overwrite an admin decision.
 
-Run from `EH-SYSTEM1/scripts/`. None of these are deployed or triggered from the web app.
+Lockable fields: display names, category, subcategory, `base_price`, status,
+availability, keywords and primary image.
 
-| Command | What it does |
-|---------|-------------|
-| `npm run catalog:csv` | **Main catalog import.** Imports the Libya CSV as active, priced products. Fills `english_name`, `arabic_name`, `arabic_keywords`, `base_price`, `active_price`. Respects `admin_locked_fields` — never overwrites an admin-set price. |
-| `npm run import:products` | Scraper sync. New scraped products → inserted as `draft`. Existing products → source metadata + images updated only. Never overwrites price, status, names, barcode, or category. |
-| `npm run upload:images` | Copies local scraper images into `MEDIA_ROOT` (served by Caddy), fills `product_images.public_url`. |
-| `npm run embeddings` | Generates semantic vector embeddings for all products and stores in `products.text_embedding`. Run after catalog imports. |
-| `npm run match:images` | Dry-run: suggests scraper images for catalog products missing images. Use `--apply --yes` to attach. |
-| `npm run validate` | Dry run of product import — shows what would happen without writing. |
+## CSV import
 
-**First-time setup order:** `catalog:csv` → `import:products` → `upload:images` → `embeddings`.
+Uploaded from **Catalog → استيراد CSV**. The worker applies it:
 
-**Repeat sync order** (no new CSV, just scraper updates): `import:products` → `upload:images`.
+- unlocked fields update **automatically** — there is no approval queue;
+- locked fields are skipped and counted in the run summary;
+- prices route through the pricing engine (history + promotion precedence);
+- every field change is recorded in `product_field_changes` for the run;
+- each product is applied in its own transaction, so one bad row cannot abort
+  the import;
+- duplicate product codes inside one file are rejected (first wins) and reported;
+- **existing catalog images are never touched.**
 
----
+Expected columns:
 
-## Product matching in AI
+```
+Product Code, Barcode, Product Name, Price, Website URL, Image URL,
+Arabic Keywords, Needs Size/Color, English Keywords, Variant Requirement, Search Text
+```
 
-When the AI receives a customer inquiry, it resolves the product through `resolveProductsFromText()`:
+Product codes are canonicalised (leading zeros stripped) so CSV rows and older
+records resolve to the same product. A row with no price is imported as `draft`
+and stays invisible to customers.
 
-1. URL → exact `website_url`, then code/barcode from URL path.
-2. Exact product code or barcode typed in the message.
-3. Keyword search (Arabic + English + Turkish names, `arabic_keywords`, `search_keywords`).
-4. Semantic vector search (embedding of the query against `products.text_embedding`).
+The run summary reports created / updated / price-updated / locked-skipped /
+unchanged / errors truthfully.
 
-For image messages, `matchCustomerImage()` runs a separate 8-step pipeline (see `AI_AND_MESSENGER.md`).
+## Families, variants and relations
 
----
+- **Families** group genuine variations — the same product in different sizes,
+  colours or set configurations. They are bootstrapped automatically from
+  existing names (`npm run bootstrap:families --prefix scripts`), conservatively:
+  only within a category, and only when the stripped base name is meaningful.
+- **Variant labels** capture what distinguishes a member (`160×220 · white`).
+- **Relations** are explicit links: `variant`, `set_member`, `complementary`,
+  `similar`.
 
-## Catalog match workflow
+**Admin corrections are permanent.** Setting a family sets `family_locked`, and
+an admin-created relation is `locked` — the automatic grouper never overrides
+either. There is no review queue for automatic suggestions.
 
-`/catalog-match` — matches scraper-discovered products to the Libya catalog.
+This is what lets the assistant answer "عندكم مفارش؟" with a few compact
+families and their verified price ranges, instead of dumping the catalog or
+presenting unrelated products as variants.
 
-1. Automatic matching runs when scraper products are imported (`import:products`).
-2. High-confidence matches land in **Possible** state.
-3. Admin reviews: **Approve** (links scraper images to catalog product), **Reject**, or marks as **No match**.
-4. **Bulk approve** approves all high-confidence pending matches at once.
+## Retrieval
 
-Once approved, the catalog product gains the scraper's images and is visible in Image Review.
+No arbitrary row caps — every strategy covers the whole catalog:
 
----
+| Strategy | Mechanism |
+|---|---|
+| Full-text | Maintained `tsvector` over names, code, barcode and keyword arrays (GIN) |
+| Fuzzy names | Trigram index |
+| Exact identity | Product code, barcode, website URL indexes |
+| Image | Perceptual dHash over **all** fingerprints, keyset-paged |
+| Semantic | Embedding cosine over **all** embedded products, keyset-paged |
 
-## Image review and fingerprint learning
+## The scraper
 
-`/image-review` — when the AI matched the wrong product from a customer image:
-
-1. Admin opens Image Review, sees the correction history.
-2. Alternatively, directly in the Inbox conversation, click "Correct" on a wrong candidate.
-3. Pick the correct product.
-
-This creates:
-- An `image_match_corrections` row (audit log).
-- A `product_fingerprints` row with the customer image's perceptual hash.
-
-Next time the same image (or a near-duplicate) arrives, step 3 of the image-match pipeline finds it via the fingerprint and returns the correct product directly — no Gemini call needed.
-
----
-
-## Missing price handling
-
-A product with `active_price = NULL` stays `draft` and appears in **Catalog Review → Prices** for activation.
-
-The AI may discover such a product during a customer query. The hard safety rule: **never quote a price for a missing-price product**. Gemini is told to say the price will be confirmed by the team and to route the conversation to `needs_human`.
-
-To activate a product: open `/price-review`, enter the LYD price, and click Activate. The product becomes `active` with the price and is immediately customer-visible.
-
----
-
-## Manual product add and edit
-
-**Add a product:** click "+ Add product" on `/products`. Fill name, code, barcode, category, price, status.
-
-**Edit a product:** open a product from `/products`, edit any field, save.
-
-Any field set via the admin UI is marked in `admin_locked_fields`. Import scripts check this field before writing and skip locked columns. Admin-set prices and names are never overwritten by a subsequent `catalog:csv` or `import:products` run.
-
----
-
-## Product images for customer sending
-
-When the AI (or admin) sends a product photo to a customer, the image URL must be **publicly fetchable over HTTPS** — Meta downloads it server-side.
-
-- The image is chosen by `primaryProductImageUrl()`: prefers `is_primary`, then lowest `position`, then the first valid image. It uses `product_images.public_url`, falling back to the public Storage URL derived from `storage_path`.
-- `isMetaSafeImageUrl()` rejects anything that is not HTTPS, plus localhost and local file paths — these are never sent to a customer.
-- For images to be sendable, run `npm run upload:images` so `public_url` is populated, and keep the `eh-media` Storage bucket **public (read)**.
-- Only `status = 'active'` products with a price are auto-sent as photos. Draft/unpriced products are not auto-sent.
-
-See `AI_AND_MESSENGER.md` → Product image sending for the full behaviour.
-
-## Admin lock fields
-
-`products.admin_locked_fields` is a JSONB array of column names: e.g. `["base_price", "english_name"]`.
-
-`integrations/product-locks.ts` — `withLocks(product, update)` strips locked fields from any update. `stripLockedFields(fields, locked)` removes locked keys from a set of proposed changes.
-
-Import scripts call these helpers before writing. API routes call them too. The result: admin decisions are sticky.
+The scraper is **not** part of this system. There is no import, sync, matching
+or review pipeline for it, and no scraper-driven UI. Images obtained from past
+sources remain in the catalog and are never deleted.

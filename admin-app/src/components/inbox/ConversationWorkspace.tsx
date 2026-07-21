@@ -14,9 +14,11 @@ interface Msg {
   is_internal_suggestion: boolean;
   created_at: string;
   delivered_at?: string | null;
+  delivery_status?: string | null;
   attachments?: Attachment[];
   ai_meta?: Record<string, unknown>;
 }
+interface FailedOutbox { id: string; message_id: string | null; kind: string; status: string; last_error: string | null }
 interface FoundProduct { id: string; code: string; name: string; original_name?: string | null; price: number | null; image: string | null; website_url?: string | null }
 interface Candidate {
   id: string; product_code: string | null; name: string; price: number | null;
@@ -55,6 +57,9 @@ export default function ConversationWorkspace({
   const [imgBusy, setImgBusy] = useState(false);
   const [imgCandidates, setImgCandidates] = useState<Candidate[] | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
+  const [channel, setChannel] = useState<string>('messenger');
+  const [attention, setAttention] = useState<{ flag: boolean; reason: string | null }>({ flag: false, reason: null });
+  const [failedOutbox, setFailedOutbox] = useState<FailedOutbox[]>([]);
   const threadRef = useRef<HTMLDivElement>(null);
   const imgInputRef = useRef<HTMLInputElement>(null);
 
@@ -70,11 +75,15 @@ export default function ConversationWorkspace({
         id: m.id, direction: m.direction, sender_type: m.sender_type, body: m.body,
         is_internal_suggestion: m.is_internal_suggestion, created_at: m.created_at,
         delivered_at: m.delivered_at ?? null,
+        delivery_status: m.delivery_status ?? null,
         attachments: m.attachments ?? [], ai_meta: m.ai_meta ?? {},
       }));
       setMessages(msgs);
       setCandidates(deriveCandidates(msgs));
       if (typeof d.ai_enabled === 'boolean') setAiEnabled(d.ai_enabled);
+      if (typeof d.channel === 'string') setChannel(d.channel);
+      setAttention({ flag: !!d.human_attention, reason: d.human_attention_reason ?? null });
+      setFailedOutbox(d.failed_outbox ?? []);
     } catch { /* ignore transient/aborted poll errors */ }
   }, [conversationId]);
 
@@ -109,7 +118,7 @@ export default function ConversationWorkspace({
     setBusy(null);
     if (res.ok) {
       setText('');
-      setNotice({ k: 'ok', t: data.delivered ? (ar ? 'تم الإرسال عبر ماسنجر' : 'Sent via Messenger') : ar ? 'حُفظ (الإرسال موقوف)' : 'Saved (sending off)' });
+      setNotice({ k: 'ok', t: data.queued ? (ar ? 'في طابور الإرسال — تظهر الحالة على الرسالة' : 'Queued — status shows on the message') : (ar ? 'حُفظ' : 'Saved') });
       poll();
     } else if (res.status === 503) {
       setNotice({ k: 'info', t: (ar ? 'الإرسال موقوف: ' : 'Sending disabled: ') + (data?.missing?.join(', ') || data?.error) });
@@ -134,7 +143,7 @@ export default function ConversationWorkspace({
     const { res, data } = await action('send_human_message', { text: t });
     setBusy(null);
     if (res.ok) {
-      setNotice({ k: 'ok', t: data.delivered ? (ar ? `${label} — أُرسل` : `${label} — sent`) : (ar ? `${label} — حُفظ` : `${label} — saved`) });
+      setNotice({ k: 'ok', t: ar ? `${label} — في طابور الإرسال` : `${label} — queued` });
       poll();
     } else if (res.status === 503) {
       setNotice({ k: 'info', t: (ar ? 'الإرسال موقوف: ' : 'Sending disabled: ') + (data?.missing?.join(', ') || data?.error || 'Meta not configured') });
@@ -210,7 +219,7 @@ export default function ConversationWorkspace({
     const { res, data } = await action('send_product_image', { productId: c.id });
     setBusy(null);
     if (res.ok) {
-      setNotice({ k: 'ok', t: data.delivered ? (ar ? 'تم إرسال الصورة' : 'Image sent') : (ar ? 'حُفظ (الإرسال موقوف)' : 'Saved (sending off)') });
+      setNotice({ k: 'ok', t: ar ? 'الصورة في طابور الإرسال' : 'Image queued for delivery' });
       poll();
     } else if (res.status === 503) {
       setNotice({ k: 'info', t: (ar ? 'الإرسال موقوف: ' : 'Sending disabled: ') + (data?.missing?.join(', ') || data?.error || 'Meta not configured') });
@@ -239,10 +248,48 @@ export default function ConversationWorkspace({
             </p>
           </div>
         </div>
-        <span className={`chip ${aiEnabled ? 'bg-success/12 text-success ring-success/25' : 'bg-warning/12 text-warning ring-warning/25'}`}>
-          <Bot size={12} /> {aiEnabled ? (ar ? 'AI مفعّل' : 'AI enabled') : (ar ? 'AI متوقف' : 'AI paused')}
-        </span>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className={`chip ${channel === 'instagram' ? 'bg-fuchsia-500/12 text-fuchsia-400 ring-fuchsia-500/25' : 'bg-sky-500/12 text-sky-400 ring-sky-500/25'}`}>
+            {channel === 'instagram' ? (ar ? 'إنستغرام' : 'Instagram') : (ar ? 'ماسنجر' : 'Messenger')}
+          </span>
+          {attention.flag && (
+            <button
+              onClick={async () => { await action('clear_attention'); poll(); }}
+              className="chip bg-warning/12 text-warning ring-warning/25"
+              title={ar ? 'اضغط لإزالة العلامة بعد المتابعة' : 'Click to clear after following up'}
+            >
+              <AlertTriangle size={12} /> {ar ? 'يحتاج الفريق' : 'Needs team'}{attention.reason ? ` · ${attention.reason}` : ''} ✕
+            </button>
+          )}
+          <span className={`chip ${aiEnabled ? 'bg-success/12 text-success ring-success/25' : 'bg-warning/12 text-warning ring-warning/25'}`}>
+            <Bot size={12} /> {aiEnabled ? (ar ? 'AI مفعّل' : 'AI enabled') : (ar ? 'AI متوقف' : 'AI paused')}
+          </span>
+        </div>
       </div>
+
+      {/* failed / uncertain deliveries — truthful, with explicit manual retry */}
+      {failedOutbox.length > 0 && (
+        <div className="border-b border-danger/30 bg-danger/5 px-3 py-2">
+          {failedOutbox.map((o) => (
+            <div key={o.id} className="flex flex-wrap items-center gap-2 py-0.5 text-xs">
+              <AlertTriangle size={12} className="text-danger" />
+              <span className="text-danger">
+                {o.status === 'uncertain'
+                  ? (ar ? 'إرسال غير مؤكد (قد يكون وصل)' : 'Uncertain delivery (may have arrived)')
+                  : (ar ? 'فشل الإرسال' : 'Delivery failed')}
+                {o.kind === 'image' ? (ar ? ' · صورة' : ' · image') : ''}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-faint">{o.last_error ?? ''}</span>
+              <button
+                onClick={async () => { await action('retry_outbox', { outboxId: o.id }); poll(); }}
+                className="btn-ghost h-7 px-2 text-[11px]"
+              >
+                {ar ? 'إعادة الإرسال' : 'Retry'}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       {/* thread */}
       <div ref={threadRef} className="scroll-thin min-h-0 flex-1 space-y-4 overflow-y-auto bg-bg/25 p-3 sm:p-4">
         {messages.length === 0 ? (
@@ -275,7 +322,7 @@ export default function ConversationWorkspace({
               <div key={c.id} className="tilt-card flex min-w-0 items-start gap-3 rounded-lg border border-line bg-surface p-2.5 transition hover:border-accent/40">
                 <Thumb url={c.image} />
                 <div className="min-w-0 flex-1">
-                  <a href={`/products/${c.id}`} className="block wrap-break-word text-sm font-semibold leading-snug text-fg hover:text-accent" dir="auto">{c.name}</a>
+                  <a href={`/catalog/${c.id}`} className="block wrap-break-word text-sm font-semibold leading-snug text-fg hover:text-accent" dir="auto">{c.name}</a>
                   {c.original_name && <p className="mt-0.5 truncate text-[11px] text-muted" title={c.original_name}>{c.original_name}</p>}
                   <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-faint">
                     {c.product_code && <span className="font-mono">{c.product_code}</span>}
@@ -322,7 +369,7 @@ export default function ConversationWorkspace({
                 <div key={c.id} className="tilt-card flex min-w-0 items-start gap-3 rounded-lg border border-line bg-surface p-2.5 transition hover:border-accent/40">
                   <Thumb url={c.image} />
                   <div className="min-w-0 flex-1">
-                    <a href={`/products/${c.id}`} className="block wrap-break-word text-sm font-semibold leading-snug text-fg hover:text-accent" dir="auto">{c.name}</a>
+                    <a href={`/catalog/${c.id}`} className="block wrap-break-word text-sm font-semibold leading-snug text-fg hover:text-accent" dir="auto">{c.name}</a>
                     <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-faint">
                       {c.product_code && <span className="font-mono">{c.product_code}</span>}
                       <span className="ltr-nums text-success">{c.price != null ? `${c.price} د.ل` : (ar ? 'بدون سعر' : 'no price')}</span>
@@ -405,17 +452,21 @@ function Bubble({ m, ar }: { m: Msg; ar: boolean }) {
   const who = m.sender_type === 'customer' ? (ar ? 'العميل' : 'Customer') : m.sender_type === 'ai' ? 'AI' : m.sender_type === 'human' ? (ar ? 'موظف' : 'Agent') : 'System';
   const Icon = m.sender_type === 'ai' ? Bot : m.sender_type === 'human' ? User : null;
   const images = (m.attachments ?? []).filter((a) => a?.type === 'image' && a?.url);
-  // Delivery status for outbound messages actually sent to the customer.
+  // Truthful delivery status for outbound messages (outbox-driven).
   const deliveryError = (m.ai_meta as any)?.delivery_error as string | undefined;
   const outboundReal = !customer && !m.is_internal_suggestion && (m.sender_type === 'human' || m.sender_type === 'ai');
+  const ds = m.delivery_status ?? (m.delivered_at ? 'sent' : (deliveryError ? 'failed' : null));
   return (
     <div className={`flex w-full min-w-0 flex-col ${customer ? 'items-start' : 'items-end'}`}>
       <span className="mb-1 flex items-center gap-1 text-[10px] text-faint">
         {Icon && <Icon size={11} />}
         {who}{m.is_internal_suggestion ? (ar ? ' · اقتراح داخلي' : ' · internal') : ''}
-        {outboundReal && m.delivered_at && <span className="flex items-center gap-0.5 text-success"><Check size={11} /> {ar ? 'أُرسل' : 'sent'}</span>}
-        {outboundReal && !m.delivered_at && deliveryError && (
-          <span className="flex items-center gap-0.5 text-danger" title={deliveryError}><AlertTriangle size={11} /> {ar ? 'فشل الإرسال' : 'failed'}</span>
+        {outboundReal && ds === 'sent' && <span className="flex items-center gap-0.5 text-success"><Check size={11} /> {ar ? 'أُرسل' : 'sent'}</span>}
+        {outboundReal && ds === 'partial' && <span className="flex items-center gap-0.5 text-warning"><AlertTriangle size={11} /> {ar ? 'أُرسل جزئياً' : 'partial'}</span>}
+        {outboundReal && ds === 'pending' && <span className="text-faint">{ar ? 'قيد الإرسال…' : 'sending…'}</span>}
+        {outboundReal && ds === 'uncertain' && <span className="flex items-center gap-0.5 text-warning"><AlertTriangle size={11} /> {ar ? 'غير مؤكد' : 'uncertain'}</span>}
+        {outboundReal && (ds === 'failed' || ds === 'skipped') && (
+          <span className="flex items-center gap-0.5 text-danger" title={deliveryError}><AlertTriangle size={11} /> {ds === 'skipped' ? (ar ? 'لم يُرسل' : 'not sent') : (ar ? 'فشل الإرسال' : 'failed')}</span>
         )}
       </span>
       {images.length > 0 && (

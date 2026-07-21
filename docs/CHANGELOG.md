@@ -134,3 +134,42 @@ full authenticated page sweep against the standalone build.
 - `conversation_status` enum still contains order-era values (`order_draft`, `order_confirmed`, `waiting_for_order_confirmation`). These are inert (never written) but cannot be cleanly dropped in Postgres without a migration that re-creates the enum. Cosmetic — no functional impact.
 - `products.raw` column stores full scraper JSON blobs. Not read at runtime. Can be dropped in a future maintenance migration after verifying no external tools depend on it.
 - Vector search uses JSONB float arrays + app-level cosine (no pgvector). Sufficient at current catalog size. Can be upgraded to pgvector + HNSW when scale requires it — no API contract change.
+
+## Platform upgrade — Instagram, Content Studio, durable processing
+
+**Customer service**
+- Instagram Direct added as a first-class channel alongside Messenger.
+- Order intent now sends **one** WhatsApp handoff message, flags the
+  conversation for the team, and lets the assistant keep answering ordinary
+  product questions until an admin presses Take Over. The system never creates,
+  confirms or manages orders.
+- Explicit Take Over / Resume AI controls; resuming keeps the full context.
+
+**Reliability**
+- Webhook now persists events before acknowledging; a database outage returns
+  503 so Meta retries instead of losing the message.
+- Durable PostgreSQL job queue and transactional outbox replace in-memory
+  debouncing and in-request sending: one reply per burst, no duplicate sends,
+  and ambiguous outcomes surfaced rather than silently retried.
+- Exactly-once Facebook/Instagram publishing with resumable multi-step flows.
+
+**Catalog**
+- Product families, variants and relations with permanent admin corrections.
+- Versioned price history and a promotion model that restores prices correctly
+  and never overwrites a later manual or CSV price.
+- CSV import applies unlocked fields automatically and honours admin locks.
+- Full-catalog indexed retrieval; the previous 1k/2k/5k/8k scan caps are gone.
+
+**Content Studio** replaces Campaigns: posts and Stories, price-drop and general
+purposes, deterministic Arabic typography for exact prices, Africa/Tripoli
+scheduling, and automatic comment replies limited to content this app published.
+
+**Security**
+- Multi-admin accounts with revocable database-backed sessions, login rate
+  limiting and a per-admin audit log.
+- Authentication now fails closed without `SESSION_SECRET`.
+- SSRF-safe image fetching, upload validation, secret scanning in CI.
+
+**Removed:** the scraper as an active feature, campaign/catalog/image/price
+review queues, and the cron endpoint. Historical campaign data is retained and
+surfaced in Content Studio as archived items; catalog images were not deleted.

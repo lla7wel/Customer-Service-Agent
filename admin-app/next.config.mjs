@@ -16,6 +16,9 @@ const nextConfig = {
   // The app imports ../integrations, so file tracing must treat the repo
   // root as the project root or standalone output would miss those files.
   outputFileTracingRoot: path.join(__dirname, '..'),
+  // Native/binary packages must load from node_modules at runtime instead of
+  // being bundled (resvg ships a .node binding; jimp reads asset files).
+  serverExternalPackages: ['@resvg/resvg-js', 'jimp'],
   images: {
     // Product/campaign images are served from our own media host; the scraper
     // CDN appears only in admin-side review screens.

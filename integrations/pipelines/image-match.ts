@@ -104,48 +104,79 @@ async function findByExactImageUrl(db: Kysely<DB>, imageUrl: string): Promise<an
 async function findByLearnedFingerprint(db: Kysely<DB>, customerHash: string): Promise<{ product: any | null; distance: number }> {
   let bestId: string | null = null;
   let bestDist = 999;
-  const corr = await db
-    .selectFrom('image_match_corrections')
-    .select(['customer_image_hash', 'corrected_product_id'])
-    .where('corrected_product_id', 'is not', null)
-    .where('customer_image_hash', 'is not', null)
-    .orderBy('created_at', 'desc')
-    .limit(1000)
-    .execute();
-  for (const r of corr) {
-    const d = hammingHex(customerHash, r.customer_image_hash);
-    if (d < bestDist) { bestDist = d; bestId = r.corrected_product_id; }
+  // Every learned correction is considered — an admin's teaching must never be
+  // dropped by a row cap (EH-014).
+  for await (const batch of pagedById(db, 'image_match_corrections', ['customer_image_hash', 'corrected_product_id'],
+    (q) => q.where('corrected_product_id', 'is not', null).where('customer_image_hash', 'is not', null))) {
+    for (const r of batch) {
+      const d = hammingHex(customerHash, (r as any).customer_image_hash);
+      if (d < bestDist) { bestDist = d; bestId = (r as any).corrected_product_id; }
+    }
   }
-  const fp = await db
-    .selectFrom('product_fingerprints')
-    .select(['hash_hex', 'product_id'])
-    .orderBy('created_at', 'desc')
-    .limit(2000)
-    .execute();
-  for (const r of fp) {
-    const d = hammingHex(customerHash, r.hash_hex);
-    if (d < bestDist) { bestDist = d; bestId = r.product_id; }
+  for await (const batch of pagedById(db, 'product_fingerprints', ['hash_hex', 'product_id'])) {
+    for (const r of batch) {
+      const d = hammingHex(customerHash, (r as any).hash_hex);
+      if (d < bestDist) { bestDist = d; bestId = (r as any).product_id; }
+    }
   }
   if (bestId && bestDist <= SIMILAR_MAX) return { product: await findById(db, bestId), distance: bestDist };
   return { product: null, distance: bestDist };
 }
 
-/** Scan active+priced product image fingerprints; per-product best distance, ascending. */
+/**
+ * Scan EVERY active+priced product image fingerprint (EH-014): no arbitrary
+ * row cap that could silently exclude part of the catalog. Rows are read in
+ * keyset-paged batches so memory stays flat regardless of catalog size.
+ */
+const FINGERPRINT_BATCH = 2000;
+
+/** Keyset-paged full read of a table (uuid `id` order). Complete, bounded memory. */
+async function* pagedById(
+  db: Kysely<DB>,
+  table: 'image_match_corrections' | 'product_fingerprints',
+  columns: string[],
+  refine?: (q: any) => any,
+): AsyncGenerator<Record<string, unknown>[]> {
+  let cursor: string | null = null;
+  for (;;) {
+    let q: any = (db as any)
+      .selectFrom(table)
+      .select(['id', ...columns])
+      .orderBy('id', 'asc')
+      .limit(FINGERPRINT_BATCH);
+    if (refine) q = refine(q);
+    if (cursor) q = q.where('id', '>', cursor);
+    const batch = await q.execute();
+    if (!batch.length) return;
+    yield batch;
+    if (batch.length < FINGERPRINT_BATCH) return;
+    cursor = batch[batch.length - 1].id as string;
+  }
+}
+
 async function scanProductImageHashes(db: Kysely<DB>, customerHash: string): Promise<{ product_id: string; distance: number }[]> {
-  const data = await db
-    .selectFrom('product_images')
-    .innerJoin('products', 'products.id', 'product_images.product_id')
-    .select(['product_images.product_id', 'product_images.perceptual_hash'])
-    .where('product_images.perceptual_hash', 'is not', null)
-    .where('products.status', '=', 'active')
-    .where('products.active_price', 'is not', null)
-    .limit(8000)
-    .execute();
   const best = new Map<string, number>();
-  for (const r of data) {
-    const d = hammingHex(customerHash, r.perceptual_hash);
-    const cur = best.get(r.product_id);
-    if (cur === undefined || d < cur) best.set(r.product_id, d);
+  let cursor: string | null = null;
+  for (;;) {
+    let q = db
+      .selectFrom('product_images')
+      .innerJoin('products', 'products.id', 'product_images.product_id')
+      .select(['product_images.id as image_id', 'product_images.product_id', 'product_images.perceptual_hash'])
+      .where('product_images.perceptual_hash', 'is not', null)
+      .where('products.status', '=', 'active')
+      .where('products.active_price', 'is not', null)
+      .orderBy('product_images.id', 'asc')
+      .limit(FINGERPRINT_BATCH);
+    if (cursor) q = q.where('product_images.id', '>', cursor);
+    const batch = await q.execute();
+    if (!batch.length) break;
+    for (const r of batch) {
+      const d = hammingHex(customerHash, r.perceptual_hash);
+      const cur = best.get(r.product_id);
+      if (cur === undefined || d < cur) best.set(r.product_id, d);
+    }
+    if (batch.length < FINGERPRINT_BATCH) break;
+    cursor = batch[batch.length - 1].image_id as string;
   }
   return [...best.entries()].map(([product_id, distance]) => ({ product_id, distance })).sort((a, b) => a.distance - b.distance);
 }
@@ -459,14 +490,20 @@ export async function matchCustomerImage(db: Kysely<DB>, opts: MatchCustomerImag
       if (dl.ok && dl.data) items.push({ id: c.id, name: c.name, imageBase64: dl.data, mimeType: dl.mimeType || 'image/jpeg' });
     }
     if (items.length >= 2) {
-      const rankPrompt = compilePrompt(opts.behaviors, 'vision_rank', { customer_text: opts.extraText || null, allowed_candidate_ids: items.map((i) => i.id) });
-      const vr = await rankProductsByImage({
-        customerImageBase64: base64, customerMimeType: mimeType, candidates: items, extraText: opts.extraText, systemPrompt: rankPrompt.effectiveSystemInstruction,
-      });
-      if (vr.ok && vr.ranked.length) {
-        const byId = new Map(vr.ranked.map((r) => [r.product_id, r] as const));
-        for (const c of candidates) { const s = byId.get(c.id); if (s) { c.confidence = s.confidence; if (s.reason) c.reason = s.reason; } }
-        candidates.sort((a, b) => b.confidence - a.confidence);
+      // EH-003: a re-rank failure must degrade to the existing ordering and be
+      // RECORDED — never swallowed into a silent no-reply.
+      try {
+        const rankPrompt = compilePrompt(opts.behaviors, 'vision_rank', { customer_text: opts.extraText || null, allowed_candidate_ids: items.map((i) => i.id) });
+        const vr = await rankProductsByImage({
+          customerImageBase64: base64, customerMimeType: mimeType, candidates: items, extraText: opts.extraText, systemPrompt: rankPrompt.effectiveSystemInstruction,
+        });
+        if (vr.ok && vr.ranked.length) {
+          const byId = new Map(vr.ranked.map((r) => [r.product_id, r] as const));
+          for (const c of candidates) { const s = byId.get(c.id); if (s) { c.confidence = s.confidence; if (s.reason) c.reason = s.reason; } }
+          candidates.sort((a, b) => b.confidence - a.confidence);
+        }
+      } catch (e: any) {
+        diagnostics.visual_rerank_error = String(e?.message ?? 'visual_rerank_failed').slice(0, 200);
       }
     }
   }

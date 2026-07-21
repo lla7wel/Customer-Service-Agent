@@ -8,9 +8,11 @@ import { resolveProducts } from '@integrations/pipelines/resolver';
 import { composeCustomerReply } from '@integrations/pipelines/compose-reply';
 import { isProductQuestion } from '@integrations/pipelines/agent-policy';
 import { dhashFromUrl } from '@integrations/util/image-hash';
-import { sendMessage, sendImageMessage, isMetaConfigured } from '@integrations/meta';
+import { isMetaConfigured } from '@integrations/meta';
 import { isMetaSafeImageUrl } from '@integrations/pipelines/product-image';
 import { behaviorMetadata, composeBehaviorContext, loadBehaviors } from '@/lib/ai-behaviors';
+import { enqueue } from '@integrations/jobs/queue';
+import { retryOutboxMessage } from '@integrations/pipelines/outbox';
 import { sanitizeCustomerText } from '@integrations/util/customer-text';
 import { customerProductName, primaryProductImageUrl } from '@integrations/util/product-display';
 import { hydrateMessagesWithCandidates } from '@/lib/product-candidates';
@@ -21,26 +23,57 @@ export const dynamic = 'force-dynamic';
 // Manual replies can run the image/match pipeline; keep headroom (calls are capped).
 export const maxDuration = 60;
 
-/** Live thread fetch for polling (no manual refresh needed in the Inbox). */
-export async function GET(_req: NextRequest, props: { params: Promise<{ conversationId: string }> }) {
+/**
+ * Live thread fetch for polling. Returns the NEWEST page (EH-005): messages
+ * are selected newest-first, then reversed for display, so a long thread
+ * always shows the current conversation. `?before=<iso>` pages older history.
+ */
+export async function GET(req: NextRequest, props: { params: Promise<{ conversationId: string }> }) {
   const params = await props.params;
   const db = getDb();
   if (!db) return NextResponse.json({ error: 'integration_not_configured' }, { status: 503 });
   const id = params.conversationId;
-  const [msgs, convo] = await Promise.all([
-    db.selectFrom('messages')
-      .select(['id', 'direction', 'sender_type', 'body', 'ai_meta', 'attachments', 'is_internal_suggestion', 'delivered_at', 'created_at'])
+  const before = req.nextUrl.searchParams.get('before');
+  const PAGE = 120;
+
+  let q = db.selectFrom('messages')
+    .select(['id', 'direction', 'sender_type', 'body', 'ai_meta', 'attachments', 'is_internal_suggestion', 'delivered_at', 'delivery_status', 'created_at'])
+    .where('conversation_id', '=', id)
+    .orderBy('created_at', 'desc')
+    .limit(PAGE + 1);
+  if (before) q = q.where('created_at', '<', before);
+  const [pageRows, convo, failedOutbox] = await Promise.all([
+    q.execute(),
+    db.selectFrom('conversations')
+      .select(['ai_enabled', 'status', 'channel', 'human_attention', 'human_attention_reason', 'handoff_sent_at', 'unread_count'])
+      .where('id', '=', id).executeTakeFirst(),
+    db.selectFrom('outbox_messages')
+      .select(['id', 'message_id', 'kind', 'status', 'last_error', 'created_at'])
       .where('conversation_id', '=', id)
-      .orderBy('created_at', 'asc')
-      .limit(300)
+      .where('status', 'in', ['failed', 'uncertain', 'dead'])
+      .orderBy('created_at', 'desc')
+      .limit(20)
       .execute(),
-    db.selectFrom('conversations').select(['ai_enabled', 'status']).where('id', '=', id).executeTakeFirst(),
   ]);
+  const hasMore = pageRows.length > PAGE;
+  const msgs = pageRows.slice(0, PAGE).reverse(); // chronological for display
   const messages = await hydrateMessagesWithCandidates(db, msgs);
+
+  // Opening the thread clears its unread badge.
+  if (!before && (convo?.unread_count ?? 0) > 0) {
+    await db.updateTable('conversations').set({ unread_count: 0 }).where('id', '=', id).execute();
+  }
+
   return NextResponse.json({
     messages,
+    has_more: hasMore,
+    oldest_loaded: msgs.length ? (msgs[0] as any).created_at : null,
     ai_enabled: convo?.ai_enabled ?? true,
     status: convo?.status ?? null,
+    channel: convo?.channel ?? 'messenger',
+    human_attention: convo?.human_attention ?? false,
+    human_attention_reason: convo?.human_attention_reason ?? null,
+    failed_outbox: failedOutbox,
   });
 }
 
@@ -66,6 +99,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ conversa
   try {
     switch (action) {
       case 'pause_ai':
+      case 'take_over':
         {
           const cur = await db.selectFrom('conversations').select(['ai_enabled', 'status']).where('id', '=', id).executeTakeFirst();
           const changed = cur?.ai_enabled !== false || cur?.status !== 'human_active';
@@ -78,6 +112,8 @@ export async function POST(req: NextRequest, props: { params: Promise<{ conversa
 
       case 'resume_ai':
         {
+          // Resume restores normal contextual conversation: the AI keeps the
+          // full persisted history/memory, so it never "forgets" the thread.
           const cur = await db.selectFrom('conversations').select(['ai_enabled', 'status']).where('id', '=', id).executeTakeFirst();
           const changed = cur?.ai_enabled !== true || cur?.status !== 'ai_handling';
           if (changed) {
@@ -86,6 +122,43 @@ export async function POST(req: NextRequest, props: { params: Promise<{ conversa
           }
         }
         return NextResponse.json({ ok: true });
+
+      case 'clear_attention':
+        await db.updateTable('conversations')
+          .set({ human_attention: false, human_attention_reason: null })
+          .where('id', '=', id).execute();
+        await logActivity(db, 'attention_cleared', id);
+        return NextResponse.json({ ok: true });
+
+      case 'retry_outbox': {
+        // Explicit admin retry of a failed/uncertain delivery (duplicate risk
+        // is a deliberate human decision here, never automatic).
+        const outboxId = String(body?.outboxId ?? '');
+        if (!outboxId) return NextResponse.json({ error: 'missing_outbox_id' }, { status: 400 });
+        const ok = await retryOutboxMessage(db, outboxId);
+        if (ok) {
+          await enqueue(db, { jobType: 'outbox_deliver', payload: { outboxId }, maxAttempts: 3, priority: 50 });
+          await logActivity(db, 'outbox_retried', id);
+        }
+        return NextResponse.json({ ok });
+      }
+
+      case 'update_customer': {
+        // EH-026: admins can correct the customer's contact/profile details.
+        // Validated, audited, and never applied to a conversation without one.
+        const convo = await db.selectFrom('conversations').select('customer_id').where('id', '=', id).executeTakeFirst();
+        if (!convo?.customer_id) return NextResponse.json({ error: 'no_customer' }, { status: 404 });
+        const FIELDS = ['display_name', 'first_name', 'last_name', 'phone', 'address', 'city', 'notes'] as const;
+        const update: Record<string, unknown> = {};
+        for (const f of FIELDS) {
+          if (typeof body?.[f] === 'string') update[f] = body[f].trim().slice(0, 300) || null;
+        }
+        if (typeof body?.is_blocked === 'boolean') update.is_blocked = body.is_blocked;
+        if (!Object.keys(update).length) return NextResponse.json({ error: 'no_editable_fields' }, { status: 400 });
+        await db.updateTable('customers').set(update as any).where('id', '=', convo.customer_id).execute();
+        await logActivity(db, 'customer_updated', id, Object.keys(update).join(', '));
+        return NextResponse.json({ ok: true, updated: Object.keys(update) });
+      }
 
       case 'mark_resolved':
         await db.updateTable('conversations').set({ status: 'resolved' }).where('id', '=', id).execute();
@@ -281,63 +354,43 @@ export async function POST(req: NextRequest, props: { params: Promise<{ conversa
         const text = sanitizeCustomerText(body?.text as string).trim();
         if (!text) return NextResponse.json({ error: 'empty_message' }, { status: 400 });
 
-        // Resolve the Messenger recipient up front so we know if delivery is even
-        // possible before claiming the reply was sent.
-        const convo = await db
-          .selectFrom('conversations').select(['customer_id', 'channel']).where('id', '=', id).executeTakeFirst();
-        let recipientPsid: string | null = null;
-        if (isMetaConfigured() && convo?.customer_id) {
-          const cust = await db
-            .selectFrom('customers').select(['external_id', 'channel']).where('id', '=', convo.customer_id).executeTakeFirst();
-          if (cust?.external_id && cust.channel === 'messenger') recipientPsid = cust.external_id;
-        }
+        const recipient = await resolveRecipient(db, id);
+        if (!recipient) return NextResponse.json({ error: 'no_recipient' }, { status: 400 });
 
-        // Store the outbound human message (delivered_at stays null until Meta
-        // confirms) and pause the AI.
-        const inserted = await db.insertInto('messages').values({
-          conversation_id: id,
-          direction: 'outbound',
-          sender_type: 'human',
-          body: text,
-          ai_meta: JSON.stringify({ meta_connected: isMetaConfigured() }),
-        }).returning('id').executeTakeFirst();
-        const sentMessageId = inserted?.id ?? null;
-
-        await db
-          .updateTable('conversations')
-          .set({
+        // Durable send: message row + outbox row + delivery job in one
+        // transaction; the worker performs the provider call and records the
+        // truthful delivery state (EH-010/011).
+        const sentMessageId = await db.transaction().execute(async (trx) => {
+          const inserted = await trx.insertInto('messages').values({
+            conversation_id: id,
+            direction: 'outbound',
+            sender_type: 'human',
+            body: text,
+            delivery_status: 'pending',
+            ai_meta: JSON.stringify({ meta_connected: isMetaConfigured() }),
+          }).returning('id').executeTakeFirst();
+          if (!inserted) throw new Error('failed to store message');
+          const outbox = await trx.insertInto('outbox_messages').values({
+            conversation_id: id, message_id: inserted.id,
+            channel: recipient.channel, recipient_id: recipient.externalId,
+            kind: 'text', body: text,
+            idempotency_key: `msg:${inserted.id}:text`,
+            sender_type: 'human',
+          }).returning('id').executeTakeFirst();
+          await trx.updateTable('conversations').set({
             ai_enabled: false,
             status: 'human_active',
             last_human_reply_at: new Date().toISOString(),
             last_message_at: new Date().toISOString(),
             last_message_preview: text.slice(0, 120),
-          })
-          .where('id', '=', id).execute();
+          }).where('id', '=', id).execute();
+          if (outbox) {
+            await enqueue(trx, { jobType: 'outbox_deliver', payload: { outboxId: outbox.id }, maxAttempts: 6, priority: 50 });
+          }
+          return inserted.id;
+        });
         await logActivity(db, 'human_message', id, text.slice(0, 120));
-
-        // Attempt delivery, THEN record the real result on the stored message so
-        // the UI can show sent vs. failed (never imply a failed send succeeded).
-        let delivered = false;
-        let deliveryError: string | null = null;
-        if (recipientPsid) {
-          try {
-            await sendMessage(recipientPsid, text);
-            delivered = true;
-          } catch (e: any) {
-            deliveryError = e?.message ?? 'send_failed';
-            await logIntegration(db, 'meta', 'outbound', deliveryError ?? undefined);
-          }
-        }
-        if (sentMessageId) {
-          if (delivered) {
-            await db.updateTable('messages').set({ delivered_at: new Date().toISOString() }).where('id', '=', sentMessageId).execute();
-          } else if (deliveryError) {
-            await db.updateTable('messages')
-              .set({ ai_meta: JSON.stringify({ meta_connected: isMetaConfigured(), delivery_error: deliveryError }) })
-              .where('id', '=', sentMessageId).execute();
-          }
-        }
-        return NextResponse.json({ ok: true, delivered, meta_connected: isMetaConfigured(), delivery_error: deliveryError });
+        return NextResponse.json({ ok: true, queued: true, message_id: sentMessageId, meta_connected: isMetaConfigured() });
       }
 
       // --- Manually send a product's photo to the customer ------------------
@@ -368,51 +421,41 @@ export async function POST(req: NextRequest, props: { params: Promise<{ conversa
         const caption = (sanitizeCustomerText(String(body.caption ?? '')).trim())
           || `${name}${price != null ? ` — ${price} د.ل` : ''}`;
 
-        // Resolve the Messenger recipient.
-        const convo = await db.selectFrom('conversations').select(['customer_id', 'channel']).where('id', '=', id).executeTakeFirst();
-        let recipientPsid: string | null = null;
-        if (isMetaConfigured() && convo?.customer_id) {
-          const cust = await db.selectFrom('customers').select(['external_id', 'channel']).where('id', '=', convo.customer_id).executeTakeFirst();
-          if (cust?.external_id && cust.channel === 'messenger') recipientPsid = cust.external_id;
-        }
+        const recipient = await resolveRecipient(db, id);
+        if (!recipient) return NextResponse.json({ error: 'no_recipient' }, { status: 400 });
 
-        // Store first (attachments/delivered_at filled in after a confirmed send).
-        const inserted = await db.insertInto('messages').values({
-          conversation_id: id, direction: 'outbound', sender_type: 'human', body: caption,
-          ai_meta: JSON.stringify({ meta_connected: isMetaConfigured(), workflow: 'manual_product_image_send', product_id: productId, image_url: imageUrl }),
-        }).returning('id').executeTakeFirst();
-        const sentMessageId = inserted?.id ?? null;
-
-        let delivered = false;
-        let deliveryError: string | null = null;
-        if (recipientPsid) {
-          try {
-            if (caption) await sendMessage(recipientPsid, caption);
-            await sendImageMessage(recipientPsid, imageUrl);
-            delivered = true;
-          } catch (e: any) {
-            deliveryError = e?.message ?? 'send_failed';
-            await logIntegration(db, 'meta', 'outbound', `image_send: ${deliveryError}`);
+        // Durable send: caption + image are separate outbox rows so a partial
+        // outcome is represented truthfully (EH-017).
+        await db.transaction().execute(async (trx) => {
+          const inserted = await trx.insertInto('messages').values({
+            conversation_id: id, direction: 'outbound', sender_type: 'human', body: caption,
+            delivery_status: 'pending',
+            ai_meta: JSON.stringify({ meta_connected: isMetaConfigured(), workflow: 'manual_product_image_send', product_id: productId, image_url: imageUrl }),
+          }).returning('id').executeTakeFirst();
+          if (!inserted) throw new Error('failed to store message');
+          const rows = [
+            ...(caption ? [{
+              conversation_id: id, message_id: inserted.id, channel: recipient.channel,
+              recipient_id: recipient.externalId, kind: 'text' as const, body: caption,
+              idempotency_key: `msg:${inserted.id}:text`, sender_type: 'human' as const,
+            }] : []),
+            {
+              conversation_id: id, message_id: inserted.id, channel: recipient.channel,
+              recipient_id: recipient.externalId, kind: 'image' as const, image_url: imageUrl,
+              product_id: productId, idempotency_key: `msg:${inserted.id}:img:0`, sender_type: 'human' as const,
+            },
+          ];
+          for (const row of rows) {
+            const outbox = await trx.insertInto('outbox_messages').values(row).returning('id').executeTakeFirst();
+            if (outbox) await enqueue(trx, { jobType: 'outbox_deliver', payload: { outboxId: outbox.id }, maxAttempts: 6, priority: 50 });
           }
-        }
-        if (sentMessageId) {
-          if (delivered) {
-            await db.updateTable('messages').set({
-              attachments: JSON.stringify([{ type: 'image', url: imageUrl, product_id: productId }]),
-              delivered_at: new Date().toISOString(),
-            }).where('id', '=', sentMessageId).execute();
-          } else if (deliveryError) {
-            await db.updateTable('messages').set({
-              ai_meta: JSON.stringify({ meta_connected: isMetaConfigured(), workflow: 'manual_product_image_send', product_id: productId, image_url: imageUrl, delivery_error: deliveryError }),
-            }).where('id', '=', sentMessageId).execute();
-          }
-        }
-        await db.updateTable('conversations').set({
-          last_message_at: new Date().toISOString(),
-          last_message_preview: `🖼️ ${name}`.slice(0, 120),
-        }).where('id', '=', id).execute();
+          await trx.updateTable('conversations').set({
+            last_message_at: new Date().toISOString(),
+            last_message_preview: `🖼️ ${name}`.slice(0, 120),
+          }).where('id', '=', id).execute();
+        });
         await logActivity(db, 'product_image_sent', id, name);
-        return NextResponse.json({ ok: true, delivered, meta_connected: isMetaConfigured(), delivery_error: deliveryError });
+        return NextResponse.json({ ok: true, queued: true, meta_connected: isMetaConfigured() });
       }
 
       case 'suggest_reply': {
@@ -422,13 +465,19 @@ export async function POST(req: NextRequest, props: { params: Promise<{ conversa
             { status: 503 },
           );
         }
-        // Build minimal history + the admin-configured customer-service behavior.
-        const [msgs, behaviors] = await Promise.all([
-          db.selectFrom('messages').select(['direction', 'sender_type', 'body']).where('conversation_id', '=', id).orderBy('created_at', 'asc').limit(20).execute(),
+        // NEWEST history (EH-006): fetch the latest messages, then restore
+        // chronological order — a suggestion must answer the current question,
+        // never an obsolete early one. Internal suggestions are excluded.
+        const [msgsDesc, behaviors] = await Promise.all([
+          db.selectFrom('messages').select(['direction', 'sender_type', 'body'])
+            .where('conversation_id', '=', id)
+            .where('is_internal_suggestion', '=', false)
+            .orderBy('created_at', 'desc').limit(24).execute(),
           loadBehaviors(),
         ]);
-        // Use the SAME behavior + composition path as the live Messenger
-        // auto-reply, so the suggested draft matches what the AI would send.
+        const msgs = [...msgsDesc].reverse();
+        // Use the SAME behavior + composition path as the live auto-reply, so
+        // the suggested draft matches what the AI would send.
         const behavior = composeBehaviorContext(behaviors, 'messenger');
         const history = msgs
           .filter((m: any) => m.body)
@@ -473,6 +522,16 @@ export async function POST(req: NextRequest, props: { params: Promise<{ conversa
   }
 }
 
+/** Channel-aware recipient resolution (Messenger PSID or Instagram IGSID). */
+async function resolveRecipient(db: any, conversationId: string): Promise<{ channel: 'messenger' | 'instagram'; externalId: string } | null> {
+  const convo = await db.selectFrom('conversations').select(['customer_id', 'channel']).where('id', '=', conversationId).executeTakeFirst();
+  if (!convo?.customer_id) return null;
+  const cust = await db.selectFrom('customers').select(['external_id', 'channel']).where('id', '=', convo.customer_id).executeTakeFirst();
+  if (!cust?.external_id) return null;
+  const channel = cust.channel === 'instagram' ? 'instagram' : 'messenger';
+  return { channel, externalId: cust.external_id };
+}
+
 async function logActivity(db: any, action: string, conversationId: string, summary?: string) {
   await db.insertInto('activity_logs').values({
     actor_type: 'human',
@@ -483,6 +542,3 @@ async function logActivity(db: any, action: string, conversationId: string, summ
   }).execute();
 }
 
-async function logIntegration(db: any, integration: string, direction: string, error?: string) {
-  await db.insertInto('integration_logs').values({ integration, direction, ok: false, error: error ?? null }).execute();
-}

@@ -9,6 +9,7 @@
  *   - price is active_price (never invented).
  */
 import { jsonArrayFrom } from 'kysely/helpers/postgres';
+import { sql } from 'kysely';
 import type { Kysely } from 'kysely';
 import type { DB } from '../db/types';
 import { normalizeCode, normalizeBarcode, tokenize } from '../catalog-match';
@@ -119,11 +120,25 @@ export async function searchProductRows(db: Kysely<DB>, terms: string[], limit: 
     .execute();
 }
 
-/** Wide text search across Arabic/English/Turkish names + keyword arrays, scored in code. */
+/**
+ * Wide text search: database-native full-text first (GIN-indexed tsvector over
+ * names/codes/keywords — ranks over the ENTIRE catalog, no silent scan caps,
+ * EH-014), falling back to ILIKE token matching for partial-word queries.
+ */
 export async function searchProductsByText(db: Kysely<DB>, terms: string[], limit = 20): Promise<ToolResult<ProductCandidate[]>> {
   const clean = Array.from(new Set(terms.map((t) => t.trim()).filter((t) => t.length >= 2))).slice(0, 12);
   if (!clean.length) return { ok: true, data: [] };
-  const rows = await searchProductRows(db, clean, Math.max(limit * 6, 40));
+
+  // Track 1: indexed full-text over the whole catalog.
+  const ftsQuery = clean.join(' ');
+  const ftsRows = await activePriced(productSelect(db))
+    .where(sql<boolean>`products.search_tsv @@ websearch_to_tsquery('simple', ${ftsQuery})`)
+    .orderBy(sql`ts_rank(products.search_tsv, websearch_to_tsquery('simple', ${ftsQuery}))`, 'desc')
+    .limit(Math.max(limit * 3, 30))
+    .execute();
+  const rows = ftsRows.length
+    ? ftsRows
+    : await searchProductRows(db, clean, Math.max(limit * 6, 40));
   if (!rows.length) return { ok: true, data: [] };
   const queryTokens = new Set(clean.flatMap((t) => tokenize(t)));
   const scored = rows
@@ -157,23 +172,37 @@ export async function searchProductsByText(db: Kysely<DB>, terms: string[], limi
 export async function vectorSearchProductText(db: Kysely<DB>, query: string, limit = 10): Promise<ToolResult<ProductCandidate[]>> {
   const emb = await embedText(query, 'RETRIEVAL_QUERY');
   if (!emb.values) return { ok: true, data: [] };
-  // Pull candidate embeddings (bounded scan, consistent with the dHash scan).
-  const rows = await activePriced(productSelect(db))
-    .select('products.text_embedding')
-    .where('products.text_embedding', 'is not', null)
-    .limit(5000)
-    .execute();
-  if (!rows.length) return { ok: true, data: [] };
-  const scored = rows
-    .map((p) => {
+  // EVERY embedded product is scored (EH-014) — read in keyset-paged batches so
+  // no part of the catalog is silently excluded and memory stays flat. Only the
+  // running top-N is retained.
+  const BATCH = 1000;
+  const scored: { p: any; sim: number }[] = [];
+  let cursor: string | null = null;
+  for (;;) {
+    let q = activePriced(productSelect(db))
+      .select('products.text_embedding')
+      .where('products.text_embedding', 'is not', null)
+      .orderBy('products.id', 'asc')
+      .limit(BATCH);
+    if (cursor) q = q.where('products.id', '>', cursor);
+    const rows: any[] = await q.execute();
+    if (!rows.length) break;
+    for (const p of rows) {
       const vec = Array.isArray(p.text_embedding) ? (p.text_embedding as number[]) : null;
       const sim = vec ? cosineSimilarity(emb.values as number[], vec) : 0;
-      return { p, sim };
-    })
-    .filter((x) => x.sim > 0.5)
-    .sort((a, b) => b.sim - a.sim)
-    .slice(0, limit);
-  return { ok: true, data: scored.map(({ p, sim }) => toCandidate(p, sim, 'semantic match', ['vector_text'])) };
+      if (sim > 0.5) scored.push({ p, sim });
+    }
+    // Keep the working set small on a large catalog.
+    if (scored.length > limit * 4) {
+      scored.sort((a, b) => b.sim - a.sim);
+      scored.length = limit * 2;
+    }
+    if (rows.length < BATCH) break;
+    cursor = rows[rows.length - 1].id as string;
+  }
+  if (!scored.length) return { ok: true, data: [] };
+  scored.sort((a, b) => b.sim - a.sim);
+  return { ok: true, data: scored.slice(0, limit).map(({ p, sim }) => toCandidate(p, sim, 'semantic match', ['vector_text'])) };
 }
 
 /** Price of one product (active_price = campaign-adjusted truth). */

@@ -1,27 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  verifySubscription,
-  verifyWebhookSignature,
-  parseMessengerWebhook,
-} from '@integrations/meta';
+import { verifySubscription, verifyWebhookSignature } from '@integrations/meta';
 import { metaStatus } from '@integrations/status';
 import { getDb } from '@integrations/db/client';
-import { processMessengerEvents, runMessageBatchDebounce } from '@integrations/pipelines/messenger';
+import { enqueue } from '@integrations/jobs/queue';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-// Allow the inbound burst-debounce (≈8s) + the AI turn to complete before the
-// serverless function is frozen.
-export const maxDuration = 60;
 
 /**
- * Meta webhook — the single Callback URL to register in the Meta App. Handles
- * Messenger messages (the comments feature has been removed).
+ * Meta webhook — persist-then-acknowledge, nothing else (EH-016).
  *
- * GET  = verification handshake: echoes hub.challenge as plain text iff
- *        hub.mode=subscribe and hub.verify_token === META_VERIFY_TOKEN.
- * POST = inbound events: verifies the X-Hub-Signature-256, then dispatches
- *        Messenger events to the pipeline.
+ * POST verifies the X-Hub-Signature-256, persists every event into
+ * inbound_events (provider-key deduped) atomically WITH its ingest job, and
+ * only then returns 200. All processing (customer upsert, batching, the AI
+ * turn, delivery) happens in the worker. If the database is unavailable the
+ * route answers 503 so Meta retries — an acknowledged event is never lost.
+ *
+ * GET is the subscription handshake (echoes hub.challenge).
  */
 export async function GET(req: NextRequest) {
   if (!metaStatus().configured) {
@@ -29,10 +24,41 @@ export async function GET(req: NextRequest) {
   }
   const { ok, challenge } = verifySubscription(req.nextUrl.searchParams);
   if (ok && challenge !== undefined) {
-    // Meta requires the raw challenge string back as text/plain.
     return new NextResponse(challenge, { status: 200, headers: { 'content-type': 'text/plain' } });
   }
   return new NextResponse('Forbidden', { status: 403 });
+}
+
+interface RawEvent {
+  topic: 'messenger' | 'instagram' | 'feed_change' | 'ig_comment_change';
+  providerEventKey: string | null;
+  payload: unknown;
+}
+
+/** Flatten a webhook body (page or instagram object) into normalized events. */
+function extractEvents(body: any): RawEvent[] {
+  const out: RawEvent[] = [];
+  const objectType = String(body?.object ?? '');
+  for (const entry of body?.entry ?? []) {
+    for (const ev of entry?.messaging ?? []) {
+      out.push({
+        topic: objectType === 'instagram' ? 'instagram' : 'messenger',
+        providerEventKey: ev?.message?.mid ?? null,
+        payload: ev,
+      });
+    }
+    for (const change of entry?.changes ?? []) {
+      const field = String(change?.field ?? '');
+      if (field === 'feed' || field === 'comments' || field === 'mention') {
+        out.push({
+          topic: objectType === 'instagram' ? 'ig_comment_change' : 'feed_change',
+          providerEventKey: change?.value?.comment_id ?? change?.value?.post_id ?? null,
+          payload: change,
+        });
+      }
+    }
+  }
+  return out;
 }
 
 export async function POST(req: NextRequest) {
@@ -45,23 +71,51 @@ export async function POST(req: NextRequest) {
 
   const db = getDb();
   if (!db) {
-    // Acknowledge so Meta does not retry forever, but note we can't persist.
-    return NextResponse.json({ ok: true, stored: false, reason: 'database_not_configured' });
+    // No durable storage → tell Meta to retry. Never acknowledge what we
+    // cannot keep.
+    return NextResponse.json({ error: 'storage_unavailable' }, { status: 503 });
   }
 
-  const body = JSON.parse(raw || '{}');
-  const events = parseMessengerWebhook(body);
-
-  let pending: { conversationId: string; messageId: string }[] = [];
-  if (events.length) {
-    const res = await processMessengerEvents(db, events);
-    pending = res.pending;
+  let body: any;
+  try {
+    body = JSON.parse(raw || '{}');
+  } catch {
+    return NextResponse.json({ error: 'malformed_json' }, { status: 400 });
   }
+  const events = extractEvents(body);
+  if (!events.length) return NextResponse.json({ ok: true, stored: 0 });
 
-  // Batching: wait out the burst window, then run ONE merged turn per conversation
-  // whose triggering message is still the newest inbound (a newer message's own
-  // webhook handles the burst instead). Awaited inline so it completes in-function.
-  if (pending.length) await runMessageBatchDebounce(db, pending);
-
-  return NextResponse.json({ ok: true, messenger: events.length });
+  try {
+    let stored = 0;
+    await db.transaction().execute(async (trx) => {
+      for (const ev of events) {
+        const inserted = await trx
+          .insertInto('inbound_events')
+          .values({
+            provider: 'meta',
+            topic: ev.topic,
+            provider_event_key: ev.providerEventKey,
+            payload: JSON.stringify(ev.payload),
+          })
+          .onConflict((oc) => oc
+            .columns(['provider', 'topic', 'provider_event_key'])
+            .where('provider_event_key', 'is not', null)
+            .doNothing())
+          .returning('id')
+          .executeTakeFirst();
+        if (!inserted) continue; // provider redelivery of a stored event
+        stored++;
+        await enqueue(trx, {
+          jobType: 'ingest_event',
+          payload: { eventId: inserted.id },
+          priority: 40,
+          maxAttempts: 5,
+        });
+      }
+    });
+    return NextResponse.json({ ok: true, stored });
+  } catch {
+    // Database failure mid-persist → retryable, nothing acknowledged.
+    return NextResponse.json({ error: 'storage_failed' }, { status: 503 });
+  }
 }

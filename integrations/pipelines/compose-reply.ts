@@ -14,7 +14,10 @@
 import type { Kysely } from 'kysely';
 import type { DB } from '../db/types';
 import { chatReplyWithTools, type ProductContext } from '../gemini';
-import { PRODUCT_TOOL_SCHEMAS, buildProductToolExecutor, type ProductCandidate } from '../tools';
+import {
+  PRODUCT_TOOL_SCHEMAS, buildProductToolExecutor, newActionRequests,
+  type ProductCandidate, type TurnActionRequests,
+} from '../tools';
 import { productClarifyingQuestion } from '../util/product-display';
 import type { BehaviorMap } from '../ai-behaviors';
 import { compilePrompt, type AiTask } from '../prompt-compiler';
@@ -40,6 +43,9 @@ export interface ComposedReply {
   ok: boolean;
   promptTraceId: string;
   promptContributors: string[];
+  /** Model-requested ACTIONS (images / human attention / order handoff) — the
+   *  server validates and decides; the model never acts directly. */
+  actions: TurnActionRequests;
 }
 
 export async function composeCustomerReply(db: Kysely<DB>, args: ComposeReplyArgs): Promise<ComposedReply> {
@@ -53,6 +59,7 @@ export async function composeCustomerReply(db: Kysely<DB>, args: ComposeReplyArg
     verified_catalog_candidates: products,
     turn_state: args.runtimeState ?? {},
   });
+  const actions = newActionRequests();
   const reply = await chatReplyWithTools(
     {
       systemPrompt: envelope.effectiveSystemInstruction,
@@ -61,11 +68,11 @@ export async function composeCustomerReply(db: Kysely<DB>, args: ComposeReplyArg
       maxOutputTokens: envelope.generationSettings.maxOutputTokens,
     },
     PRODUCT_TOOL_SCHEMAS,
-    buildProductToolExecutor(db),
+    buildProductToolExecutor(db, actions),
   );
   // Gemini unavailable (transient) → a single safe clarifying question, never a
   // robotic product template.
-  if (!reply.ok) return { text: productClarifyingQuestion(), model: null, rounds: 0, toolCalls: [], ok: false, promptTraceId: envelope.traceId, promptContributors: envelope.contributors.map((c) => c.behaviorKey) };
+  if (!reply.ok) return { text: productClarifyingQuestion(), model: null, rounds: 0, toolCalls: [], ok: false, promptTraceId: envelope.traceId, promptContributors: envelope.contributors.map((c) => c.behaviorKey), actions };
   const text = reply.text?.trim() || productClarifyingQuestion();
-  return { text, model: reply.model, rounds: reply.rounds, toolCalls: reply.toolCalls.map((t) => t.name), ok: true, promptTraceId: envelope.traceId, promptContributors: envelope.contributors.map((c) => c.behaviorKey) };
+  return { text, model: reply.model, rounds: reply.rounds, toolCalls: reply.toolCalls.map((t) => t.name), ok: true, promptTraceId: envelope.traceId, promptContributors: envelope.contributors.map((c) => c.behaviorKey), actions };
 }

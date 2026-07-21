@@ -121,12 +121,15 @@ export async function matchProductFromImage(args: {
     json: true,
     temperature: 0.1,
   });
-  const parsed = parseJsonLoose<{ ranked?: { product_id: string; confidence: number; reason?: string }[] }>(r.text);
-  const ranked = parsed?.ranked ?? [];
-  const matches: ImageMatch[] = ranked.map((item) => ({
+  const parsed = parseJsonLoose<{ ranked?: unknown }>(r.text);
+  // Strict validation (EH-022): only ids we actually offered, confidence
+  // clamped to [0,1]. A malformed or hallucinated entry is dropped, never
+  // propagated into product matching.
+  const allowed = new Map(args.candidates.map((c) => [c.id, c.name] as const));
+  const matches: ImageMatch[] = validateRanked(parsed?.ranked, allowed).map((item) => ({
     product_id: item.product_id,
-    name: args.candidates.find((c) => c.id === item.product_id)?.name ?? '',
-    confidence: Number(item.confidence) || 0,
+    name: allowed.get(item.product_id) ?? '',
+    confidence: item.confidence,
     reason: item.reason,
   }));
   const top = matches[0];
@@ -183,13 +186,20 @@ export interface VisualRankItem {
   id: string;
   name: string;
 }
+
+/** One validated entry of a model ranking (never contains an unoffered id). */
+export interface RankedProduct {
+  product_id: string;
+  confidence: number;
+  reason?: string;
+}
 export async function rankProductsByImage(args: {
   customerImageBase64: string;
   customerMimeType: string;
   candidates: VisualRankItem[];
   extraText?: string;
   systemPrompt: string;
-}): Promise<AiResult<{ ranked: { product_id: string; confidence: number; reason?: string }[]; latencyMs: number; model: string }>> {
+}): Promise<AiResult<{ ranked: RankedProduct[]; latencyMs: number; model: string }>> {
   if (!isGeminiConfigured()) return notConfigured;
   if (args.candidates.length === 0) return { ok: true, ranked: [], latencyMs: 0, model: visionModel() } as any;
   if (!args.systemPrompt?.trim()) throw new Error('compiled_system_prompt_required');
@@ -202,8 +212,38 @@ export async function rankProductsByImage(args: {
     parts.push({ inlineData: { mimeType: c.mimeType, data: c.imageBase64 } });
   }
   const r = await generateContent(parts, { model: visionModel(), systemInstruction: args.systemPrompt, timeoutMs: 25_000, json: true, temperature: 0.1 });
-  const parsed = parseJsonLoose<{ ranked: { product_id: string; confidence: number; reason?: string }[] }>(r.text);
-  return { ok: true, ranked: parsed?.ranked ?? [], latencyMs: r.latencyMs, model: r.model };
+  const parsed = parseJsonLoose<{ ranked?: unknown }>(r.text);
+  const allowed = new Map(args.candidates.map((c) => [c.id, c.name] as const));
+  return { ok: true, ranked: validateRanked(parsed?.ranked, allowed), latencyMs: r.latencyMs, model: r.model };
+}
+
+/**
+ * Validate a model "ranked" array against the candidates that were actually
+ * offered. Entries with an unknown id, a non-finite confidence or the wrong
+ * shape are DROPPED — the model can never introduce a product into the result.
+ */
+function validateRanked(
+  raw: unknown,
+  allowed: Map<string, string>,
+): RankedProduct[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: RankedProduct[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const id = (entry as any).product_id;
+    if (typeof id !== 'string' || !allowed.has(id) || seen.has(id)) continue;
+    const rawConfidence = Number((entry as any).confidence);
+    if (!Number.isFinite(rawConfidence)) continue;
+    const reason = (entry as any).reason;
+    seen.add(id);
+    out.push({
+      product_id: id,
+      confidence: Math.max(0, Math.min(1, rawConfidence)),
+      reason: typeof reason === 'string' ? reason.slice(0, 300) : undefined,
+    });
+  }
+  return out;
 }
 
 /** ---- 3. Campaign caption ----------------------------------------------- */

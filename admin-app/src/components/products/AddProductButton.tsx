@@ -45,7 +45,7 @@ export default function AddProductButton({ locale }: { locale: Locale }) {
     setSaving(false);
     if (res.ok && data.id) {
       setOpen(false);
-      router.push(`/products/${data.id}`);
+      router.push(`/catalog/${data.id}`);
     } else {
       const map: Record<string, string> = {
         product_code_required: ar ? 'الكود مطلوب' : 'Product code required',

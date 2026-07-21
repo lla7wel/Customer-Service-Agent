@@ -23,6 +23,8 @@ const en: Dict = {
   nav_inbox: 'Inbox',
   nav_orders: 'Orders',
   nav_products: 'Products',
+  nav_catalog: 'Catalog',
+  nav_content_studio: 'Content Studio',
   nav_catalog_review: 'Catalog Review',
   nav_price_review: 'Price Review',
   nav_catalog_match: 'Catalog Match',
@@ -42,7 +44,7 @@ const en: Dict = {
   save: 'Save',
   cancel: 'Cancel',
   search: 'Search',
-  search_ph: 'Search products, conversations, customers, campaigns…',
+  search_ph: 'Search products, conversations, customers, content…',
   filter: 'Filter',
   all: 'All',
   refresh: 'Refresh',
@@ -69,7 +71,7 @@ const en: Dict = {
   import_status: 'Product database',
   all_clear: 'All clear',
   all_clear_hint: 'Nothing needs action right now.',
-  supabase_not_connected_help: 'Add your Supabase keys and run database/schema.sql. See docs/SETUP.md.',
+  db_not_connected_help: 'Set DATABASE_URL and run the migration runner (scripts/migrate.ts).',
 };
 
 const ar: Dict = {
@@ -86,6 +88,8 @@ const ar: Dict = {
   nav_inbox: 'الرسائل',
   nav_orders: 'الطلبات',
   nav_products: 'المنتجات',
+  nav_catalog: 'الكتالوج',
+  nav_content_studio: 'استوديو المحتوى',
   nav_catalog_review: 'مركز مراجعة الكتالوج',
   nav_price_review: 'مراجعة الأسعار',
   nav_catalog_match: 'مطابقة الصور',
@@ -104,7 +108,7 @@ const ar: Dict = {
   save: 'حفظ',
   cancel: 'إلغاء',
   search: 'بحث',
-  search_ph: 'ابحث عن منتجات، محادثات، عملاء، حملات…',
+  search_ph: 'ابحث عن منتجات، محادثات، عملاء، محتوى…',
   filter: 'تصفية',
   all: 'الكل',
   refresh: 'تحديث',
@@ -130,7 +134,7 @@ const ar: Dict = {
   import_status: 'قاعدة بيانات المنتجات',
   all_clear: 'كل شيء تمام',
   all_clear_hint: 'لا يوجد ما يحتاج إجراءً الآن.',
-  supabase_not_connected_help: 'أضف مفاتيح Supabase وشغّل database/schema.sql. راجع docs/SETUP.md.',
+  db_not_connected_help: 'اضبط DATABASE_URL وشغّل مُرحِّل قاعدة البيانات (scripts/migrate.ts).',
 };
 
 export const dictionaries: Record<Locale, Dict> = { en, ar };

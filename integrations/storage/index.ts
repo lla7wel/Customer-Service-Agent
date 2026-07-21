@@ -63,6 +63,29 @@ export async function putObject(
   }
 }
 
+/**
+ * Read one of OUR OWN media objects straight from disk.
+ *
+ * Media we published is served by the reverse proxy at PUBLIC_MEDIA_BASE_URL,
+ * but the app should never round-trip through the network to read its own
+ * files: it is slower, depends on the proxy being reachable from inside the
+ * container, and needlessly widens the outbound-fetch surface. Returns null
+ * when the URL is not ours (the caller then uses the SSRF-safe fetcher).
+ */
+export async function readOwnMedia(url: string): Promise<Buffer | null> {
+  const base = publicMediaBaseUrl();
+  const root = mediaRoot();
+  if (!base || !root || !url.startsWith(base)) return null;
+  const objectPath = decodeURIComponent(url.slice(base.length).replace(/^\/+/, '')).split('?')[0];
+  const abs = safeJoin(root, objectPath);
+  if (!abs) return null;
+  try {
+    return await fs.readFile(abs);
+  } catch {
+    return null;
+  }
+}
+
 export async function removeObject(objectPath: string): Promise<{ ok: boolean; reason?: string }> {
   const root = mediaRoot();
   if (!root) return { ok: false, reason: 'not_configured' };

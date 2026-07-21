@@ -73,6 +73,43 @@ export interface ActivityLogs {
   summary: string | null;
 }
 
+export interface AdminAccounts {
+  created_at: Generated<Timestamp>;
+  created_by: string | null;
+  display_name: string | null;
+  full_access: Generated<boolean>;
+  id: Generated<string>;
+  is_active: Generated<boolean>;
+  last_login_at: Timestamp | null;
+  password_hash: string;
+  preferred_locale: Generated<string>;
+  role: Generated<string>;
+  updated_at: Generated<Timestamp>;
+  username: string;
+}
+
+export interface AdminAuditLog {
+  action: string;
+  admin_id: string | null;
+  admin_username: string | null;
+  created_at: Generated<Timestamp>;
+  detail: Generated<Json>;
+  entity_id: string | null;
+  entity_type: string | null;
+  id: Generated<Int8>;
+}
+
+export interface AdminSessions {
+  admin_id: string;
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  id: Generated<string>;
+  ip: string | null;
+  revoked_at: Timestamp | null;
+  token_hash: string;
+  user_agent: string | null;
+}
+
 export interface AdminUsers {
   created_at: Generated<Timestamp>;
   email: string;
@@ -98,6 +135,19 @@ export interface AiBehaviors {
   updated_by: string | null;
 }
 
+export interface AiBehaviorVersions {
+  behavior_key: string;
+  created_at: Generated<Timestamp>;
+  enabled: Generated<boolean>;
+  id: Generated<Int8>;
+  memory: string | null;
+  note: string | null;
+  prompt: string | null;
+  rules: string | null;
+  saved_by: string | null;
+  title: string | null;
+}
+
 export interface AiEvents {
   confidence: Numeric | null;
   conversation_id: string | null;
@@ -112,8 +162,27 @@ export interface AiEvents {
   prompt_summary: string | null;
   related_id: string | null;
   success: Generated<boolean>;
+  task: string | null;
   token_input: number | null;
   token_output: number | null;
+  trace_id: string | null;
+}
+
+export interface AnalyticsDaily {
+  computed_at: Generated<Timestamp>;
+  day: Timestamp;
+  detail: Generated<Json>;
+  metric: string;
+  value: Generated<Numeric>;
+}
+
+export interface BusinessFacts {
+  key: string;
+  label_ar: string | null;
+  label_en: string | null;
+  updated_at: Generated<Timestamp>;
+  updated_by: string | null;
+  value: Json;
 }
 
 export interface CampaignAssets {
@@ -122,14 +191,14 @@ export interface CampaignAssets {
   campaign_id: string;
   caption: string | null;
   created_at: Generated<Timestamp>;
+  fallback_used: Generated<boolean>;
   id: Generated<string>;
   kind: CampaignAssetKind;
-  fallback_used: Generated<boolean>;
   overlay_text_status: string | null;
   position: Generated<number>;
   product_fidelity_status: string | null;
-  prompt_trace_id: string | null;
   product_id: string | null;
+  prompt_trace_id: string | null;
   public_url: string | null;
   requested_model: string | null;
   requested_overlay_text: string | null;
@@ -159,8 +228,8 @@ export interface Campaigns {
   discount_percent: Numeric | null;
   ends_at: Timestamp | null;
   generated_caption: string | null;
-  image_text: string | null;
   id: Generated<string>;
+  image_text: string | null;
   name: string;
   objective: string | null;
   priority: Generated<number>;
@@ -184,6 +253,91 @@ export interface CatalogMatchSuggestions {
   score: Numeric | null;
   scraper_product_id: string | null;
   state: Generated<string>;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface ContentAssets {
+  content_item_id: string;
+  created_at: Generated<Timestamp>;
+  height: number | null;
+  id: Generated<string>;
+  kind: string;
+  overlay: Generated<Json>;
+  position: Generated<number>;
+  product_id: string | null;
+  public_url: string | null;
+  source_model: string | null;
+  storage_path: string | null;
+  width: number | null;
+}
+
+export interface ContentComments {
+  author_external_id: string | null;
+  author_name: string | null;
+  body: string | null;
+  commented_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  decision: string | null;
+  decision_reason: string | null;
+  id: Generated<string>;
+  parent_comment_id: string | null;
+  provider_comment_id: string;
+  publication_id: string;
+  reply_error: string | null;
+  reply_provider_id: string | null;
+  reply_status: string | null;
+  reply_text: string | null;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface ContentItems {
+  approved_at: Timestamp | null;
+  approved_by: string | null;
+  caption: string | null;
+  comment_automation: Generated<boolean>;
+  content_type: Generated<string>;
+  created_at: Generated<Timestamp>;
+  created_by: string | null;
+  id: Generated<string>;
+  image_text: string | null;
+  image_text_mode: Generated<string>;
+  last_error: string | null;
+  legacy_campaign_id: string | null;
+  output_mode: Generated<string>;
+  platforms: Generated<string[]>;
+  promotion_ends_at: Timestamp | null;
+  purpose: Generated<string>;
+  scheduled_for: Timestamp | null;
+  status: Generated<string>;
+  title: string | null;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface ContentProducts {
+  content_item_id: string;
+  id: Generated<string>;
+  new_price: Numeric | null;
+  position: Generated<number>;
+  product_id: string;
+  show_price: Generated<boolean>;
+}
+
+export interface ContentPublications {
+  attempts: Generated<number>;
+  content_item_id: string;
+  created_at: Generated<Timestamp>;
+  format: string;
+  id: Generated<string>;
+  idempotency_key: string;
+  last_error: string | null;
+  max_attempts: Generated<number>;
+  next_attempt_at: Generated<Timestamp>;
+  permalink_url: string | null;
+  platform: string;
+  provider_children: Generated<Json>;
+  provider_post_id: string | null;
+  published_at: Timestamp | null;
+  status: Generated<string>;
   updated_at: Generated<Timestamp>;
 }
 
@@ -217,6 +371,10 @@ export interface Conversations {
   customer_id: string | null;
   customer_language: string | null;
   detected_intent: string | null;
+  handoff_sent_at: Timestamp | null;
+  human_attention: Generated<boolean>;
+  human_attention_at: Timestamp | null;
+  human_attention_reason: string | null;
   id: Generated<string>;
   is_spam: Generated<boolean>;
   last_customer_message_at: Timestamp | null;
@@ -225,6 +383,7 @@ export interface Conversations {
   last_message_preview: string | null;
   next_turn_at: Timestamp | null;
   status: Generated<ConversationStatus>;
+  takeover_admin_id: string | null;
   unread_count: Generated<number>;
   updated_at: Generated<Timestamp>;
 }
@@ -296,6 +455,19 @@ export interface ImageMatchCorrections {
   outcome: Generated<ImageMatchOutcome>;
 }
 
+export interface InboundEvents {
+  attempts: Generated<number>;
+  id: Generated<string>;
+  last_error: string | null;
+  payload: Json;
+  processed_at: Timestamp | null;
+  provider: Generated<string>;
+  provider_event_key: string | null;
+  received_at: Generated<Timestamp>;
+  status: Generated<string>;
+  topic: string;
+}
+
 export interface IntegrationLogs {
   created_at: Generated<Timestamp>;
   direction: Generated<string>;
@@ -309,6 +481,32 @@ export interface IntegrationLogs {
   status_code: number | null;
 }
 
+export interface Jobs {
+  attempts: Generated<number>;
+  created_at: Generated<Timestamp>;
+  dedupe_key: string | null;
+  finished_at: Timestamp | null;
+  id: Generated<string>;
+  job_type: string;
+  last_error: string | null;
+  lease_expires_at: Timestamp | null;
+  locked_by: string | null;
+  max_attempts: Generated<number>;
+  payload: Generated<Json>;
+  priority: Generated<number>;
+  run_at: Generated<Timestamp>;
+  status: Generated<string>;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface LoginAttempts {
+  created_at: Generated<Timestamp>;
+  id: Generated<Int8>;
+  ip: string | null;
+  ok: Generated<boolean>;
+  username: string | null;
+}
+
 export interface Messages {
   ai_meta: Generated<Json>;
   attachments: Generated<Json>;
@@ -316,6 +514,7 @@ export interface Messages {
   conversation_id: string;
   created_at: Generated<Timestamp>;
   delivered_at: Timestamp | null;
+  delivery_status: string | null;
   direction: MessageDirection;
   external_id: string | null;
   id: Generated<string>;
@@ -361,12 +560,57 @@ export interface OrdersArchive {
   updated_at: Timestamp | null;
 }
 
+export interface OutboxMessages {
+  attempts: Generated<number>;
+  body: string | null;
+  channel: string;
+  conversation_id: string | null;
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  idempotency_key: string;
+  image_url: string | null;
+  kind: string;
+  last_error: string | null;
+  max_attempts: Generated<number>;
+  message_id: string | null;
+  next_attempt_at: Generated<Timestamp>;
+  product_id: string | null;
+  provider_message_id: string | null;
+  recipient_id: string;
+  sender_type: Generated<string>;
+  sent_at: Timestamp | null;
+  status: Generated<string>;
+}
+
 export interface ProductActivePricing {
   active_campaign_id: string | null;
   active_price: Numeric | null;
   base_price: Numeric | null;
   campaign_price: Numeric | null;
   product_id: string | null;
+}
+
+export interface ProductFamilies {
+  created_at: Generated<Timestamp>;
+  family_key: string | null;
+  id: Generated<string>;
+  kind: Generated<string>;
+  name: string;
+  name_ar: string | null;
+  notes: string | null;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface ProductFieldChanges {
+  changed_by: string | null;
+  created_at: Generated<Timestamp>;
+  field: string;
+  id: Generated<Int8>;
+  import_run_id: string | null;
+  new_value: string | null;
+  old_value: string | null;
+  product_id: string;
+  source: Generated<string>;
 }
 
 export interface ProductFingerprints {
@@ -409,6 +653,29 @@ export interface ProductImportRuns {
   updated_count: Generated<number>;
 }
 
+export interface ProductPriceHistory {
+  changed_by: string | null;
+  content_item_id: string | null;
+  effective_at: Generated<Timestamp>;
+  id: Generated<Int8>;
+  import_run_id: string | null;
+  new_price: Numeric | null;
+  note: string | null;
+  old_price: Numeric | null;
+  product_id: string;
+  source: string;
+}
+
+export interface ProductRelations {
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  locked: Generated<boolean>;
+  product_id: string;
+  related_product_id: string;
+  relation_type: string;
+  source: Generated<string>;
+}
+
 export interface Products {
   active_campaign_id: string | null;
   active_price: Numeric | null;
@@ -425,6 +692,8 @@ export interface Products {
   category: string | null;
   created_at: Generated<Timestamp>;
   english_name: string | null;
+  family_id: string | null;
+  family_locked: Generated<boolean>;
   id: Generated<string>;
   import_run_id: string | null;
   libyan_display_name: string | null;
@@ -432,29 +701,67 @@ export interface Products {
   product_code: string;
   raw: Generated<Json>;
   search_keywords: Generated<string[]>;
+  search_tsv: string | null;
   source: Generated<string>;
   source_name: string | null;
   status: Generated<ProductStatus>;
   subcategory: string | null;
   text_embedding: Json | null;
   updated_at: Generated<Timestamp>;
+  variant_attributes: Generated<Json>;
+  variant_label: string | null;
   website_url: string | null;
+}
+
+export interface Promotions {
+  content_item_id: string | null;
+  created_at: Generated<Timestamp>;
+  created_by: string | null;
+  ends_at: Timestamp | null;
+  id: Generated<string>;
+  previous_price: Numeric;
+  product_id: string;
+  promo_price: Numeric;
+  starts_at: Timestamp | null;
+  status: Generated<string>;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface ProviderReadiness {
+  check_key: string;
+  checked_at: Generated<Timestamp>;
+  detail: Generated<Json>;
+  ok: boolean;
+  summary: string | null;
 }
 
 export interface SchemaMigrations {
   applied_at: Generated<Timestamp>;
+  backfilled: Generated<boolean>;
+  checksum: string | null;
   version: string;
 }
 
 export interface DB {
   activity_logs: ActivityLogs;
+  admin_accounts: AdminAccounts;
+  admin_audit_log: AdminAuditLog;
+  admin_sessions: AdminSessions;
   admin_users: AdminUsers;
+  ai_behavior_versions: AiBehaviorVersions;
   ai_behaviors: AiBehaviors;
   ai_events: AiEvents;
+  analytics_daily: AnalyticsDaily;
+  business_facts: BusinessFacts;
   campaign_assets: CampaignAssets;
   campaign_products: CampaignProducts;
   campaigns: Campaigns;
   catalog_match_suggestions: CatalogMatchSuggestions;
+  content_assets: ContentAssets;
+  content_comments: ContentComments;
+  content_items: ContentItems;
+  content_products: ContentProducts;
+  content_publications: ContentPublications;
   conversation_attachments: ConversationAttachments;
   conversation_labels: ConversationLabels;
   conversations: Conversations;
@@ -462,14 +769,24 @@ export interface DB {
   customers: Customers;
   facebook_posts: FacebookPosts;
   image_match_corrections: ImageMatchCorrections;
+  inbound_events: InboundEvents;
   integration_logs: IntegrationLogs;
+  jobs: Jobs;
+  login_attempts: LoginAttempts;
   messages: Messages;
   order_items_archive: OrderItemsArchive;
   orders_archive: OrdersArchive;
+  outbox_messages: OutboxMessages;
   product_active_pricing: ProductActivePricing;
+  product_families: ProductFamilies;
+  product_field_changes: ProductFieldChanges;
   product_fingerprints: ProductFingerprints;
   product_images: ProductImages;
   product_import_runs: ProductImportRuns;
+  product_price_history: ProductPriceHistory;
+  product_relations: ProductRelations;
   products: Products;
+  promotions: Promotions;
+  provider_readiness: ProviderReadiness;
   schema_migrations: SchemaMigrations;
 }

@@ -1,43 +1,86 @@
 # Database
 
-The source for a fresh database is `database/schema.sql`; deployed databases advance through ordered files in `database/migrations/`. TypeScript access uses Kysely types in `integrations/db/types.ts` and row helpers in `integrations/db/rows.ts`.
+PostgreSQL 16, accessed through Kysely. Types in `integrations/db/types.ts` are
+generated from the live schema (`npm run db:codegen`).
 
-PostgreSQL is reachable only inside the Docker network. Admin authorization is the jose middleware/session boundary; Supabase RLS and browser database clients are not part of the current architecture.
+## Migration policy
 
-## Principal data
+**Forward-only and idempotent.** An applied migration is never edited — a new
+one is added instead.
 
-| Area | Tables |
+`scripts/migrate.ts` is the only supported way to change the schema:
+
+```bash
+npm run db:preflight   # report the plan, change nothing
+npm run db:migrate     # apply
+```
+
+It takes a PostgreSQL advisory lock (concurrent deploys cannot race) and then:
+
+- **Fresh database** → `bootstrap.sql` + `schema.sql` + every migration in
+  order, each recorded in `schema_migrations`.
+- **Existing database** → for every migration not in the ledger it runs a
+  read-only **probe** to check whether the effects are already present.
+  Present → the ledger row is backfilled (`backfilled = true`). Absent → the
+  file is applied in a transaction and recorded.
+
+This repairs the historical state where only 4 of 14 migrations had recorded
+themselves, without re-applying anything or rewriting history. Both paths are
+covered by integration tests, including an upgrade from a fixture that
+reproduces the production ledger gap.
+
+Always run `./scripts/backup.sh` first. Media is backed up with the database
+because it cannot be rebuilt.
+
+## Schema map
+
+**Identity and access**
+`admin_accounts`, `admin_sessions` (token hashes only), `admin_audit_log`,
+`login_attempts`.
+
+**Conversations**
+`customers` (channel-scoped identity), `conversations` (one active per customer,
+enforced by a partial unique index), `messages` (truthful `delivery_status`),
+`customer_memory`, `conversation_attachments`.
+
+**Durable processing**
+`inbound_events` (provider-deduped), `jobs` (leased, one live job per dedupe
+key), `outbox_messages` (idempotency key, truthful send state).
+
+**Catalog**
+`products` (with `admin_locked_fields`, `search_tsv`, `family_id`),
+`product_images`, `product_families`, `product_relations`,
+`product_price_history`, `promotions` (one open per product),
+`product_import_runs`, `product_field_changes`, `product_fingerprints`,
+`image_match_corrections`.
+
+**Content Studio**
+`content_items`, `content_products`, `content_assets`, `content_publications`
+(one per item+platform), `content_comments` (one decision per provider comment).
+
+**Configuration and operations**
+`business_facts`, `ai_behaviors`, `ai_behavior_versions`, `ai_events`,
+`provider_readiness`, `analytics_daily`, `activity_logs`, `integration_logs`.
+
+Legacy `campaigns`, `campaign_products`, `campaign_assets` and `facebook_posts`
+are **retained as history**; migration 0018 surfaces them in Content Studio as
+archived items. Nothing was deleted.
+
+## Invariants enforced in the database
+
+| Invariant | Mechanism |
 |---|---|
-| Messaging | `customers`, `conversations`, `messages`, `conversation_labels`, `conversation_attachments` |
-| Catalog | `products`, `product_images`, `product_fingerprints`, `image_match_corrections`, `catalog_match_suggestions`, `product_import_runs` |
-| Marketing | `campaigns`, `campaign_products`, `campaign_assets`, `facebook_posts` |
-| AI/operations | `ai_behaviors`, `customer_memory`, `ai_events`, `activity_logs`, `integration_logs` |
+| One active conversation per customer | Partial unique index |
+| One live job per dedupe key | Partial unique index |
+| One open promotion per product | Partial unique index |
+| One publication per (content item, platform) | Unique constraint |
+| One decision per (publication, provider comment) | Unique constraint |
+| Provider event redelivery is a no-op | Unique index on (provider, topic, key) |
+| Outbox idempotency | Unique `idempotency_key` |
 
-`products.active_price` is customer price truth. The pricing function chooses the active campaign winner and otherwise uses base price. AI tools expose only eligible verified product facts.
+## Retention
 
-## AI Control
-
-`ai_behaviors` stores each editable section in `prompt`, `rules`, and `memory`, plus `enabled`. Existing administrator-authored rows are never replaced by migration 0014. Missing new keys are inserted with defaults; conflict handling preserves live content.
-
-## Campaign variables and evidence
-
-Migration 0014 adds `campaigns.objective`, `image_text`, `aspect_ratio`, and `target_channel`. It adds asset evidence fields: `prompt_trace_id`, `requested_overlay_text`, `overlay_text_status`, `product_fidelity_status`, `verification`, `requested_model`, `actual_model`, and `fallback_used`.
-
-Legacy campaign/style prompt columns and `campaign_assets.source_prompt` remain intact but are deprecated and ignored for new generation/regeneration.
-
-## Migration history
-
-| Migration | Purpose |
-|---|---|
-| 0001–0004 | Initial platform, pricing review, catalog matching, admin field locks |
-| 0005–0009 | AI behaviors, batching, fingerprints, campaign review, memory/embeddings |
-| 0010–0013 | Remove comments, add attachments/indexes, production cleanup, detach Supabase RLS |
-| 0014 | Central AI Control sections, campaign variables, generation/verification evidence |
-
-0014 is forward-only and data-preserving. It does not drop historical columns or overwrite existing behavior keys.
-
-## Deployment rule
-
-Never edit an applied migration. Before applying a new one: create `pg_dump`, run `gzip -t`, restore to a scratch database, apply the migration there with `ON_ERROR_STOP`, then apply once to production. Record the deployed Git commit and retain the pre-migration application image/commit for rollback.
-
-Do not manually edit message/audit records, derived `active_price`, or AI behavior rows. Use the authenticated admin workflows.
+The worker sweeps every six hours: processed `inbound_events` after 30 days,
+completed `jobs` after 7, `login_attempts` and expired `admin_sessions` after
+14, `integration_logs` after 60. Customer conversations, catalog data, media and
+publication history are **not** swept.

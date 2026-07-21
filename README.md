@@ -1,150 +1,269 @@
-# English Home Libya — AI Customer-Service Platform
+# English Home Libya — Customer Service & Content Platform
 
-A production AI agent that runs customer service for a real retail franchise's
-Facebook page (~250k reach), answering in **Libyan Arabic**, recognizing
-products from **customer photos**, and quoting prices only from the live
-catalog — wrapped in a bilingual (AR/EN, RTL-first) admin command center.
+The operations centre for a real home-furnishings retailer in Libya: it answers
+customers on **Facebook Messenger and Instagram Direct** in Libyan Arabic,
+grounded in a locked 4,700-product catalog, and it produces, schedules and
+publishes the brand's Facebook/Instagram content — including automatic replies
+to comments on the posts it published.
 
-Built for and operated by the English Home Libya franchise. The whole system
-runs on **one ~€5/month VPS** with exactly two external dependencies: the
-Gemini API and Meta's Graph API.
+Everything runs on one small VPS with two external dependencies: the **Gemini
+API** and **Meta's Graph API**.
 
-![Architecture](docs/diagrams/architecture.svg)
+> **Screenshots and sample data in this repository are synthetic.** No customer
+> conversations, credentials, media dumps or business records are published here.
+
+---
 
 ## What it does
 
-- **Answers Messenger DMs and story replies automatically** using the exact
-  language and service behavior configured in AI Control,
-  grounded in the real catalog — the model can call read-only product tools
-  (code/barcode/URL/keyword/semantic lookup) but can never invent a price.
-- **Recognizes products from photos** with an 8-step hybrid matcher:
-  exact-URL → perceptual dHash → learned admin corrections → fingerprint
-  near-duplicates → Gemini vision description → visible code/barcode →
-  keyword + embedding retrieval → visual re-rank. Admin corrections feed
-  fingerprints back, so the same mistake gets less likely over time.
-- **Sends real catalog photos** when a customer asks to see a product
-  (max 3, de-duplicated, public HTTPS only, honest delivery accounting).
-- **Hands off gracefully**: order/refund/complaint intents get a warm
-  human-handoff reply and pause the AI for that conversation.
-- **Admin command center**: inbox with AI pause/resume and suggested drafts,
-  4,700-product catalog with image-match review queues, campaign builder with
-  AI captions and image editing, a sectioned AI Control prompt workbench, and a
-  playground that runs the production compiler and execution paths.
+**Customer service (Messenger + Instagram)**
+- Answers product, price, size, colour, set, comparison and branch questions
+  automatically in natural Libyan Arabic, whatever language the customer wrote in.
+- Recognises products from customer photos (perceptual hash → learned admin
+  corrections → fingerprints → vision description → keyword/semantic retrieval
+  → visual re-rank), and sends **real catalog photos** on request (max three).
+- Quotes prices **only** from the verified active price. It never invents a
+  price, stock level, delivery time or policy.
+- **Never creates, confirms or manages orders.** When real buying intent
+  appears it sends one Libyan-Arabic handoff message pointing to WhatsApp,
+  flags the conversation for the team, and keeps answering ordinary product
+  questions until an admin explicitly presses **Take Over**.
 
-## Production hardening (the interesting bits)
+**Catalog**
+- Families, sellable variants and genuine related products, bootstrapped
+  automatically from existing data; admin corrections are permanent.
+- Versioned price history, promotions with automatic restoration, and per-field
+  admin locks that CSV imports can never overwrite.
+- Indexed full-catalog retrieval (PostgreSQL full-text + trigram + barcode +
+  image fingerprint + semantic) with no silent row caps.
 
-![Message flow](docs/diagrams/message-flow.svg)
+**Content Studio**
+- Posts and Stories for Facebook, Instagram or both; original / carousel /
+  combined output; price-drop or general purpose.
+- Exact prices and Arabic phrases are rendered by a **deterministic typography
+  layer** (resvg + rustybuzz shaping, bundled Tajawal font) — an image model is
+  never trusted to spell a price. What you preview is what publishes.
+- Approve immediately or schedule in **Africa/Tripoli** time. A scheduled price
+  drop activates the new price only when a platform actually publishes.
+- Automatic Libyan-Arabic comment replies **only on content this app published**.
 
-Every guard in the pipeline exists because of a real incident:
+**Operations**
+- Durable PostgreSQL-backed jobs, transactional outbox, exactly-once publishing.
+- Multi-admin accounts with database-backed revocable sessions and audit trail.
+- Truthful readiness checks — a channel is never shown as connected without proof.
 
-| Guard | Incident it prevents |
-|---|---|
-| **Burst batching** (5s window, newest-message-wins) | three rapid messages → three disjoint AI replies |
-| **Supersede guard** in `deliverAndStore` | image + "how much?" arriving together → double reply to one burst |
-| **`ai_enabled` re-check at send time** | AI reply landing seconds after an admin took over |
-| **Output sanitizer gate** | the model echoing `catalog_search(...)` or system text into customer chat |
-| **Honest delivery** (`delivered_at` only on confirmed send) | inbox showing failed sends as delivered |
-| **Model router + fallback chain** | image generation dying when the strong model is rate-limited |
+---
 
 ## Architecture
 
 ```
-├── admin-app/        Next.js 16 App Router — UI + API routes (jose session auth)
-├── integrations/     Framework-agnostic core, shared by app + scripts
-│   ├── db/           Kysely + pg (typed queries; codegen'd schema types)
-│   ├── gemini/       central model router — per-task models, fallback chains
-│   ├── prompt-compiler.ts typed AI Control compiler + prompt trace
-│   ├── meta/         Graph API client + webhook signature verification
-│   ├── pipelines/    messenger turn engine, hybrid image matcher, campaigns
-│   ├── tools/        the AI's ONLY database access (read-only, price-safe)
-│   └── storage/      media on disk, served by Caddy at media.<domain>
-├── database/         plain-SQL schema + 14 ordered migrations
-├── scripts/          local catalog import/enrich CLIs (scraper → Postgres)
-├── deploy/           Caddyfile, backup cron, VPS runbook
-└── docs/             architecture, operations, AI pipeline deep-dives
+                    Meta (Messenger · Instagram · Pages)
+                                  │  webhook (signature-verified)
+                                  ▼
+   Caddy ──► Next.js app ──► PostgreSQL ◄── worker (separate container)
+     │        (UI + API)          ▲              │
+     │                            │              ├─ debounced customer turns
+     └─► /media (product &        │              ├─ outbox delivery
+         content images)          │              ├─ content publishing
+                                  │              ├─ comment automation
+                              Gemini API         ├─ promotion expiry
+                                                 └─ analytics + readiness
 ```
 
-Companion repositories:
+The webhook **only persists** verified events and acknowledges after the commit.
+Everything else happens in the worker, claimed with `FOR UPDATE SKIP LOCKED`
+leases. No host cron is required — the worker schedules its own recurring work.
 
-- [english-home-catalog-scraper](https://github.com/lla7wel/english-home-catalog-scraper)
-  — resumable Playwright-over-CDP scraper (real-Chrome Cloudflare bypass) that
-  builds the product/image database this platform imports.
-- [trilingual-catalog-matcher](https://github.com/lla7wel/trilingual-catalog-matcher)
-  — the Arabic/Turkish/English product-matching engine, extracted from
-  `integrations/catalog-match.ts` as a zero-dependency library.
-- [visual-product-matcher](https://github.com/lla7wel/visual-product-matcher)
-  — the photo-recognition pipeline (dHash backbone, learning loop, pluggable
-  vision/retrieval) as a standalone, provider-agnostic library.
+| Area | Choice |
+|---|---|
+| Web / API | Next.js (App Router), Arabic RTL-first UI |
+| Data | PostgreSQL + Kysely, forward-only idempotent migrations |
+| Background | Standalone worker process, PostgreSQL job queue + outbox |
+| AI | Gemini (text, vision, embeddings) with bounded, schema-validated tools |
+| Media | Filesystem volume served by Caddy |
+| Deploy | Docker Compose: `postgres`, `app`, `worker`, `caddy` |
 
-## Engineering decisions
+---
 
-- **Self-hosted over serverless** — the platform previously ran on
-  Supabase + Vercel + Cloudflare; a free-tier pause took production down.
-  Everything now runs in one `docker compose up`: Postgres 16, the Next.js
-  standalone server, and Caddy (auto-HTTPS). Backups are a nightly `pg_dump`
-  with offsite copy — the database is the only non-rebuildable state.
-- **Kysely over an ORM** — the schema lives in plain SQL migrations;
-  `kysely-codegen` derives types from the live database, so queries are fully
-  typed without a second schema definition. pg type parsers keep row shapes
-  identical to what the app was written against (ISO-string timestamps,
-  numeric → number).
-- **Embeddings in JSONB, cosine in code** — at 4,700 products a bounded scan
-  is milliseconds; pgvector + HNSW is an upgrade path, not a day-one need.
-- **One reply composer** — the live webhook, the inbox "suggest" button and
-  the playground all call the same `composeCustomerReply()`, so what the admin
-  tests is exactly what customers get.
-- **AI Control is authoritative** — typed tasks compile immutable execution
-  policy, exact editable sections, structured runtime facts, tools/schema and a
-  trace hash. Provider adapters contain no hidden English Home behavior prose.
-- **Arabic-first UI** — the admin is RTL-first with AR/EN dictionaries;
-  customer and marketing language is configured in AI Control.
+## Reliability guarantees
 
-## Run it locally
+Each of these is covered by an automated test:
+
+| Guarantee | How |
+|---|---|
+| One AI reply per customer burst | Per-conversation debounced job + transactional supersede guard |
+| No lost inbound events | Events persisted before the 200; database failure returns 503 so Meta retries |
+| No duplicate provider sends | Transactional outbox with a conditional claim and idempotency key |
+| Ambiguous sends never silently retried | Timeouts land in an `uncertain` state that only an admin may retry |
+| No duplicate Facebook/Instagram posts | One publication row per (item, platform), conditional claim, resumable children |
+| Truthful publication state | Parent status is always derived from all its publications |
+| Prices only change when content goes live | Activation runs on the first successful platform publish |
+| Promotions restore correctly | Expiry restores the prior price unless a newer manual/CSV price superseded it |
+| Admin locks beat imports | Field-level lock map consulted by every automated writer |
+| One order handoff, no spam | Handoff timestamp with a suppression window |
+| Comments answered only on our own posts | Comments are fetched exclusively from our publication rows |
+
+---
+
+## Local development
+
+**Requirements:** Node 22+, PostgreSQL 16+.
 
 ```bash
+git clone https://github.com/lla7wel/Customer-Service-Agent.git
+cd Customer-Service-Agent
+npm install && npm install --prefix admin-app && npm install --prefix scripts
+
+cp .env.example .env          # fill in DATABASE_URL and SESSION_SECRET
+
 createdb eh_system
-psql -d eh_system -f database/bootstrap.sql
-psql -d eh_system -f database/schema.sql
-for f in database/migrations/0*.sql; do psql -d eh_system -v ON_ERROR_STOP=1 -f "$f"; done
+npm run db:migrate            # bootstrap + full migration chain
 
-cp .env.example .env        # set DATABASE_URL + ADMIN_* + SESSION_SECRET
-cd admin-app && npm install && npm run dev
+# Create the first owner account (no default password exists anywhere)
+node -e "require('bcryptjs').hash('your-password',12).then(console.log)"
+#   → put the hash in OWNER_PASSWORD_HASH, pick OWNER_USERNAME, then:
+npm run bootstrap:owner --prefix scripts
+
+npm run dev --prefix admin-app    # http://localhost:3000
+npm run worker:dev                # in a second terminal
 ```
 
-The app runs with integrations unconfigured — each shows a clear
-"not connected" card instead of faking data.
+The app runs with integrations missing — every unconfigured channel shows an
+explicit "not connected" state with the exact remediation instead of faking data.
 
-**Production** is one command on a VPS: `docker compose up -d --build` —
-see [deploy/setup-vps.md](deploy/setup-vps.md) for the zero-to-production
-runbook (domain, TLS, Meta webhook, backups, smoke tests).
-
-## Tests
+### Useful commands
 
 ```bash
-cd scripts
-npx tsx upgrade-tests.ts             # focused pure-logic regression suite (sanitizer, policy, hashing)
-npx tsx ai-control-behavior-test.ts  # compiler, provenance, parity and prompt boundaries
+npm run db:preflight     # report pending migrations, change nothing
+npm run test             # unit + integration (throwaway databases)
+npm run test:e2e         # Playwright: desktop + 360px phone, Arabic RTL
+npm run worker:build     # bundle the worker for the container
+npm run bootstrap:families --prefix scripts   # build product families from catalog data
+
+npm run test:ai-control --prefix scripts      # prompt compiler, provenance and boundaries
 ```
+
+---
+
+## Configuration
+
+All configuration is environment variables — see [`.env.example`](.env.example).
+Nothing is hard-coded and no secret is ever committed.
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `DATABASE_URL` | yes | PostgreSQL connection |
+| `SESSION_SECRET` | yes | Signs admin sessions (≥32 chars). **The app refuses to serve without it.** |
+| `OWNER_USERNAME` / `OWNER_PASSWORD_HASH` | bootstrap | First owner account (bcrypt hash) |
+| `MEDIA_ROOT` / `PUBLIC_MEDIA_BASE_URL` | media | Image storage + public base URL |
+| `GEMINI_API_KEY` | AI | Text, vision and embedding calls |
+| `META_PAGE_ID`, `META_PAGE_ACCESS_TOKEN`, `META_APP_SECRET`, `META_VERIFY_TOKEN` | Meta | Messenger + Page publishing |
+| `META_IG_USER_ID` | Instagram | Instagram DMs, publishing and comments |
+
+**Fail-closed by design:** without `SESSION_SECRET` the admin app returns 503
+rather than exposing the dashboard. Local development may opt out explicitly
+with `AUTH_DISABLED_DEV=true`, which is ignored in production builds.
+
+---
+
+## Deployment (Docker Compose)
+
+```bash
+cp .env.example .env      # fill in real values on the server
+docker compose build
+docker compose run --rm app node -e "require('/app/scripts/migrate')" || \
+  DATABASE_URL=... npm run db:migrate      # run migrations first
+docker compose up -d                       # postgres, app, worker, caddy
+```
+
+Compose starts four services: `postgres`, `app` (web/API), `worker` (all
+background processing) and `caddy` (TLS + public media). See
+[docs/OPERATIONS.md](docs/OPERATIONS.md) for the full runbook.
+
+### Backup and restore
+
+Media is **not** rebuildable — back it up with the database:
+
+```bash
+./scripts/backup.sh                     # database + media → backups/<timestamp>/
+./scripts/backup.sh --db-only
+./scripts/restore.sh backups/<ts> --yes # restores both (destructive; needs --yes)
+```
+
+Run a backup before every migration. `npm run db:preflight` reports exactly what
+a migration would do without touching anything.
+
+---
+
+## Meta setup and readiness
+
+Register **one** callback URL — `https://<your-app-domain>/api/meta/webhook` —
+for both the Page and Instagram objects, with `META_VERIFY_TOKEN` as the verify
+token.
+
+Required permissions:
+
+| Capability | Permissions |
+|---|---|
+| Messenger DMs | `pages_messaging` |
+| Page publishing + comments | `pages_manage_posts`, `pages_read_engagement` |
+| Instagram DMs | `instagram_basic`, `instagram_manage_messages` |
+| Instagram publishing | `instagram_content_publish` |
+| Instagram comments | `instagram_manage_comments` |
+| Insights (optional) | `read_insights` |
+
+**Settings → Channels** runs real checks against the Graph API and reports
+exactly what is connected, what is missing and how to fix it. A channel is never
+displayed as ready without a passing check, and reach/engagement metrics appear
+only when the API actually returns them — never as fabricated zeros.
+
+---
+
+## Testing
+
+```bash
+npm run test        # unit + integration suite
+npm run test:e2e    # Playwright, desktop + 360px phone
+```
+
+Integration tests create a throwaway PostgreSQL database, run the **real**
+migration chain and tear it down. Provider credentials are stripped from the
+test environment, so no test can reach a live account or a paid API.
+
+Coverage includes migrations (fresh + upgrade-from-production), the job queue,
+webhook durability and dedupe, outbox delivery states, exactly-once publishing,
+price/promotion rules, CSV import locks, order-handoff behaviour, comment
+automation, authentication and readiness truthfulness.
+
+---
 
 ## Documentation
 
-| Doc | Covers |
+| Document | Contents |
 |---|---|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | system design, folder ownership, invariants |
-| [docs/AI_AND_MESSENGER.md](docs/AI_AND_MESSENGER.md) | the conversation pipeline + image matcher, step by step |
-| [docs/CATALOG_AND_PRODUCTS.md](docs/CATALOG_AND_PRODUCTS.md) | price truth, import flow, matching, admin locks |
-| [docs/CAMPAIGNS.md](docs/CAMPAIGNS.md) | campaign builder, AI creative generation, scheduler |
-| [docs/DATABASE.md](docs/DATABASE.md) | data model + migration history |
-| [docs/OPERATIONS.md](docs/OPERATIONS.md) | day-to-day admin workflow |
-| [deploy/setup-vps.md](deploy/setup-vps.md) | production deployment runbook |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design and data flow |
+| [docs/DATABASE.md](docs/DATABASE.md) | Schema and migration policy |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | Deployment, backup, monitoring runbook |
+| [docs/AI_AND_MESSENGER.md](docs/AI_AND_MESSENGER.md) | Prompt architecture and conversation rules |
+| [docs/CONTENT_STUDIO.md](docs/CONTENT_STUDIO.md) | Content creation, publishing, comments |
+| [docs/CATALOG_AND_PRODUCTS.md](docs/CATALOG_AND_PRODUCTS.md) | Catalog, pricing, imports |
+| [docs/SECURITY.md](docs/SECURITY.md) | Security posture and known limitations |
 
-## Security posture
+## Known limitations
 
-- The middleware session gate (jose HS256, httpOnly cookie) is the security
-  boundary — every page and API route except the webhook, health check, cron
-  tick and auth endpoints requires it.
-- Meta webhook posts are verified with `X-Hub-Signature-256` (timing-safe).
-- The cron endpoint requires a bearer secret; it returns 503 rather than
-  running unprotected if the secret is unset.
-- No secrets in the repository — configuration is env-only, documented in
-  [.env.example](.env.example).
+Stated plainly rather than papered over:
+
+- **No inventory system.** An active product with a verified price is treated as
+  available. There is an inactive `availability provider` boundary for a future
+  ERP integration.
+- **No order management.** By design — WhatsApp is the handoff destination only.
+- **Instagram requires account linkage** that cannot be configured from code; the
+  readiness panel reports the exact missing step.
+- **Provider insights** appear only with `read_insights` granted.
+- Next.js currently bundles its own copy of `postcss` carrying a moderate
+  build-time advisory; the direct dependency is patched and the nested copy is
+  fixed upstream by Next, not by this repository.
+
+## License
+
+[MIT](LICENSE)

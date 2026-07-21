@@ -2,10 +2,16 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Pause, Play, CheckCircle2, Bot } from 'lucide-react';
+import { UserCheck, Play, CheckCircle2, Bot } from 'lucide-react';
 import type { Locale } from '@/lib/i18n/config';
 
-/** Pause/resume the AI and mark a conversation resolved. */
+/**
+ * Take Over / Resume AI — the explicit human handover controls.
+ *
+ * Take Over pauses the assistant entirely (a human owns the thread).
+ * Resume AI restores normal contextual conversation: the assistant keeps the
+ * full persisted history and memory, so it never restarts confused.
+ */
 export default function AiControls({
   conversationId,
   aiEnabled,
@@ -45,22 +51,27 @@ export default function AiControls({
         </div>
         <span className={`chip ${aiEnabled ? 'bg-success/12 text-success ring-success/25' : 'bg-warning/12 text-warning ring-warning/25'}`}>
           <span className={`h-1.5 w-1.5 rounded-full ${aiEnabled ? 'bg-success' : 'bg-warning'}`} />
-          {aiEnabled ? (ar ? 'مفعّل' : 'Active') : ar ? 'متوقف' : 'Paused'}
+          {aiEnabled ? (ar ? 'الذكاء يجاوب' : 'AI replying') : ar ? 'موظف مستلم' : 'Human active'}
         </span>
       </div>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid gap-2 sm:grid-cols-2">
         <button
-          onClick={() => act(aiEnabled ? 'pause_ai' : 'resume_ai')}
+          onClick={() => act(aiEnabled ? 'take_over' : 'resume_ai')}
           disabled={busy}
-          className={aiEnabled ? 'btn bg-warning/15 text-warning hover:bg-warning/25' : 'btn bg-success/15 text-success hover:bg-success/25'}
+          className={`min-h-11 ${aiEnabled ? 'btn bg-warning/15 text-warning hover:bg-warning/25' : 'btn bg-success/15 text-success hover:bg-success/25'}`}
         >
-          {aiEnabled ? <Pause size={15} /> : <Play size={15} />}
-          {aiEnabled ? (ar ? 'إيقاف' : 'Pause') : ar ? 'تشغيل' : 'Resume'}
+          {aiEnabled ? <UserCheck size={15} /> : <Play size={15} />}
+          {aiEnabled ? (ar ? 'استلام المحادثة' : 'Take over') : ar ? 'استئناف الذكاء' : 'Resume AI'}
         </button>
-        <button onClick={() => act('mark_resolved')} disabled={busy} className="btn-ghost">
+        <button onClick={() => act('mark_resolved')} disabled={busy} className="btn-ghost min-h-11">
           <CheckCircle2 size={15} /> {ar ? 'تم الحل' : 'Resolve'}
         </button>
       </div>
+      <p className="mt-2 text-[11px] text-faint">
+        {aiEnabled
+          ? (ar ? 'الاستلام يوقف ردود الذكاء تماماً حتى تستأنفه.' : 'Taking over stops AI replies until you resume.')
+          : (ar ? 'الاستئناف يرجّع الذكاء بنفس سياق المحادثة الكامل.' : 'Resuming restores the AI with the full conversation context.')}
+      </p>
       {err && <p className="mt-2 text-xs text-danger">{err}</p>}
     </div>
   );

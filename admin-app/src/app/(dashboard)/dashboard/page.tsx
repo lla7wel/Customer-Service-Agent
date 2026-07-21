@@ -1,199 +1,186 @@
 import Link from 'next/link';
 import {
-  LayoutDashboard, Inbox, AlertTriangle, Package,
-  Megaphone, Activity, ArrowUpRight, CircleCheck, Bot, CalendarClock, Database,
-  Tags, Images, ImageOff, Sparkles,
+  LayoutDashboard, MessageSquare, Bot, HandHelping, Clapperboard,
+  AlertTriangle, Package, Activity, TrendingUp,
 } from 'lucide-react';
-import { PageHeader, Card, StatCard, SectionTitle, Badge, EmptyState, Meter } from '@/components/ui';
+import { PageHeader, Card, StatCard, SectionTitle, Badge, EmptyState } from '@/components/ui';
 import SystemStatus from '@/components/dashboard/SystemStatus';
-import Diagnostics from '@/components/catalog/Diagnostics';
 import NotConnected from '@/components/NotConnected';
+import AutoRefresh from '@/components/AutoRefresh';
 import { getT } from '@/lib/i18n/server';
-import { allIntegrationStatuses, databaseStatus, geminiStatus } from '@integrations/status';
-import { fetchRows, countRows } from '@/lib/data';
-import { getCatalogStats } from '@/lib/catalog';
-import { conversationTone, campaignTone } from '@/lib/status-tone';
-import { activityLabel, activitySummary, humanize, timeAgo, formatDate } from '@/lib/format';
-import type { Conversation, Campaign, ActivityLog, AiEvent } from '@integrations/db/rows';
+import { allIntegrationStatuses, databaseStatus } from '@integrations/status';
+import { getDb } from '@/lib/db';
+import { sql } from 'kysely';
+import { timeAgo } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
-const NEEDS_ACTION = ['needs_human', 'waiting_for_order_confirmation', 'issue_refund_exchange', 'human_active'];
+async function liveCounts(db: NonNullable<ReturnType<typeof getDb>>) {
+  const day7 = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+  const [inbound, aiReplies, handoffs, attention, published, failedPubs, deliveryProblems, deadJobs] = await Promise.all([
+    db.selectFrom('messages').select(db.fn.countAll<number>().as('n'))
+      .where('direction', '=', 'inbound').where('created_at', '>', day7).executeTakeFirst(),
+    db.selectFrom('messages').select(db.fn.countAll<number>().as('n'))
+      .where('direction', '=', 'outbound').where('sender_type', '=', 'ai')
+      .where('delivery_status', 'in', ['sent', 'partial']).where('created_at', '>', day7).executeTakeFirst(),
+    db.selectFrom('conversations').select(db.fn.countAll<number>().as('n'))
+      .where('handoff_sent_at', '>', day7).executeTakeFirst(),
+    db.selectFrom('conversations').select(db.fn.countAll<number>().as('n'))
+      .where('human_attention', '=', true).executeTakeFirst(),
+    db.selectFrom('content_publications').select(db.fn.countAll<number>().as('n'))
+      .where('status', '=', 'published').where('published_at', '>', day7).executeTakeFirst(),
+    db.selectFrom('content_publications').select(db.fn.countAll<number>().as('n'))
+      .where('status', '=', 'failed').executeTakeFirst(),
+    db.selectFrom('outbox_messages').select(db.fn.countAll<number>().as('n'))
+      .where('status', 'in', ['failed', 'uncertain', 'dead']).executeTakeFirst(),
+    db.selectFrom('jobs').select(db.fn.countAll<number>().as('n'))
+      .where('status', '=', 'dead').executeTakeFirst(),
+  ]);
+  return {
+    inbound: Number(inbound?.n ?? 0),
+    aiReplies: Number(aiReplies?.n ?? 0),
+    handoffs: Number(handoffs?.n ?? 0),
+    attention: Number(attention?.n ?? 0),
+    published: Number(published?.n ?? 0),
+    failedPubs: Number(failedPubs?.n ?? 0),
+    deliveryProblems: Number(deliveryProblems?.n ?? 0),
+    deadJobs: Number(deadJobs?.n ?? 0),
+  };
+}
 
 export default async function DashboardPage() {
   const { t, locale } = await getT();
   const ar = locale === 'ar';
   const statuses = allIntegrationStatuses();
-  const sConnected = databaseStatus().configured;
+  const db = getDb();
+  if (!db) {
+    return (
+      <div>
+        <PageHeader icon={LayoutDashboard} title={t('dashboard_title')} subtitle={t('dashboard_subtitle')} />
+        <NotConnected status={databaseStatus()} />
+      </div>
+    );
+  }
 
-  const [
-    needsAction, campaigns, activity, aiErrors,
-    convCount, actionCount, productCount, aiErrCount, aiOkCount, importRun,
-  ] = await Promise.all([
-    fetchRows<Conversation>('conversations', (q) => q.where('status', 'in', NEEDS_ACTION).orderBy('last_message_at', (ob: any) => ob.desc().nullsLast()).limit(6)),
-    fetchRows<Campaign>('campaigns', (q) => q.where('status', 'in', ['scheduled', 'publishing', 'published', 'draft']).orderBy('starts_at', (ob: any) => ob.asc().nullsLast()).limit(5)),
-    fetchRows<ActivityLog>('activity_logs', (q) => q.orderBy('created_at', 'desc').limit(8)),
-    fetchRows<AiEvent>('ai_events', (q) => q.where('success', '=', false).orderBy('created_at', 'desc').limit(4)),
-    countRows('conversations'),
-    countRows('conversations', (q) => q.where('status', 'in', NEEDS_ACTION)),
-    countRows('products'),
-    countRows('ai_events', (q) => q.where('success', '=', false)),
-    countRows('ai_events', (q) => q.where('success', '=', true)),
-    fetchRows<any>('product_import_runs', (q) => q.orderBy('started_at', 'desc').limit(1)),
+  const [counts, trend, topProducts, upcoming, recentAttention] = await Promise.all([
+    liveCounts(db),
+    db.selectFrom('analytics_daily')
+      .select(['day', 'metric', 'value'])
+      .where('metric', 'in', ['inbound_messages', 'ai_replies'])
+      .where('day', '>=', sql<any>`current_date - 14`)
+      .orderBy('day', 'asc')
+      .execute()
+      .catch(() => [] as { day: string; metric: string; value: number }[]),
+    sql<{ product_id: string; name: string | null; hits: number }>`
+      select p.id as product_id,
+             coalesce(p.libyan_display_name, p.arabic_name, p.english_name) as name,
+             count(*)::int as hits
+        from customer_memory cm,
+             jsonb_array_elements(cm.recent_products) as rp(elem)
+        join products p on p.id = (rp.elem->>'product_id')::uuid
+       where cm.updated_at > now() - interval '30 days'
+       group by p.id, name
+       order by hits desc
+       limit 6
+    `.execute(db).then((r) => r.rows).catch(() => []),
+    db.selectFrom('content_items')
+      .select(['id', 'title', 'content_type', 'status', 'scheduled_for', 'platforms'])
+      .where('status', 'in', ['scheduled', 'publishing', 'partially_published', 'failed'])
+      .orderBy('scheduled_for', 'asc')
+      .limit(6)
+      .execute(),
+    db.selectFrom('conversations')
+      .select(['id', 'human_attention_reason', 'human_attention_at', 'last_message_preview'])
+      .where('human_attention', '=', true)
+      .orderBy('human_attention_at', 'desc')
+      .limit(6)
+      .execute(),
   ]);
 
-  const catalog = await getCatalogStats();
-
-  const n = (r: { connected: boolean; count: number | null }) => (!r.connected ? '—' : (r.count ?? 0).toString());
-  const aiTotal = (aiOkCount.count ?? 0) + (aiErrCount.count ?? 0);
-  const aiSuccessRate = aiTotal > 0 ? Math.round(((aiOkCount.count ?? 0) / aiTotal) * 100) : null;
-  const run = importRun.rows[0];
+  const inboundSeries = trend.filter((r) => r.metric === 'inbound_messages').map((r) => Number(r.value));
+  const aiSeries = trend.filter((r) => r.metric === 'ai_replies').map((r) => Number(r.value));
+  const problems = counts.deliveryProblems + counts.deadJobs + counts.failedPubs;
 
   return (
     <div>
+      <AutoRefresh intervalMs={30000} />
       <PageHeader icon={LayoutDashboard} title={t('dashboard_title')} subtitle={t('dashboard_subtitle')} />
 
-      {!sConnected && (
-        <div className="mb-6">
-          <NotConnected status={databaseStatus()} />
-        </div>
-      )}
-
-      <section className="command-surface mb-6 grid gap-5 p-5 lg:grid-cols-[1.35fr_0.65fr] lg:p-6">
-        <div className="relative">
-          <div className="mb-4 flex flex-wrap items-center gap-2">
-            <Badge tone={sConnected ? 'good' : 'warn'} dot>{sConnected ? (ar ? 'متصل' : 'Connected') : (ar ? 'غير متصل' : 'Not connected')}</Badge>
-            <Badge tone={(aiErrCount.count ?? 0) > 0 ? 'warn' : 'accent'} dot>{aiSuccessRate != null ? `${aiSuccessRate}% ${ar ? 'نجاح AI' : 'AI success'}` : ar ? 'AI جاهز' : 'AI ready'}</Badge>
-          </div>
-          <h2 className="max-w-2xl text-2xl font-semibold tracking-tight text-fg sm:text-3xl">
-            {ar ? 'مركز قيادة المتجر والذكاء' : 'Store and AI command center'}
-          </h2>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
-            {ar
-              ? 'راجع المحادثات العاجلة، صحة الكتالوج، وحالة الحملات من شاشة واحدة.'
-              : 'Watch urgent conversations, catalog health, and campaign readiness from one focused surface.'}
-          </p>
-          <div className="mt-5 flex flex-wrap gap-2">
-            <Link href="/inbox" className="btn-primary">
-              <Inbox size={15} /> {ar ? 'فتح الوارد' : 'Open inbox'}
-            </Link>
-            <Link href="/catalog-review" className="btn-ghost">
-              <Package size={15} /> {ar ? 'مراجعة الكتالوج' : 'Review catalog'}
-            </Link>
-          </div>
-        </div>
-        <CommandVisual ar={ar} aiSuccessRate={aiSuccessRate} actionCount={actionCount.count ?? 0} />
-      </section>
-
-      {/* KPI row */}
-      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <StatCard icon={AlertTriangle} tone="warn" label={t('needs_action')} value={n(actionCount)} href="/inbox?filter=action" />
-        <StatCard icon={Inbox} tone="accent" label={ar ? 'المحادثات' : 'Conversations'} value={n(convCount)} href="/inbox" />
-        <StatCard icon={Package} tone="default" label={ar ? 'المنتجات' : 'Products'} value={n(productCount)} href="/products" />
-        <StatCard icon={Megaphone} tone="default" label={ar ? 'الحملات' : 'Campaigns'} value={catalog.connected ? campaigns.rows.length.toString() : '—'} href="/campaigns" />
-        <StatCard icon={Bot} tone={(aiErrCount.count ?? 0) > 0 ? 'bad' : 'good'} label={ar ? 'أخطاء الذكاء' : 'AI errors'} value={n(aiErrCount)} href="/ai-control" />
-      </div>
-
-      {/* Catalog action priorities — loud when there's work to do. */}
-      <div className="mb-6 grid gap-3 sm:grid-cols-2">
-        {catalog.needsReview > 0 && (
-          <Link
-            href="/price-review"
-            className="tilt-card flex items-center justify-between gap-3 rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 transition hover:border-warning/50"
-          >
-            <div className="flex items-center gap-3">
-              <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-warning/15 text-warning"><Tags size={18} /></span>
+      {(counts.attention > 0 || problems > 0) && (
+        <section className="mb-4 grid gap-3 sm:grid-cols-2">
+          {counts.attention > 0 && (
+            <Link href="/inbox?filter=attention" className="flex items-center gap-3 rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 transition hover:bg-warning/15">
+              <HandHelping size={20} className="shrink-0 text-warning" />
               <div>
                 <p className="text-sm font-semibold text-fg">
-                  {catalog.needsReview.toLocaleString()} {ar ? 'منتج بحاجة لمراجعة' : 'products need review'}
+                  {ar ? `${counts.attention} محادثة تحتاج متابعة الفريق` : `${counts.attention} conversation(s) need the team`}
                 </p>
-                <p className="text-xs text-muted">{ar ? 'أضف الاسم العربي/الإنجليزي والسعر لتفعيلها.' : 'Add Arabic/English name + price to activate.'}</p>
+                <p className="text-xs text-muted">{ar ? 'طلبات، شكاوى أو أسعار ناقصة' : 'Orders, complaints or missing prices'}</p>
               </div>
-            </div>
-            <span className="flex items-center gap-1 text-xs font-medium text-warning">{ar ? 'مراجعة' : 'Review'} <ArrowUpRight size={14} /></span>
-          </Link>
-        )}
-        {catalog.activeMissingImages > 0 && (
-          <Link
-            href="/products?images=missing&status=active"
-            className="tilt-card flex items-center justify-between gap-3 rounded-xl border border-info/30 bg-info/10 px-4 py-3 transition hover:border-info/50"
-          >
-            <div className="flex items-center gap-3">
-              <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-info/15 text-info"><ImageOff size={18} /></span>
+            </Link>
+          )}
+          {problems > 0 && (
+            <Link href="/settings?tab=activity" className="flex items-center gap-3 rounded-xl border border-danger/40 bg-danger/10 px-4 py-3 transition hover:bg-danger/15">
+              <AlertTriangle size={20} className="shrink-0 text-danger" />
               <div>
                 <p className="text-sm font-semibold text-fg">
-                  {catalog.activeMissingImages.toLocaleString()} {ar ? 'منتج فعّال بدون صور' : 'active products missing images'}
-                </p>
-                <p className="text-xs text-muted">{ar ? 'راجع مطابقات الكتالوج أو ارفع صوراً من صفحة المنتجات.' : 'Review catalog matches or upload images from the products page.'}</p>
-              </div>
-            </div>
-            <span className="flex items-center gap-1 text-xs font-medium text-info">{ar ? 'عرض' : 'View'} <ArrowUpRight size={14} /></span>
-          </Link>
-        )}
-        {catalog.matchPossible > 0 && (
-          <Link
-            href="/catalog-match"
-            className="tilt-card flex items-center justify-between gap-3 rounded-xl border border-accent/30 bg-accent/10 px-4 py-3 transition hover:border-accent/50"
-          >
-            <div className="flex items-center gap-3">
-              <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-accent/15 text-accent"><Sparkles size={18} /></span>
-              <div>
-                <p className="text-sm font-semibold text-fg">
-                  {catalog.matchPossible.toLocaleString()} {ar ? 'مطابقة صور محتملة للمراجعة' : 'possible image matches to review'}
+                  {ar ? `${problems} مشكلة تشغيلية` : `${problems} operational issue(s)`}
                 </p>
                 <p className="text-xs text-muted">
                   {ar
-                    ? `مقبولة ${catalog.matchApproved.toLocaleString()} · للمراجعة ${catalog.matchNeedsReview.toLocaleString()} · بلا تطابق ${catalog.matchNoSafe.toLocaleString()}`
-                    : `${catalog.matchApproved.toLocaleString()} approved · ${catalog.matchNeedsReview.toLocaleString()} needs review · ${catalog.matchNoSafe.toLocaleString()} no safe match`}
+                    ? `${counts.deliveryProblems} إرسال متعثّر · ${counts.failedPubs} نشر فاشل · ${counts.deadJobs} مهمة متوقفة`
+                    : `${counts.deliveryProblems} delivery · ${counts.failedPubs} publish · ${counts.deadJobs} dead jobs`}
                 </p>
               </div>
-            </div>
-            <span className="flex items-center gap-1 text-xs font-medium text-accent">{ar ? 'مطابقة' : 'Match'} <ArrowUpRight size={14} /></span>
-          </Link>
-        )}
-      </div>
+            </Link>
+          )}
+        </section>
+      )}
 
-      {/* Catalog diagnostics — products / images / uploaded / missing / review / active */}
-      <div className="mb-6">
-        <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-faint">
-          <Database size={13} /> {ar ? 'تشخيص الكتالوج' : 'Catalog diagnostics'}
-        </div>
-        <div className="rounded-xl border border-line/70 bg-surface/70 p-3 shadow-card backdrop-blur-md">
-          <Diagnostics stats={catalog} ar={ar} />
-        </div>
-      </div>
+      <section className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatCard icon={MessageSquare} label={ar ? 'رسائل واردة (٧ أيام)' : 'Inbound (7d)'} value={counts.inbound.toLocaleString()} />
+        <StatCard icon={Bot} label={ar ? 'ردود الذكاء (٧ أيام)' : 'AI replies (7d)'} value={counts.aiReplies.toLocaleString()} />
+        <StatCard icon={HandHelping} label={ar ? 'تحويلات طلب (٧ أيام)' : 'Order handoffs (7d)'} value={counts.handoffs.toLocaleString()} hint={ar ? 'نية شراء — ليست طلبات مؤكدة' : 'Buying intent — not confirmed orders'} />
+        <StatCard icon={Clapperboard} label={ar ? 'منشورات ناجحة (٧ أيام)' : 'Published (7d)'} value={counts.published.toLocaleString()} />
+      </section>
 
-      <div className="grid gap-5 lg:grid-cols-3">
-        {/* LEFT 2/3 — action queue */}
-        <div className="space-y-5 lg:col-span-2">
-          {/* Conversations needing admin */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="space-y-4 lg:col-span-2">
           <Card>
-            <SectionTitle
-              icon={Inbox}
-              title={t('conversations_need_admin')}
-              count={needsAction.rows.length || undefined}
-              action={<Link href="/inbox" className="text-xs text-accent hover:underline">{t('view_all')}</Link>}
-            />
-            {needsAction.rows.length === 0 ? (
-              <AllClear ar={ar} />
+            <SectionTitle icon={TrendingUp} title={ar ? 'آخر ١٤ يوم' : 'Last 14 days'} />
+            {inboundSeries.length === 0 ? (
+              <p className="text-sm text-muted">
+                {ar
+                  ? 'تظهر الاتجاهات بعد أول تشغيل لمهمة التحليلات في الخلفية.'
+                  : 'Trends appear after the background analytics job runs for the first time.'}
+              </p>
+            ) : (
+              <div className="space-y-3">
+                <TrendRow label={ar ? 'رسائل واردة' : 'Inbound messages'} series={inboundSeries} tone="accent" />
+                <TrendRow label={ar ? 'ردود الذكاء' : 'AI replies'} series={aiSeries} tone="success" />
+              </div>
+            )}
+          </Card>
+
+          <Card>
+            <SectionTitle icon={Clapperboard} title={ar ? 'خط المحتوى' : 'Content pipeline'} />
+            {upcoming.length === 0 ? (
+              <EmptyState icon={Clapperboard} title={ar ? 'لا يوجد محتوى مجدول' : 'Nothing scheduled'} hint={ar ? 'أنشئ منشوراً من استوديو المحتوى.' : 'Create a post in Content Studio.'} />
             ) : (
               <ul className="divide-y divide-line">
-                {needsAction.rows.map((c) => (
+                {upcoming.map((c) => (
                   <li key={c.id}>
-                    <Link href={`/inbox/${c.id}`} className="group flex items-center justify-between gap-3 py-2.5 transition hover:bg-surface2/50">
+                    <Link href={`/content-studio/${c.id}`} className="flex items-center justify-between gap-3 py-2.5 transition hover:bg-surface2/40">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-fg">
-                          {c.context_summary?.slice(0, 48) || `#${c.id.slice(0, 8)}`}
-                        </p>
-                        <p className="truncate text-xs text-muted">
-                          {humanize(c.channel)} · {c.detected_intent || (ar ? 'بدون نية' : 'no intent')}
+                        <p className="truncate text-sm font-medium text-fg" dir="auto">{c.title || (ar ? 'بدون عنوان' : 'Untitled')}</p>
+                        <p className="text-xs text-muted">
+                          {(c.platforms ?? []).join(' + ')} · {c.content_type === 'story' ? (ar ? 'ستوري' : 'Story') : (ar ? 'منشور' : 'Post')}
+                          {c.scheduled_for ? ` · ${timeAgo(c.scheduled_for, locale)}` : ''}
                         </p>
                       </div>
-                      <div className="flex shrink-0 items-center gap-2">
-                        <Badge tone={conversationTone(c.status)} dot>{humanize(c.status)}</Badge>
-                        <span className="hidden text-xs text-faint sm:inline">{timeAgo(c.last_message_at, locale)}</span>
-                        <ArrowUpRight size={15} className="text-faint opacity-0 transition group-hover:opacity-100" />
-                      </div>
+                      <Badge tone={c.status === 'failed' ? 'bad' : c.status === 'partially_published' ? 'warn' : 'info'}>
+                        {c.status}
+                      </Badge>
                     </Link>
                   </li>
                 ))}
@@ -201,19 +188,18 @@ export default async function DashboardPage() {
             )}
           </Card>
 
-          {/* Recent activity */}
           <Card>
-            <SectionTitle icon={Activity} title={t('recent_activity')} action={<Link href="/logs" className="text-xs text-accent hover:underline">{t('view_all')}</Link>} />
-            {activity.rows.length === 0 ? (
-              <p className="py-4 text-center text-sm text-faint">{t('no_data_yet')}</p>
+            <SectionTitle icon={HandHelping} title={ar ? 'يحتاج متابعة' : 'Needs follow-up'} />
+            {recentAttention.length === 0 ? (
+              <p className="text-sm text-muted">{t('all_clear_hint')}</p>
             ) : (
-              <ul className="space-y-1">
-                {activity.rows.map((l) => (
-                  <li key={l.id} className="flex items-center gap-3 py-1.5 text-sm">
-                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${l.actor_type === 'human' ? 'bg-info' : l.actor_type === 'ai' ? 'bg-accent' : 'bg-faint'}`} />
-                    <span className="font-medium text-fg">{activityLabel(l.action, locale)}</span>
-                    {activitySummary(l.summary) && <span className="min-w-0 flex-1 truncate text-muted">{activitySummary(l.summary)}</span>}
-                    <span className="shrink-0 text-xs text-faint">{timeAgo(l.created_at, locale)}</span>
+              <ul className="divide-y divide-line">
+                {recentAttention.map((c) => (
+                  <li key={c.id}>
+                    <Link href={`/inbox/${c.id}`} className="flex items-center justify-between gap-3 py-2.5 transition hover:bg-surface2/40">
+                      <p className="min-w-0 truncate text-sm text-fg" dir="auto">{c.last_message_preview || '—'}</p>
+                      <span className="shrink-0 text-xs text-muted">{c.human_attention_reason ?? ''}</span>
+                    </Link>
                   </li>
                 ))}
               </ul>
@@ -221,98 +207,34 @@ export default async function DashboardPage() {
           </Card>
         </div>
 
-        {/* RIGHT 1/3 — status rail */}
-        <div className="space-y-5">
+        <div className="space-y-4">
           <SystemStatus statuses={statuses} locale={locale} />
-
-          {/* AI status */}
           <Card>
-            <SectionTitle icon={Bot} title={t('ai_status')} />
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted">{ar ? 'مزوّد الذكاء' : 'AI provider'}</span>
-              <Badge tone={geminiStatus().configured ? 'good' : 'warn'} dot>Gemini</Badge>
-            </div>
-            <div className="mt-4">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted">{ar ? 'نسبة نجاح الذكاء' : 'AI success rate'}</span>
-                <span className="font-semibold text-fg">{aiSuccessRate != null ? `${aiSuccessRate}%` : '—'}</span>
-              </div>
-              <div className="mt-2"><Meter value={aiSuccessRate ?? 0} tone={aiSuccessRate != null && aiSuccessRate < 80 ? 'warn' : 'good'} /></div>
-              <p className="mt-2 text-xs text-faint">{aiTotal} {ar ? 'عملية ذكاء مسجّلة' : 'AI events logged'}</p>
-            </div>
-            {aiErrors.rows.length > 0 && (
-              <div className="mt-3 rounded-lg border border-danger/20 bg-danger/5 p-2.5">
-                <p className="text-xs font-medium text-danger">{ar ? 'آخر الأخطاء' : 'Recent errors'}</p>
-                <ul className="mt-1 space-y-0.5">
-                  {aiErrors.rows.slice(0, 3).map((e) => (
-                    <li key={e.id} className="truncate text-xs text-muted">{e.kind}: {e.error || 'error'}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </Card>
-
-          {/* Campaign schedule */}
-          <Card>
-            <SectionTitle icon={CalendarClock} title={t('campaign_schedule')} action={<Link href="/campaigns" className="text-xs text-accent hover:underline">{t('view_all')}</Link>} />
-            {campaigns.rows.length === 0 ? (
-              <EmptyState icon={Megaphone} title={ar ? 'لا حملات' : 'No campaigns'} />
+            <SectionTitle icon={Package} title={ar ? 'الأكثر طلباً (٣٠ يوم)' : 'Most requested (30d)'} />
+            {topProducts.length === 0 ? (
+              <p className="text-sm text-muted">{t('no_data_yet')}</p>
             ) : (
-              <ul className="space-y-2">
-                {campaigns.rows.map((c) => (
-                  <li key={c.id}>
-                    <Link href={`/campaigns/${c.id}`} className="flex items-center justify-between rounded-lg border border-line bg-surface2 px-3 py-2 transition hover:border-accent/40">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-fg">{c.name}</p>
-                        <p className="text-xs text-faint">{c.starts_at ? formatDate(c.starts_at, locale) : humanize(c.type)}</p>
-                      </div>
-                      <Badge tone={campaignTone(c.status)}>{humanize(c.status)}</Badge>
+              <ul className="space-y-1.5">
+                {topProducts.map((p) => (
+                  <li key={p.product_id}>
+                    <Link href={`/catalog/${p.product_id}`} className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 transition hover:bg-surface2/60">
+                      <span className="min-w-0 truncate text-sm text-fg" dir="auto">{p.name ?? '—'}</span>
+                      <span className="shrink-0 text-xs font-semibold text-accent">{p.hits}</span>
                     </Link>
                   </li>
                 ))}
               </ul>
             )}
           </Card>
-
-          {/* Product DB / import status */}
           <Card>
-            <SectionTitle icon={Database} title={t('import_status')} />
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted">{ar ? 'منتجات في القاعدة' : 'Products in database'}</span>
-              <span className="font-semibold text-fg">{n(productCount)}</span>
-            </div>
-            {run ? (
-              <div className="mt-3 rounded-lg border border-line bg-surface2 p-3 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="text-muted">{ar ? 'آخر استيراد' : 'Last import'}</span>
-                  <Badge tone={run.status === 'completed' ? 'good' : run.status === 'failed' ? 'bad' : 'warn'}>{humanize(run.status)}</Badge>
-                </div>
-                <p className="mt-1.5 text-faint">
-                  +{run.created_count ?? 0} {ar ? 'جديد' : 'new'} · {run.updated_count ?? 0} {ar ? 'محدّث' : 'updated'} · {run.error_count ?? 0} {ar ? 'خطأ' : 'errors'}
-                </p>
-              </div>
-            ) : (
-              <p className="mt-3 text-xs text-faint">
-                {ar ? 'لم يتم استيراد بعد — شغّل scripts/import:products' : 'No import yet — run scripts/import:products'}
-              </p>
-            )}
-          </Card>
-
-          {/* Catalog images snapshot */}
-          <Card>
-            <SectionTitle
-              icon={ImageOff}
-              title={ar ? 'صور الكتالوج' : 'Catalog images'}
-              action={<Link href="/catalog-match" className="text-xs text-accent hover:underline">{ar ? 'مطابقة' : 'Match'}</Link>}
-            />
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <SyncStat label={ar ? 'صور مرفوعة' : 'Uploaded'} value={catalog.uploadedImages} />
-              <SyncStat label={ar ? 'فعّال بدون صور' : 'Active missing'} value={catalog.activeMissingImages} tone={catalog.activeMissingImages > 0 ? 'warn' : undefined} />
-              <SyncStat label={ar ? 'مطابقات ممكنة' : 'Possible matches'} value={catalog.matchPossible} />
-              <SyncStat label={ar ? 'مطابقات معتمدة' : 'Approved'} value={catalog.matchApproved} />
-            </div>
-            <Link href="/catalog-match" className="btn-ghost mt-3 w-full justify-center">
-              <Images size={14} /> {ar ? 'مراجعة المطابقات' : 'Review matches'}
+            <SectionTitle icon={Activity} title={ar ? 'رؤى فيسبوك وإنستغرام' : 'Facebook & Instagram insights'} />
+            <p className="text-sm text-muted">
+              {ar
+                ? 'تظهر أرقام الوصول والتفاعل هنا فقط عندما تكون صلاحية read_insights مفعّلة ويمرّ فحص الجاهزية — لا نعرض أرقاماً وهمية.'
+                : 'Reach and engagement appear here only once the Page token has read_insights and the readiness check passes — no fabricated numbers.'}
+            </p>
+            <Link href="/settings?tab=channels" className="mt-2 inline-block text-sm font-medium text-accent hover:underline">
+              {ar ? 'فحص جاهزية القنوات ←' : 'Check channel readiness →'}
             </Link>
           </Card>
         </div>
@@ -321,58 +243,19 @@ export default async function DashboardPage() {
   );
 }
 
-function SyncStat({ label, value, tone }: { label: string; value: number; tone?: 'warn' }) {
+function TrendRow({ label, series, tone }: { label: string; series: number[]; tone: 'accent' | 'success' }) {
+  const max = Math.max(1, ...series);
+  const color = tone === 'accent' ? 'bg-accent' : 'bg-success';
   return (
-    <div className="rounded-lg border border-line bg-surface2 px-2.5 py-2">
-      <p className="text-faint">{label}</p>
-      <p className={`mt-0.5 text-sm font-semibold ${tone === 'warn' ? 'text-warning' : 'text-fg'}`}>{value.toLocaleString()}</p>
-    </div>
-  );
-}
-
-function CommandVisual({
-  ar,
-  aiSuccessRate,
-  actionCount,
-}: {
-  ar: boolean;
-  aiSuccessRate: number | null;
-  actionCount: number;
-}) {
-  return (
-    <div className="command-visual relative hidden min-h-[220px] overflow-hidden rounded-xl border border-line/70 bg-surface2/60 p-5 lg:block">
-      <div className="command-plane absolute inset-x-8 bottom-[-82px] h-56 rounded-xl border border-line/70 shadow-glow" />
-      <div className="floating-tile absolute inset-e-8 top-7 w-36 rounded-xl border border-accent/25 bg-surface/95 p-3 shadow-card">
-        <p className="text-[10px] uppercase tracking-wide text-faint">{ar ? 'AI' : 'AI'}</p>
-        <p className="mt-1 text-xl font-semibold text-fg">{aiSuccessRate != null ? `${aiSuccessRate}%` : '—'}</p>
-        <div className="mt-2 h-1.5 rounded-full bg-surface2">
-          <div className="h-full rounded-full bg-success" style={{ width: `${aiSuccessRate ?? 0}%` }} />
-        </div>
+    <div>
+      <div className="mb-1 flex items-center justify-between text-xs text-muted">
+        <span>{label}</span>
+        <span className="font-semibold text-fg">{series.reduce((a, b) => a + b, 0).toLocaleString()}</span>
       </div>
-      <div className="floating-tile absolute inset-s-8 top-20 w-40 rounded-xl border border-warning/25 bg-surface/95 p-3 shadow-card">
-        <p className="text-[10px] uppercase tracking-wide text-faint">{ar ? 'الإجراءات' : 'Action queue'}</p>
-        <p className="mt-1 text-2xl font-semibold text-warning">{actionCount.toLocaleString()}</p>
-        <p className="mt-1 text-xs text-muted">{ar ? 'محادثات تحتاج متابعة' : 'conversations need follow-up'}</p>
-      </div>
-      <div className="floating-tile absolute bottom-6 inset-e-16 w-32 rounded-xl border border-info/25 bg-surface/95 p-3 shadow-card">
-        <p className="text-[10px] uppercase tracking-wide text-faint">{ar ? 'القنوات' : 'Channels'}</p>
-        <div className="mt-2 flex gap-1.5">
-          <span className="h-2 w-8 rounded-full bg-success" />
-          <span className="h-2 w-8 rounded-full bg-accent" />
-          <span className="h-2 w-8 rounded-full bg-info" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AllClear({ ar }: { ar: boolean }) {
-  return (
-    <div className="flex items-center gap-2.5 rounded-lg border border-success/20 bg-success/5 px-3 py-4">
-      <CircleCheck size={18} className="text-success" />
-      <div>
-        <p className="text-sm font-medium text-fg">{ar ? 'كل شيء تمام' : 'All clear'}</p>
-        <p className="text-xs text-muted">{ar ? 'لا يوجد ما يحتاج إجراءً الآن.' : 'Nothing needs action right now.'}</p>
+      <div className="flex h-10 items-end gap-1" dir="ltr">
+        {series.map((v, i) => (
+          <div key={i} className={`${color} min-w-1 flex-1 rounded-t-sm opacity-80`} style={{ height: `${Math.max(6, (v / max) * 100)}%` }} />
+        ))}
       </div>
     </div>
   );
