@@ -335,6 +335,89 @@ export interface CampaignImageVerification {
   };
 }
 
+const unverifiableCampaignVerification = (concern: string): CampaignImageVerification => ({
+  product_fidelity: 0,
+  product_status: 'unverifiable',
+  overlay_text_status: 'unverifiable',
+  price_text_status: 'unverifiable',
+  brand_mark_status: 'unverifiable',
+  observed_text: null,
+  concerns: [concern],
+  identity_checks: {
+    silhouette_and_geometry: 'unverifiable',
+    color_material_and_transparency: 'unverifiable',
+    pattern_artwork_and_labels: 'unverifiable',
+    included_components_and_count: 'unverifiable',
+    packaging_and_closures: 'unverifiable',
+  },
+});
+
+function normalizeCampaignVerification(parsed: CampaignImageVerification | null, concern: string): CampaignImageVerification {
+  const result = parsed ?? unverifiableCampaignVerification(concern);
+  result.product_fidelity = Math.max(0, Math.min(1, Number(result.product_fidelity) || 0));
+  result.concerns = Array.isArray(result.concerns) ? result.concerns.map(String).slice(0, 10) : [];
+  const allowed = new Set(['match', 'mismatch', 'unverifiable']);
+  const rawChecks = result.identity_checks && typeof result.identity_checks === 'object' ? result.identity_checks : {} as CampaignImageVerification['identity_checks'];
+  result.identity_checks = {
+    silhouette_and_geometry: allowed.has(rawChecks.silhouette_and_geometry) ? rawChecks.silhouette_and_geometry : 'unverifiable',
+    color_material_and_transparency: allowed.has(rawChecks.color_material_and_transparency) ? rawChecks.color_material_and_transparency : 'unverifiable',
+    pattern_artwork_and_labels: allowed.has(rawChecks.pattern_artwork_and_labels) ? rawChecks.pattern_artwork_and_labels : 'unverifiable',
+    included_components_and_count: allowed.has(rawChecks.included_components_and_count) ? rawChecks.included_components_and_count : 'unverifiable',
+    packaging_and_closures: allowed.has(rawChecks.packaging_and_closures) ? rawChecks.packaging_and_closures : 'unverifiable',
+  };
+  const checkValues = Object.values(result.identity_checks);
+  if (checkValues.includes('mismatch')) {
+    result.product_status = 'unacceptable';
+    result.product_fidelity = Math.min(result.product_fidelity, 0.4);
+    result.concerns.push('One or more immutable product-identity attributes do not match the source.');
+  } else if (checkValues.includes('unverifiable')) {
+    result.product_status = 'unverifiable';
+    result.product_fidelity = Math.min(result.product_fidelity, 0.7);
+    result.concerns.push('One or more immutable product-identity attributes could not be verified.');
+  }
+  result.concerns = [...new Set(result.concerns)].slice(0, 10);
+  return result;
+}
+
+export function mergeCampaignImageVerifications(results: CampaignImageVerification[]): CampaignImageVerification {
+  if (!results.length) return unverifiableCampaignVerification('No creative verifier returned a result.');
+  const identityKeys = Object.keys(results[0].identity_checks) as Array<keyof CampaignImageVerification['identity_checks']>;
+  const identity_checks = Object.fromEntries(identityKeys.map((key) => {
+    const values = results.map((result) => result.identity_checks[key]);
+    return [key, values.includes('mismatch') ? 'mismatch' : values.includes('unverifiable') ? 'unverifiable' : 'match'];
+  })) as CampaignImageVerification['identity_checks'];
+  const textStatus = (key: 'overlay_text_status' | 'price_text_status' | 'brand_mark_status') => {
+    const values = results.map((result) => result[key] ?? 'unverifiable');
+    if (values.every((value) => value === 'not_requested')) return 'not_requested' as const;
+    if (values.includes('mismatch')) return 'mismatch' as const;
+    if (values.includes('missing')) return 'missing' as const;
+    if (values.includes('unverifiable')) return 'unverifiable' as const;
+    return 'likely_exact' as const;
+  };
+  const productStatuses = results.map((result) => result.product_status);
+  const merged = normalizeCampaignVerification({
+    product_fidelity: Math.min(...results.map((result) => result.product_fidelity)),
+    product_status: productStatuses.includes('unacceptable') ? 'unacceptable'
+      : productStatuses.includes('unverifiable') ? 'unverifiable'
+        : productStatuses.includes('warning') ? 'warning' : 'acceptable',
+    identity_checks,
+    overlay_text_status: textStatus('overlay_text_status'),
+    price_text_status: textStatus('price_text_status'),
+    brand_mark_status: textStatus('brand_mark_status'),
+    observed_text: [...new Set(results.map((result) => result.observed_text).filter(Boolean))].join('\n---\n') || null,
+    concerns: [...new Set(results.flatMap((result) => result.concerns))],
+  }, 'Creative verifier consensus was incomplete.');
+  const signatures = results.map((result) => JSON.stringify({
+    product_status: result.product_status,
+    identity_checks: result.identity_checks,
+    overlay_text_status: result.overlay_text_status,
+    price_text_status: result.price_text_status,
+    brand_mark_status: result.brand_mark_status,
+  }));
+  if (new Set(signatures).size > 1) merged.concerns = [...new Set([...merged.concerns, 'Independent creative verifiers did not fully agree; the conservative result is shown.'])].slice(0, 10);
+  return merged;
+}
+
 /** Probabilistic review only. Callers must never present this as pixel-perfect proof. */
 export async function verifyCampaignImage(args: {
   systemPrompt: string;
@@ -359,49 +442,31 @@ export async function verifyCampaignImage(args: {
     { text: 'GENERATED CAMPAIGN IMAGE' },
     { inlineData: { mimeType: args.generatedMimeType, data: args.generatedImageBase64 } },
   ];
-  const r = await generateContent(parts, {
-    model: creativeVerificationModel(),
-    systemInstruction: args.systemPrompt,
-    timeoutMs: 90_000,
-    json: true,
-    temperature: args.temperature ?? 0.1,
-  });
-  const parsed = parseJsonLoose<CampaignImageVerification>(r.text);
-  const result: CampaignImageVerification = parsed ?? {
-    product_fidelity: 0,
-    product_status: 'unverifiable',
-    overlay_text_status: 'unverifiable',
-    observed_text: null,
-    concerns: ['Vision verification returned no valid result.'],
-    identity_checks: {
-      silhouette_and_geometry: 'unverifiable',
-      color_material_and_transparency: 'unverifiable',
-      pattern_artwork_and_labels: 'unverifiable',
-      included_components_and_count: 'unverifiable',
-      packaging_and_closures: 'unverifiable',
-    },
-  };
-  result.product_fidelity = Math.max(0, Math.min(1, Number(result.product_fidelity) || 0));
-  result.concerns = Array.isArray(result.concerns) ? result.concerns.map(String).slice(0, 10) : [];
-  const allowed = new Set(['match', 'mismatch', 'unverifiable']);
-  const rawChecks = result.identity_checks && typeof result.identity_checks === 'object' ? result.identity_checks : {} as CampaignImageVerification['identity_checks'];
-  result.identity_checks = {
-    silhouette_and_geometry: allowed.has(rawChecks.silhouette_and_geometry) ? rawChecks.silhouette_and_geometry : 'unverifiable',
-    color_material_and_transparency: allowed.has(rawChecks.color_material_and_transparency) ? rawChecks.color_material_and_transparency : 'unverifiable',
-    pattern_artwork_and_labels: allowed.has(rawChecks.pattern_artwork_and_labels) ? rawChecks.pattern_artwork_and_labels : 'unverifiable',
-    included_components_and_count: allowed.has(rawChecks.included_components_and_count) ? rawChecks.included_components_and_count : 'unverifiable',
-    packaging_and_closures: allowed.has(rawChecks.packaging_and_closures) ? rawChecks.packaging_and_closures : 'unverifiable',
-  };
-  const checkValues = Object.values(result.identity_checks);
-  if (checkValues.includes('mismatch')) {
-    result.product_status = 'unacceptable';
-    result.product_fidelity = Math.min(result.product_fidelity, 0.4);
-    result.concerns.push('One or more immutable product-identity attributes do not match the source.');
-  } else if (checkValues.includes('unverifiable')) {
-    result.product_status = 'unverifiable';
-    result.product_fidelity = Math.min(result.product_fidelity, 0.7);
-    result.concerns.push('One or more immutable product-identity attributes could not be verified.');
+  const models = [...new Set([creativeVerificationModel(), visionModel()])];
+  const settled = await Promise.allSettled(models.map(async (model) => {
+    const response = await generateContent(parts, {
+      model,
+      systemInstruction: args.systemPrompt,
+      timeoutMs: model === creativeVerificationModel() ? 90_000 : 30_000,
+      json: true,
+      temperature: args.temperature ?? 0.1,
+    });
+    return {
+      result: normalizeCampaignVerification(parseJsonLoose<CampaignImageVerification>(response.text), `${model} returned no valid verification result.`),
+      latencyMs: response.latencyMs,
+      model: response.model,
+    };
+  }));
+  const fulfilled = settled.filter((entry): entry is PromiseFulfilledResult<{ result: CampaignImageVerification; latencyMs: number; model: string }> => entry.status === 'fulfilled');
+  if (!fulfilled.length) throw settled[0].status === 'rejected' ? settled[0].reason : new Error('Creative verification unavailable.');
+  const verificationResults = fulfilled.map((entry) => entry.value.result);
+  for (const [index, entry] of settled.entries()) {
+    if (entry.status === 'rejected') verificationResults.push(unverifiableCampaignVerification(`${models[index]} verification failed: ${String(entry.reason?.message ?? entry.reason)}`));
   }
-  result.concerns = [...new Set(result.concerns)].slice(0, 10);
-  return { ok: true, result, latencyMs: r.latencyMs, model: r.model };
+  return {
+    ok: true,
+    result: mergeCampaignImageVerifications(verificationResults),
+    latencyMs: Math.max(...fulfilled.map((entry) => entry.value.latencyMs)),
+    model: fulfilled.map((entry) => entry.value.model).join('+'),
+  };
 }

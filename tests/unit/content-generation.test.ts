@@ -5,7 +5,7 @@ import {
   generationNeedsRetry,
   generationVerificationWarnings,
 } from '../../integrations/pipelines/content-create';
-import { campaignImageModel, creativeVerificationModel } from '../../integrations/gemini';
+import { campaignImageModel, creativeVerificationModel, mergeCampaignImageVerifications } from '../../integrations/gemini';
 
 const exactIdentityChecks = {
   silhouette_and_geometry: 'match' as const,
@@ -104,5 +104,32 @@ describe('content generation configuration', () => {
     expect(warnings).toContain('Arabic image text could not be verified as exact.');
     expect(warnings).toContain('Price text could not be verified as exact.');
     expect(warnings).toContain('Brand mark could not be verified.');
+  });
+
+  it('uses the conservative result when independent creative verifiers disagree', () => {
+    const exact = {
+      product_fidelity: 0.97,
+      product_status: 'acceptable' as const,
+      overlay_text_status: 'likely_exact' as const,
+      price_text_status: 'likely_exact' as const,
+      brand_mark_status: 'likely_exact' as const,
+      observed_text: 'راحة تردّ الروح',
+      concerns: [],
+      identity_checks: exactIdentityChecks,
+    };
+    const merged = mergeCampaignImageVerifications([
+      exact,
+      {
+        ...exact,
+        product_fidelity: 0.82,
+        product_status: 'unacceptable',
+        identity_checks: { ...exactIdentityChecks, included_components_and_count: 'mismatch' },
+        concerns: ['Generated image has three reeds; source has two.'],
+      },
+    ]);
+    expect(merged.product_status).toBe('unacceptable');
+    expect(merged.product_fidelity).toBe(0.4);
+    expect(merged.identity_checks.included_components_and_count).toBe('mismatch');
+    expect(merged.concerns).toContain('Independent creative verifiers did not fully agree; the conservative result is shown.');
   });
 });
