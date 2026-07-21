@@ -113,6 +113,9 @@ export interface GenerateOptions {
   temperature?: number;
   /** Hard cap on generated tokens. Keeps customer replies short. */
   maxOutputTokens?: number;
+  /** Gemini 2.5 thinking budget. Set to 0 for deterministic short-form copy so
+   * internal reasoning cannot consume the entire visible-output allowance. */
+  thinkingBudget?: number;
   /** Ask the model to return JSON (sets responseMimeType). */
   json?: boolean;
   /** For image generation models. */
@@ -188,6 +191,7 @@ export async function generateContent(
     generationConfig: {
       temperature: opts.temperature ?? 0.7,
       ...(opts.maxOutputTokens ? { maxOutputTokens: opts.maxOutputTokens } : {}),
+      ...(opts.thinkingBudget !== undefined ? { thinkingConfig: { thinkingBudget: opts.thinkingBudget } } : {}),
       ...(opts.json ? { responseMimeType: 'application/json' } : {}),
       ...(opts.responseModalities ? { responseModalities: opts.responseModalities } : {}),
       ...(opts.imageConfig ? { imageConfig: opts.imageConfig } : {}),

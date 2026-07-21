@@ -9,6 +9,7 @@ import {
   generationVerificationWarnings,
   MARKETING_CAPTION_MAX_TOKENS,
   MARKETING_PHRASE_MAX_TOKENS,
+  MARKETING_THINKING_BUDGET,
 } from '../../integrations/pipelines/content-create';
 import { campaignImageModel, creativeVerificationModel, mergeCampaignImageVerifications } from '../../integrations/gemini';
 
@@ -77,6 +78,7 @@ describe('content generation configuration', () => {
   it('budgets for Gemini thinking without starving visible Arabic copy', () => {
     expect(MARKETING_PHRASE_MAX_TOKENS).toBeGreaterThanOrEqual(800);
     expect(MARKETING_CAPTION_MAX_TOKENS).toBeGreaterThanOrEqual(1000);
+    expect(MARKETING_THINKING_BUDGET).toBe(0);
   });
 
   it('uses a bold retail-sale contract only for price drops', () => {

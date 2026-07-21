@@ -28,6 +28,7 @@ type ReferenceImage = { data: string; mimeType: string; label: string; productId
 // for the visible answer even when the model followed the prompt correctly.
 export const MARKETING_PHRASE_MAX_TOKENS = 800;
 export const MARKETING_CAPTION_MAX_TOKENS = 1200;
+export const MARKETING_THINKING_BUDGET = 0;
 
 async function loadItemProducts(db: Kysely<DB>, contentItemId: string) {
   return db
@@ -103,6 +104,7 @@ export async function generatePhrase(db: Kysely<DB>, productNames: string[], pur
   const r = await generateContent(envelope.runtimeData, {
     model: marketingTextModel(), systemInstruction: envelope.effectiveSystemInstruction,
     temperature: 0.82, maxOutputTokens: MARKETING_PHRASE_MAX_TOKENS,
+    thinkingBudget: MARKETING_THINKING_BUDGET,
   });
   return cleanGeneratedPhrase(r.text);
 }
@@ -124,6 +126,7 @@ export async function generateCaption(db: Kysely<DB>, args: {
   const r = await generateContent(envelope.runtimeData, {
     model: marketingTextModel(), systemInstruction: envelope.effectiveSystemInstruction,
     temperature: 0.75, maxOutputTokens: MARKETING_CAPTION_MAX_TOKENS,
+    thinkingBudget: MARKETING_THINKING_BUDGET,
   });
   return cleanGeneratedCaption(r.text, args.purpose);
 }
