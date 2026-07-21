@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   contentConfigFingerprint,
+  cleanGeneratedCaption,
+  cleanGeneratedPhrase,
+  creativeDirectionForPurpose,
   exactCreativePriceText,
   generationNeedsRetry,
   generationVerificationWarnings,
@@ -49,13 +52,33 @@ describe('content generation configuration', () => {
 
   it('keeps single-product price text concise and associates multiple prices by name', () => {
     expect(exactCreativePriceText([{ name: 'Violet Diffuser', oldPrice: null, newPrice: 69 }]))
-      .toEqual(['69 د.ل']);
+      .toEqual(['69 LYD']);
     expect(exactCreativePriceText([{ name: 'Pillow', oldPrice: 99, newPrice: 79 }]))
-      .toEqual(['قبل 99 د.ل — بعد 79 د.ل']);
+      .toEqual(['قبل 99 LYD | بعد 79 LYD']);
     expect(exactCreativePriceText([
       { name: 'Pillow', oldPrice: null, newPrice: 99 },
       { name: 'Sheet', oldPrice: null, newPrice: 149 },
-    ])).toEqual(['Pillow: 99 د.ل', 'Sheet: 149 د.ل']);
+    ])).toEqual(['Pillow: 99 LYD', 'Sheet: 149 LYD']);
+  });
+
+  it('keeps a complete two-line Arabic phrase instead of discarding line two', () => {
+    expect(cleanGeneratedPhrase('العبارة: خصم يفرّحك 🔥\nوفرصة ما تتعوّضش')).toBe('خصم يفرّحك 🔥\nوفرصة ما تتعوّضش');
+  });
+
+  it('keeps the full caption and guarantees a restrained social emoji', () => {
+    expect(cleanGeneratedCaption('نعومة تكمّل راحتك\nاختاري لونك المفضل', 'general'))
+      .toBe('نعومة تكمّل راحتك ✨\nاختاري لونك المفضل');
+    expect(cleanGeneratedCaption('خصم اليوم 🔥\nقبل 199 وبعد 149', 'price_drop'))
+      .toBe('خصم اليوم 🔥\nقبل 199 وبعد 149');
+  });
+
+  it('uses a bold retail-sale contract only for price drops', () => {
+    const sale = creativeDirectionForPurpose('price_drop');
+    const general = creativeDirectionForPurpose('general');
+    expect(sale.visual_mode).toMatch(/promotion/i);
+    expect(JSON.stringify(sale)).toMatch(/قبل/);
+    expect(JSON.stringify(sale)).toMatch(/red/i);
+    expect(general.visual_mode).toMatch(/editorial/i);
   });
 
   it('uses the professional image model unless explicitly configured otherwise', () => {

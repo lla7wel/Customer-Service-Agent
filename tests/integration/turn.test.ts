@@ -53,8 +53,8 @@ describe('customer turn pipeline', () => {
     const sends = await outboundTexts(t, conversationId);
     expect(sends).toHaveLength(1);
     expect(sends[0].body).toContain('تمام، الفريق بيكمل معاك في الطلب');
-    expect(sends[0].body).toContain('https://wh.ms/218923322008');
-    expect(sends[0].body).toContain('0924565511');
+    expect(sends[0].body).toContain('+218 91-1315900');
+    expect(sends[0].body).not.toMatch(/0924565511|0923322008/);
     // Never an order confirmation, never a request for order details.
     expect(sends[0].body).not.toMatch(/تم الطلب|تم تأكيد|عنوانك|رقم الطلب/);
 
@@ -215,7 +215,7 @@ describe('customer turn pipeline', () => {
     await inbound(t, conversationId, 'ممكن تجهزوه لي؟');
     await runCustomerTurn(t.db, conversationId);
     const sends = await outboundTexts(t, conversationId);
-    const handoffs = sends.filter((s) => s.body?.includes('wh.ms'));
+    const handoffs = sends.filter((s) => s.body?.includes('+218 91-1315900'));
     expect(handoffs).toHaveLength(1);
     const convo = await t.db.selectFrom('conversations').select(['human_attention', 'handoff_sent_at'])
       .where('id', '=', conversationId).executeTakeFirst();

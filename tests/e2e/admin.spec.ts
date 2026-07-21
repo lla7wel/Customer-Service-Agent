@@ -159,7 +159,9 @@ test.describe('signed-in application', () => {
     await page.goto('/settings?tab=facts');
     await expect(page.getByText('الفروع', { exact: true })).toBeVisible();
     await expect(page.locator('input[value*="السياحية"]')).toBeVisible();
-    await expect(page.locator('input[value="0923322008"]')).toBeVisible();
+    await expect(page.getByText('جهات التواصل وواتساب', { exact: true })).toBeVisible();
+    await expect(page.locator('input[value="+218 91-1315900"]')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'إضافة جهة تواصل' })).toBeVisible();
   });
 
   test('Settings lists admin accounts and the create form', async ({ page }) => {

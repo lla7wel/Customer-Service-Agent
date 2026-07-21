@@ -6,8 +6,8 @@ import { Loader2, Save, Plus, Trash2 } from 'lucide-react';
 interface Fact { key: string; value: unknown; label_ar: string | null; label_en: string | null }
 
 /**
- * Structured Business Facts editor — branches, hours, phone, delivery flags,
- * order-handoff contacts. These feed the AI as verified runtime data.
+ * Structured Business Facts editor — branches, contacts, hours, and delivery
+ * flags. These feed the AI as verified runtime data.
  */
 export default function BusinessFactsEditor() {
   const [facts, setFacts] = useState<Fact[] | null>(null);
@@ -48,6 +48,7 @@ export default function BusinessFactsEditor() {
 
   const label = (f: Fact) => f.label_ar || f.label_en || f.key;
   const branches = (draft.branches as string[]) ?? [];
+  const contacts = (draft.contacts as string[]) ?? [];
 
   return (
     <div className="space-y-4">
@@ -85,8 +86,40 @@ export default function BusinessFactsEditor() {
         </button>
       </div>
 
+      <div className="rounded-xl border border-line bg-surface2/50 p-4">
+        <p className="mb-1 text-sm font-bold text-fg">جهات التواصل وواتساب</p>
+        <p className="mb-3 text-xs leading-5 text-muted">هذه الأرقام هي الوحيدة التي يستخدمها المساعد عند توجيه العميل للطلب.</p>
+        <ul className="space-y-2">
+          {contacts.map((contact, i) => (
+            <li key={i} className="flex items-center gap-2">
+              <input
+                value={contact}
+                onChange={(e) => setDraft({ ...draft, contacts: contacts.map((x, j) => (j === i ? e.target.value : x)) })}
+                className="min-h-11 w-full rounded-lg border border-line bg-surface px-3 text-sm text-fg outline-none focus:border-accent/50"
+                dir="ltr"
+                inputMode="tel"
+                placeholder="+218 91-1315900"
+              />
+              <button
+                onClick={() => setDraft({ ...draft, contacts: contacts.filter((_, j) => j !== i) })}
+                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-muted transition hover:bg-danger/10 hover:text-danger"
+                aria-label="حذف جهة التواصل"
+              >
+                <Trash2 size={15} />
+              </button>
+            </li>
+          ))}
+        </ul>
+        <button
+          onClick={() => setDraft({ ...draft, contacts: [...contacts, ''] })}
+          className="mt-2 inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-line px-3 text-sm text-muted transition hover:bg-surface2"
+        >
+          <Plus size={14} /> إضافة جهة تواصل
+        </button>
+      </div>
+
       <div className="grid gap-3 sm:grid-cols-2">
-        {facts.filter((f) => !['branches', 'delivery_available', 'pickup_available'].includes(f.key)).map((f) => (
+        {facts.filter((f) => !['branches', 'contacts', 'delivery_available', 'pickup_available'].includes(f.key)).map((f) => (
           <label key={f.key} className="block">
             <span className="mb-1 block text-xs font-semibold text-muted">{label(f)}</span>
             <input

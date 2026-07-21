@@ -41,11 +41,12 @@ describe('migration runner', () => {
     const facts = await t.db.selectFrom('business_facts').select(['key', 'value']).execute();
     const keys = facts.map((f) => f.key);
     expect(keys).toEqual(expect.arrayContaining([
-      'branches', 'working_hours', 'phone', 'delivery_available', 'pickup_available',
-      'order_whatsapp_url', 'order_whatsapp_benghazi',
+      'branches', 'contacts', 'working_hours', 'delivery_available', 'pickup_available',
     ]));
+    expect(keys).not.toEqual(expect.arrayContaining(['phone', 'order_whatsapp_url', 'order_whatsapp_benghazi']));
     const branches = facts.find((f) => f.key === 'branches')!.value as string[];
     expect(branches).toHaveLength(3);
+    expect(facts.find((f) => f.key === 'contacts')!.value).toEqual(['+218 91-1315900']);
   });
 
   it('is idempotent — a second run applies nothing', async () => {

@@ -43,20 +43,62 @@ async function loadItemProducts(db: Kysely<DB>, contentItemId: string) {
     .execute();
 }
 
-export async function generatePhrase(db: Kysely<DB>, productNames: string[]): Promise<string | null> {
+function stripModelWrapper(value: string): string {
+  return value
+    .replace(/^```(?:text|markdown)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .replace(/^\s*(?:العبارة|الكابشن|caption|phrase)\s*[:：-]\s*/i, '')
+    .trim();
+}
+
+/** Keep the complete short phrase instead of silently throwing away line two. */
+export function cleanGeneratedPhrase(value: string | null | undefined): string | null {
+  if (!value?.trim()) return null;
+  const lines = stripModelWrapper(value)
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/^[-*•]\s*/, ''))
+    .filter(Boolean)
+    .slice(0, 2);
+  const phrase = lines.join('\n').replace(/^["'«]+|["'»]+$/g, '').trim();
+  if (!phrase) return null;
+  // The editor/API accept 200 characters. Stop on a word boundary so Arabic is
+  // never left visibly cut off if a provider ignores the requested brevity.
+  if (phrase.length <= 180) return phrase;
+  const shortened = phrase.slice(0, 180).replace(/\s+\S*$/u, '').trim();
+  return shortened || phrase.slice(0, 180).trim();
+}
+
+export function cleanGeneratedCaption(value: string | null | undefined, purpose: string): string | null {
+  if (!value?.trim()) return null;
+  let caption = stripModelWrapper(value).replace(/^["'«]+|["'»]+$/g, '').trim();
+  if (!caption) return null;
+  // A restrained emoji is part of the requested social voice. Add one only
+  // when the model omitted every emoji; never rewrite the generated wording.
+  if (!/\p{Extended_Pictographic}/u.test(caption)) {
+    const lines = caption.split(/\r?\n/);
+    lines[0] = `${lines[0]} ${purpose === 'price_drop' ? '🔥' : '✨'}`;
+    caption = lines.join('\n');
+  }
+  if (caption.length <= 2200) return caption;
+  return caption.slice(0, 2200).replace(/\s+\S*$/u, '').trim();
+}
+
+export async function generatePhrase(db: Kysely<DB>, productNames: string[], purpose = 'general'): Promise<string | null> {
   if (!isGeminiConfigured()) return null;
   const behaviors = await loadBehaviorsWith(db);
   const envelope = compilePrompt(behaviors, 'campaign_caption', {
     task: 'short_on_image_phrase',
-    instruction: 'Write exactly ONE natural, warm Libyan-Arabic phrase of 2–7 words. No price, hashtag, emoji, quotation marks, explanation, or alternative.',
+    purpose,
+    instruction: purpose === 'price_drop'
+      ? 'Write exactly ONE punchy, natural Libyan-Arabic sale headline of 2–10 words. It may use one fitting emoji. Do not include a price, hashtag, quotation marks, label, explanation, or alternative. Return the complete phrase only; it may use at most two short lines.'
+      : 'Write exactly ONE warm, natural Libyan-Arabic product phrase of 2–10 words. It may use one fitting emoji. Do not include a price, hashtag, quotation marks, label, explanation, or alternative. Return the complete phrase only; it may use at most two short lines.',
     products: productNames,
   });
   const r = await generateContent(envelope.runtimeData, {
     model: marketingTextModel(), systemInstruction: envelope.effectiveSystemInstruction,
-    temperature: 0.8, maxOutputTokens: 80,
+    temperature: 0.82, maxOutputTokens: 120,
   });
-  const line = r.text?.trim().split('\n').map((x) => x.trim()).filter(Boolean)[0] ?? null;
-  return line ? line.replace(/^["'«]+|["'»]+$/g, '').slice(0, 120) : null;
+  return cleanGeneratedPhrase(r.text);
 }
 
 export async function generateCaption(db: Kysely<DB>, args: {
@@ -69,13 +111,15 @@ export async function generateCaption(db: Kysely<DB>, args: {
   const envelope = compilePrompt(behaviors, 'campaign_caption', {
     task: 'content_studio_caption', purpose: args.purpose, products: args.productNames,
     verified_prices: args.prices ?? [],
-    instruction: 'Write a warm concise Libyan-Arabic caption in 2–4 short lines. Use only supplied prices. No invented offer, date, stock claim, or policy.',
+    instruction: args.purpose === 'price_drop'
+      ? 'Write one complete, energetic Libyan-Arabic social caption in 3–6 short readable lines. State each supplied old and new price exactly, use 1–3 relevant natural emojis, and finish with a soft WhatsApp call to action without inventing a number. Use only supplied facts. No invented discount percentage, offer deadline, stock claim, product feature, or policy. Return the caption only and never cut a sentence.'
+      : 'Write one complete, warm Libyan-Arabic social caption in 3–6 short readable lines. Use 1–3 relevant natural emojis and a light conversational call to action. Use only supplied facts and prices. No invented offer, date, stock claim, product feature, or policy. Return the caption only and never cut a sentence.',
   });
   const r = await generateContent(envelope.runtimeData, {
     model: marketingTextModel(), systemInstruction: envelope.effectiveSystemInstruction,
     temperature: 0.75, maxOutputTokens: 400,
   });
-  return r.text?.trim().slice(0, 1800) || null;
+  return cleanGeneratedCaption(r.text, args.purpose);
 }
 
 function mimeFor(buffer: Buffer): string {
@@ -135,9 +179,35 @@ export function exactCreativePriceText(prices: Array<{ name: string; oldPrice: n
   return prices.map((price) => {
     const prefix = includeName ? `${price.name}: ` : '';
     return price.oldPrice != null
-      ? `${prefix}قبل ${price.oldPrice} د.ل — بعد ${price.newPrice} د.ل`
-      : `${prefix}${price.newPrice} د.ل`;
+      ? `${prefix}قبل ${price.oldPrice} LYD | بعد ${price.newPrice} LYD`
+      : `${prefix}${price.newPrice} LYD`;
   });
+}
+
+export function creativeDirectionForPurpose(purpose: string): Record<string, unknown> {
+  if (purpose === 'price_drop') {
+    return {
+      visual_mode: 'high-impact premium retail promotion',
+      palette: 'English Home navy, vivid sale red, warm ivory, with only subtle sand accents',
+      product_scale: 'The exact product is the dominant hero and occupies roughly 45–65% of the frame.',
+      price_hierarchy: [
+        'Show the Arabic label قبل above the old price.',
+        'Render the old numeric price in navy with one clean red diagonal strike-through.',
+        'Show the Arabic label بعد above the new price.',
+        'Render the new numeric price in red at least twice the visual size of the old price.',
+        'Keep LYD beside each numeric value and reproduce every supplied value exactly.',
+      ],
+      composition: 'Use confident sale blocks, cards, ribbons, or restrained brush accents inspired by polished regional retail advertising. Keep generous safe margins and a clear top brand zone. This must read immediately as a real price-drop advertisement, not as a calm generic editorial post.',
+      call_to_action: 'A small navy CTA pill may say exactly اطلبه على واتساب. Do not add a phone number unless runtime data supplies one.',
+      prohibited: 'No beige cream-strip template, no tiny prices, no weak low-contrast typography, no decorative text crowding, and no invented percentage, deadline, benefit icon, feature, or product detail.',
+    };
+  }
+  return {
+    visual_mode: 'premium editorial product advertising',
+    palette: 'warm ivory and navy with restrained sand or olive accents chosen to suit the product',
+    composition: 'Create a realistic English Home lifestyle scene with the product as the unmistakable hero, elegant negative space, and strong readable hierarchy.',
+    prohibited: 'No invented product detail, fake promotion, busy discount graphics, or generic cream-strip template.',
+  };
 }
 
 /** Worker handler for one durable generation revision. */
@@ -162,7 +232,7 @@ export async function processContentGeneration(db: Kysely<DB>, runId: string): P
     const names = products.map((p) => customerProductName(p as any));
     let phrase = item.image_text;
     if (item.image_text_mode === 'generated' && !phrase) {
-      phrase = await generatePhrase(db, names);
+      phrase = await generatePhrase(db, names, item.purpose);
       if (phrase) await db.updateTable('content_items').set({ image_text: phrase }).where('id', '=', item.id).execute();
     }
     if (item.image_text_mode !== 'none' && !phrase?.trim()) throw new Error('Generate or enter the image phrase before creating the visual.');
@@ -229,18 +299,21 @@ export async function processContentGeneration(db: Kysely<DB>, runId: string): P
       for (let attempt = 1; attempt <= 3; attempt++) {
         await db.updateTable('content_generation_runs').set({ attempt_count: groupIndex * 3 + attempt, stage: 'creating' }).where('id', '=', runId).execute();
         const exactPriceText = exactCreativePriceText(groupPrices);
+        const creativeDirection = creativeDirectionForPurpose(item.purpose);
         const envelope = compilePrompt(behaviors, 'campaign_image', {
           task: 'content_studio_professional_visual',
+          purpose: item.purpose,
           treatment: item.creative_treatment,
           aspect_ratio: item.aspect_ratio,
           image_size: '2K',
           products: products.filter((p) => !groupProductIds.length || groupProductIds.includes(p.product_id)).map((p) => ({ id: p.product_id, code: p.product_code, name: customerProductName(p as any), category: p.category })),
           exact_arabic_phrase: item.image_text_mode === 'none' ? null : phrase,
           exact_price_text: exactPriceText,
+          creative_direction: creativeDirection,
           brand: brand?.logo_public_url ? 'Use the supplied official logo reference exactly.' : `Render the restrained text wordmark exactly: ${brand?.wordmark || 'ENGLISH HOME LIBYA'}`,
           instruction: item.creative_treatment === 'use_original'
-            ? 'Preserve the original photograph and product exactly. Improve only crop, lighting, layout, and commercial finish. Integrate all exact supplied text professionally.'
-            : 'This is an image-editing task. The first supplied image is the PRIMARY PRODUCT IMAGE: retain its actual product pixels and visible identity wherever possible while replacing or extending only the surrounding scene. Create premium, photorealistic English Home lifestyle advertising photography around it. Change the scene, never the product. Preserve identical silhouette and geometry, dimensions, color, material, transparency, printed artwork and labels, packaging, closures, handles, caps, attachments, and exact number and placement of included pieces or reeds. Do not redraw, redesign, simplify, substitute, or invent any product detail. Integrate only the exact supplied Arabic phrase, exact price text, and branding professionally with strong hierarchy and safe margins. Do not add a product name unless it is explicitly included in exact text.',
+            ? `Preserve the original photograph and product exactly. Improve only crop, lighting, layout, and commercial finish. Follow the supplied purpose-specific creative_direction exactly and integrate all exact supplied text professionally.${item.purpose === 'price_drop' ? ' Build a bold, high-impact navy/red price-drop layout comparable to premium regional retail sale advertising; do not fall back to a calm editorial template.' : ''}`
+            : `This is an image-editing task. The first supplied image is the PRIMARY PRODUCT IMAGE: retain its actual product pixels and visible identity wherever possible while replacing or extending only the surrounding scene. Change the scene, never the product. Preserve identical silhouette and geometry, dimensions, color, material, transparency, printed artwork and labels, packaging, closures, handles, caps, attachments, and exact number and placement of included pieces or reeds. Do not redraw, redesign, simplify, substitute, or invent any product detail. Follow the supplied purpose-specific creative_direction exactly. Integrate only the exact supplied Arabic phrase, exact price text, and branding with strong hierarchy and safe margins. Do not add a product name unless it is explicitly included in exact text.${item.purpose === 'price_drop' ? ' This must be a bold, conversion-focused English Home price-drop advertisement in navy, vivid red, and ivory—visually comparable to polished regional retail sale campaigns, not calm beige lifestyle editorial.' : ' Create premium, photorealistic English Home lifestyle advertising photography around the unchanged product.'}`,
           correction_feedback: feedback,
         });
         const generated = await editImage({
