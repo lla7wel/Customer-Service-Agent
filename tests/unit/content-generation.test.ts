@@ -73,6 +73,8 @@ describe('content generation configuration', () => {
       .toBe('نعومة تكمّل راحتك ✨\nاختاري لونك المفضل');
     expect(cleanGeneratedCaption('خصم اليوم 🔥\nقبل 199 وبعد 149', 'price_drop'))
       .toBe('خصم اليوم 🔥\nقبل 199 وبعد 149');
+    expect(cleanGeneratedCaption('اطلبها توة قبل ما تكمل الكمية! تواصلوا معانا على الواتساب 📲', 'price_drop'))
+      .toBe('اطلبها توة تواصلوا معانا على الواتساب 📲');
   });
 
   it('budgets for Gemini thinking without starving visible Arabic copy', () => {

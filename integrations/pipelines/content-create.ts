@@ -79,6 +79,14 @@ export function cleanGeneratedCaption(value: string | null | undefined, purpose:
   if (!value?.trim()) return null;
   let caption = stripModelWrapper(value).replace(/^["'«]+|["'»]+$/g, '').trim();
   if (!caption) return null;
+  // Remove unsupported scarcity/deadline language even if the model ignores
+  // the verified-facts instruction. Availability is assumed; scarcity is not.
+  caption = caption
+    .replace(/\s*قبل\s+ما\s+(?:تكمل|تخلص|توفى|تنفد|ينفد)\s+(?:الكمية|الكميات)[^!؟.\n]*(?:[!؟.])?/gu, ' ')
+    .replace(/(?:الكمية|الكميات)\s+(?:محدودة|قربت\s+(?:تكمل|تخلص|تنفد))[^!؟.\n]*(?:[!؟.])?/gu, '')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .trim();
   // A restrained emoji is part of the requested social voice. Add one only
   // when the model omitted every emoji; never rewrite the generated wording.
   if (!/\p{Extended_Pictographic}/u.test(caption)) {
