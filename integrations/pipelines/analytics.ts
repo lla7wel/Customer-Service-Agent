@@ -20,6 +20,16 @@ const PROVIDER_METRIC_NAMES: Record<string, string> = {
   total_interactions: 'instagram_interactions',
 };
 
+/** PostgreSQL can return a date column as either YYYY-MM-DD or a Date object. */
+export function analyticsDayKey(value: unknown): string | null {
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.toISOString().slice(0, 10);
+  const text = String(value ?? '');
+  const iso = text.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
+  if (iso) return iso;
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
+}
+
 export function providerInsightRows(data: ProviderMetric[] | undefined): { day: string; metric: string; value: number }[] {
   const rows: { day: string; metric: string; value: number }[] = [];
   for (const series of data ?? []) {
@@ -73,7 +83,10 @@ export async function refreshAnalytics(db: Kysely<DB>, days = 14): Promise<void>
 
   const daily = async (query: string, metric: string) => {
     const res = await sql<{ day: string; n: number }>`${sql.raw(query.replace('__DAYS__', String(days)))}`.execute(db);
-    await upsert(res.rows.map((r) => ({ day: String(r.day).slice(0, 10), metric, value: Number(r.n) })));
+    await upsert(res.rows.flatMap((r) => {
+      const day = analyticsDayKey(r.day);
+      return day ? [{ day, metric, value: Number(r.n) }] : [];
+    }));
   };
 
   await daily(`

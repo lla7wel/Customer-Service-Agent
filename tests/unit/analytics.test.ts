@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { providerInsightRows } from '../../integrations/pipelines/analytics';
+import { analyticsDayKey, providerInsightRows } from '../../integrations/pipelines/analytics';
 
 describe('provider insights normalization', () => {
+  it('normalizes both PostgreSQL Date objects and ISO date strings', () => {
+    expect(analyticsDayKey(new Date('2026-07-21T00:00:00.000Z'))).toBe('2026-07-21');
+    expect(analyticsDayKey('2026-07-20')).toBe('2026-07-20');
+    expect(analyticsDayKey('not-a-date')).toBeNull();
+  });
+
   it('keeps only real numeric provider values with their source day', () => {
     expect(providerInsightRows([
       { name: 'page_post_engagements', values: [{ value: 12, end_time: '2026-07-20T07:00:00+0000' }] },
