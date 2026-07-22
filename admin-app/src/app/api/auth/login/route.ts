@@ -6,6 +6,7 @@ import {
   isLoginRateLimited, recordLoginAttempt, audit,
 } from '@/lib/auth';
 import { getDb } from '@integrations/db/client';
+import { landingPath, normalizeRole } from '@/lib/rbac';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -46,7 +47,7 @@ export async function POST(req: NextRequest) {
 
   const admin = await db
     .selectFrom('admin_accounts')
-    .select(['id', 'username', 'password_hash', 'is_active'])
+    .select(['id', 'username', 'password_hash', 'is_active', 'role'])
     .where((eb) => eb(eb.fn('lower', ['username']), '=', username.toLowerCase()))
     .executeTakeFirst();
 
@@ -61,7 +62,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'invalid_credentials' }, { status: 401 });
   }
 
-  const token = await createSession(db, { id: admin!.id, username: admin!.username }, {
+  const role = normalizeRole(admin!.role);
+  const token = await createSession(db, { id: admin!.id, username: admin!.username, role }, {
     ip, userAgent: req.headers.get('user-agent'),
   });
   if (!token) return NextResponse.json({ error: 'auth_not_configured' }, { status: 503 });
@@ -69,7 +71,7 @@ export async function POST(req: NextRequest) {
   await db.updateTable('admin_accounts').set({ last_login_at: new Date().toISOString() }).where('id', '=', admin!.id).execute();
   await audit(db, { id: admin!.id, username: admin!.username }, 'auth.login', { detail: { ip: ip ?? undefined } });
 
-  const res = NextResponse.json({ ok: true });
+  const res = NextResponse.json({ ok: true, redirect: landingPath(role) });
   res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
   return res;
 }

@@ -90,54 +90,54 @@ export async function refreshAnalytics(db: Kysely<DB>, days = 14): Promise<void>
   };
 
   await daily(`
-    select date(created_at) as day, count(*) as n from messages
+    select date(created_at at time zone 'Africa/Tripoli') as day, count(*) as n from messages
     where direction = 'inbound' and created_at > now() - interval '__DAYS__ days'
     group by 1`, 'inbound_messages');
 
   await daily(`
-    select date(created_at) as day, count(*) as n from messages
+    select date(created_at at time zone 'Africa/Tripoli') as day, count(*) as n from messages
     where direction = 'outbound' and sender_type = 'ai' and delivery_status in ('sent','partial')
       and created_at > now() - interval '__DAYS__ days'
     group by 1`, 'ai_replies');
 
   await daily(`
-    select date(created_at) as day, count(*) as n from messages
+    select date(created_at at time zone 'Africa/Tripoli') as day, count(*) as n from messages
     where direction = 'outbound' and sender_type = 'human'
       and created_at > now() - interval '__DAYS__ days'
     group by 1`, 'human_replies');
 
   await daily(`
-    select date(last_message_at) as day, count(distinct id) as n from conversations
+    select date(last_message_at at time zone 'Africa/Tripoli') as day, count(distinct id) as n from conversations
     where last_message_at > now() - interval '__DAYS__ days'
     group by 1`, 'active_conversations');
 
   await daily(`
-    select date(handoff_sent_at) as day, count(*) as n from conversations
+    select date(handoff_sent_at at time zone 'Africa/Tripoli') as day, count(*) as n from conversations
     where handoff_sent_at > now() - interval '__DAYS__ days'
     group by 1`, 'order_handoffs');
 
   await daily(`
-    select date(human_attention_at) as day, count(*) as n from conversations
+    select date(human_attention_at at time zone 'Africa/Tripoli') as day, count(*) as n from conversations
     where human_attention_at > now() - interval '__DAYS__ days'
     group by 1`, 'human_attention_flags');
 
   await daily(`
-    select date(published_at) as day, count(*) as n from content_publications
+    select date(published_at at time zone 'Africa/Tripoli') as day, count(*) as n from content_publications
     where status = 'published' and published_at > now() - interval '__DAYS__ days'
     group by 1`, 'content_published');
 
   await daily(`
-    select date(updated_at) as day, count(*) as n from content_publications
+    select date(updated_at at time zone 'Africa/Tripoli') as day, count(*) as n from content_publications
     where status = 'failed' and updated_at > now() - interval '__DAYS__ days'
     group by 1`, 'content_failed');
 
   await daily(`
-    select date(updated_at) as day, count(*) as n from content_comments
+    select date(updated_at at time zone 'Africa/Tripoli') as day, count(*) as n from content_comments
     where reply_status = 'sent' and updated_at > now() - interval '__DAYS__ days'
     group by 1`, 'comment_replies');
 
   await daily(`
-    select date(updated_at) as day, count(*) as n from content_comments
+    select date(updated_at at time zone 'Africa/Tripoli') as day, count(*) as n from content_comments
     where reply_status = 'failed' and updated_at > now() - interval '__DAYS__ days'
     group by 1`, 'comment_reply_failures');
 

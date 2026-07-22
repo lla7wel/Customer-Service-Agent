@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { jsonObjectFrom } from 'kysely/helpers/postgres';
-import { getDb } from '@/lib/db';
-import { databaseStatus } from '@integrations/status';
+import { requireAdminApi } from '@/lib/api';
+import { canAccessSection } from '@/lib/rbac';
 import { uiProductQuery, toUiCandidate } from '@/lib/product-candidates';
 
 export const runtime = 'nodejs';
@@ -16,18 +16,22 @@ type SearchItem = {
 };
 
 export async function GET(req: NextRequest) {
-  if (!databaseStatus().configured) {
-    return NextResponse.json({ error: 'integration_not_configured', missing: databaseStatus().missing }, { status: 503 });
-  }
-  const db = getDb();
-  if (!db) return NextResponse.json({ rows: [] });
+  const auth = await requireAdminApi(req);
+  if (!auth.ok) return auth.res;
+  const { db, admin } = auth.ctx;
 
   const q = (req.nextUrl.searchParams.get('q') ?? '').trim();
   if (q.length < 2) return NextResponse.json({ rows: [] });
   const like = `%${q}%`;
 
+  // Global search never leaks results a role cannot open: each category is
+  // gated by the section its links target.
+  const canProducts = canAccessSection(admin.role, 'catalog');
+  const canInbox = canAccessSection(admin.role, 'inbox');
+  const canContent = canAccessSection(admin.role, 'content-studio');
+
   const [products, conversations, customers, content] = await Promise.all([
-    uiProductQuery(db)
+    canProducts ? uiProductQuery(db)
       .where((eb) =>
         eb.or([
           eb('products.libyan_display_name', 'ilike', like), eb('products.arabic_name', 'ilike', like),
@@ -37,8 +41,8 @@ export async function GET(req: NextRequest) {
       )
       .orderBy('products.updated_at', 'desc')
       .limit(5)
-      .execute(),
-    db.selectFrom('conversations')
+      .execute() : Promise.resolve([]),
+    canInbox ? db.selectFrom('conversations')
       .select(['id', 'status', 'last_message_preview', 'detected_intent', 'last_message_at'])
       .select((eb) => [
         jsonObjectFrom(
@@ -54,8 +58,8 @@ export async function GET(req: NextRequest) {
       )
       .orderBy('last_message_at', (ob) => ob.desc().nullsLast())
       .limit(5)
-      .execute(),
-    db.selectFrom('customers')
+      .execute() : Promise.resolve([]),
+    canInbox ? db.selectFrom('customers')
       .select(['id', 'display_name', 'phone', 'external_id'])
       .where((eb) =>
         eb.or([
@@ -65,13 +69,13 @@ export async function GET(req: NextRequest) {
       )
       .orderBy('updated_at', 'desc')
       .limit(5)
-      .execute(),
-    db.selectFrom('content_items')
+      .execute() : Promise.resolve([]),
+    canContent ? db.selectFrom('content_items')
       .select(['id', 'title', 'status', 'content_type', 'purpose'])
       .where((eb) => eb.or([eb('title', 'ilike', like), eb(eb.cast('status', 'text'), 'ilike', like), eb(eb.cast('purpose', 'text'), 'ilike', like)]))
       .orderBy('updated_at', 'desc')
       .limit(5)
-      .execute(),
+      .execute() : Promise.resolve([]),
   ]);
 
   const rows: SearchItem[] = [];

@@ -1,31 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/api';
 import { sql } from 'kysely';
+import { getAnalytics } from '@integrations/pipelines/analytics-query';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
- * Owner dashboard data — REAL local data only. Provider insights appear only
- * when actually fetched; otherwise the response says they are unavailable
- * instead of showing fabricated zeroes.
+ * Owner dashboard data — REAL local data only, sourced from the ONE shared
+ * analytics service (identical numbers to the Dashboard server page and the
+ * Analytics workspace; no drift). Provider insights appear only when actually
+ * fetched; otherwise the response says they are unavailable rather than showing
+ * fabricated zeroes.
  */
 export async function GET(req: NextRequest) {
   const auth = await requireAdminApi(req);
   if (!auth.ok) return auth.res;
   const { db } = auth.ctx;
-  const days = Math.min(90, Math.max(7, Number(req.nextUrl.searchParams.get('days') ?? 14)));
+  const days = Math.min(90, Math.max(7, Number(req.nextUrl.searchParams.get('days') ?? 7)));
 
-  const [series, attention, jobsHealth, recentErrors, topProducts, contentSummary] = await Promise.all([
-    db.selectFrom('analytics_daily')
-      .select(['day', 'metric', 'value'])
-      .where('day', '>=', sql<any>`current_date - ${days}`)
-      .orderBy('day', 'asc')
-      .execute(),
+  const analytics = await getAnalytics(db, { days });
+
+  const [attention, jobsHealth, recentErrors, topProducts, contentSummary] = await Promise.all([
     db.selectFrom('conversations')
-      .select((eb) => [
-        eb.fn.countAll<number>().as('n'),
-      ])
+      .select((eb) => [eb.fn.countAll<number>().as('n')])
       .where('human_attention', '=', true)
       .executeTakeFirst(),
     db.selectFrom('jobs')
@@ -56,23 +54,21 @@ export async function GET(req: NextRequest) {
       .execute(),
   ]);
 
-  const lastAnalyticsRun = await db.selectFrom('analytics_daily')
-    .select(db.fn.max('computed_at').as('at'))
-    .executeTakeFirst();
-
-  const providerRows = series.filter((row) => ['facebook_page_engagements', 'facebook_page_views', 'instagram_reach', 'instagram_views', 'instagram_interactions'].includes(row.metric));
   return NextResponse.json({
-    series,
+    analytics,
     attention_count: Number(attention?.n ?? 0),
     jobs: Object.fromEntries(jobsHealth.map((j) => [j.status, Number(j.n)])),
     delivery_problems: Object.fromEntries(recentErrors.map((r) => [r.status, Number(r.n)])),
     top_products: topProducts,
     content: Object.fromEntries(contentSummary.map((c) => [c.status, Number(c.n)])),
-    analytics_computed_at: lastAnalyticsRun?.at ?? null,
+    analytics_computed_at: analytics.meta.generatedAt,
     provider_insights: {
-      available: providerRows.length > 0,
-      series: providerRows,
-      note: providerRows.length ? null : 'Facebook/Instagram reach and engagement appear here once the Page token has read_insights and the readiness check passes.',
+      available: analytics.provider.some((p) => p.available),
+      insights: analytics.provider,
+      last_synced_at: analytics.meta.providerLastSyncedAt,
+      note: analytics.provider.some((p) => p.available)
+        ? null
+        : 'Facebook/Instagram reach and engagement appear here once the Page token has read_insights and the readiness check passes.',
     },
   });
 }

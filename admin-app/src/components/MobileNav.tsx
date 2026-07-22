@@ -3,23 +3,29 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Inbox, Package, Clapperboard, MoreHorizontal, SlidersHorizontal, Settings, X, Activity } from 'lucide-react';
+import { LayoutDashboard, Inbox, Package, Clapperboard, BarChart3, MoreHorizontal, SlidersHorizontal, Settings, X, Activity, type LucideIcon } from 'lucide-react';
 import ThemeToggle from './ThemeToggle';
 import LanguageSwitcher from './LanguageSwitcher';
 import LogoutButton from './LogoutButton';
+import { canAccessSection, type Role } from '@/lib/rbac';
 import type { Locale } from '@/lib/i18n/config';
 import type { Theme } from '@/lib/theme';
 import type { IntegrationStatus } from '@integrations/status';
 
-const PRIMARY = [
-  { href: '/dashboard', ar: 'الرئيسية', en: 'Home', icon: LayoutDashboard },
-  { href: '/inbox', ar: 'الرسائل', en: 'Inbox', icon: Inbox },
-  { href: '/catalog', ar: 'الكتالوج', en: 'Catalog', icon: Package },
-  { href: '/content-studio', ar: 'المحتوى', en: 'Studio', icon: Clapperboard },
+type Item = { href: string; ar: string; en: string; icon: LucideIcon; section: Parameters<typeof canAccessSection>[1] };
+
+// Phone primary bar, in the order each role should see it. Filtered by section
+// so the bar never shows a tab the role cannot open (Studio is shared by all).
+const ITEMS: Item[] = [
+  { href: '/dashboard', ar: 'الرئيسية', en: 'Home', icon: LayoutDashboard, section: 'dashboard' },
+  { href: '/inbox', ar: 'الرسائل', en: 'Inbox', icon: Inbox, section: 'inbox' },
+  { href: '/analytics', ar: 'التحليلات', en: 'Analytics', icon: BarChart3, section: 'analytics' },
+  { href: '/catalog', ar: 'الكتالوج', en: 'Catalog', icon: Package, section: 'catalog' },
+  { href: '/content-studio', ar: 'المحتوى', en: 'Studio', icon: Clapperboard, section: 'content-studio' },
 ];
 
-export default function MobileNav({ locale, theme, userEmail, statuses }: {
-  locale: Locale; theme: Theme; userEmail?: string | null; statuses: IntegrationStatus[];
+export default function MobileNav({ locale, theme, userEmail, statuses, role }: {
+  locale: Locale; theme: Theme; userEmail?: string | null; statuses: IntegrationStatus[]; role: Role;
 }) {
   const pathname = usePathname();
   const [more, setMore] = useState(false);
@@ -37,10 +43,20 @@ export default function MobileNav({ locale, theme, userEmail, statuses }: {
   }, [more]);
   const active = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
   const connected = statuses.filter((s) => s.configured).length;
+
+  const primary = ITEMS.filter((i) => canAccessSection(role, i.section)).slice(0, 4);
+  const isOwner = role === 'owner';
+  const cols = primary.length + 1; // + the More button
+  const moreActivePaths = ['/ai-control', '/settings'];
+
   return (
     <>
-      <nav className="safe-b fixed inset-x-0 bottom-0 z-40 grid h-[calc(4.25rem+env(safe-area-inset-bottom))] grid-cols-5 border-t border-line bg-surface/96 px-1 backdrop-blur-xl md:hidden" aria-label={ar ? 'التنقل الرئيسي' : 'Primary navigation'}>
-        {PRIMARY.map((item) => {
+      <nav
+        className="safe-b fixed inset-x-0 bottom-0 z-40 grid h-[calc(4.25rem+env(safe-area-inset-bottom))] border-t border-line bg-surface/96 px-1 backdrop-blur-xl md:hidden"
+        style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+        aria-label={ar ? 'التنقل الرئيسي' : 'Primary navigation'}
+      >
+        {primary.map((item) => {
           const Icon = item.icon;
           const isActive = active(item.href);
           return <Link key={item.href} href={item.href} className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl text-[10px] font-medium transition ${isActive ? 'text-accent' : 'text-muted'}`}>
@@ -48,7 +64,7 @@ export default function MobileNav({ locale, theme, userEmail, statuses }: {
             <span className="truncate">{ar ? item.ar : item.en}</span>
           </Link>;
         })}
-        <button onClick={() => setMore(true)} className={`flex flex-col items-center justify-center gap-1 rounded-xl text-[10px] font-medium ${more || ['/ai-control', '/settings'].some(active) ? 'text-accent' : 'text-muted'}`}>
+        <button onClick={() => setMore(true)} className={`flex flex-col items-center justify-center gap-1 rounded-xl text-[10px] font-medium ${more || moreActivePaths.some(active) ? 'text-accent' : 'text-muted'}`}>
           <span className="flex h-7 w-12 items-center justify-center rounded-full"><MoreHorizontal size={20} /></span>
           {ar ? 'المزيد' : 'More'}
         </button>
@@ -60,15 +76,15 @@ export default function MobileNav({ locale, theme, userEmail, statuses }: {
             <div><p className="text-base font-bold text-fg">{ar ? 'المزيد' : 'More'}</p><p className="text-xs text-muted">{userEmail || (ar ? 'مشرف' : 'Admin')}</p></div>
             <button onClick={() => setMore(false)} className="flex h-11 w-11 items-center justify-center rounded-xl bg-surface2 text-muted" aria-label="Close"><X size={19} /></button>
           </div>
-          <div className="mb-5 grid gap-2">
+          {isOwner && <div className="mb-5 grid gap-2">
             <MoreLink href="/ai-control" icon={SlidersHorizontal} label={ar ? 'تحكّم الذكاء والاختبار' : 'AI Control & testing'} />
             <MoreLink href="/settings" icon={Settings} label={ar ? 'الإعدادات والفريق' : 'Settings & team'} />
             <MoreLink href="/settings?tab=activity" icon={Activity} label={ar ? 'النشاط والأخطاء' : 'Activity & errors'} />
-          </div>
-          <div className="mb-5 rounded-2xl border border-line bg-surface2/60 p-4">
+          </div>}
+          {isOwner && <div className="mb-5 rounded-2xl border border-line bg-surface2/60 p-4">
             <div className="mb-3 flex items-center justify-between"><span className="text-sm font-semibold text-fg">{ar ? 'حالة الأنظمة' : 'System status'}</span><span className="text-xs text-muted">{connected}/{statuses.length}</span></div>
             <div className="space-y-2">{statuses.map((s) => <div key={s.key} className="flex items-center justify-between text-xs"><span className="text-muted">{s.label}</span><span className={s.configured ? 'text-success' : 'text-warning'}>{s.configured ? (ar ? 'متصل' : 'Connected') : (ar ? 'يحتاج إعداد' : 'Setup')}</span></div>)}</div>
-          </div>
+          </div>}
           <div className="flex items-center justify-between gap-3 rounded-2xl border border-line p-3"><ThemeToggle initial={theme} /><LanguageSwitcher locale={locale} /><LogoutButton label={ar ? 'خروج' : 'Sign out'} /></div>
         </section>
       </div>}

@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Sparkles } from 'lucide-react';
-import { NAV } from '@/lib/nav';
+import { navForRole } from '@/lib/nav';
+import { canAccessSection, type Role } from '@/lib/rbac';
 import { translate } from '@/lib/i18n/dictionaries';
 import type { Locale } from '@/lib/i18n/config';
 import type { IntegrationStatus } from '@integrations/status';
@@ -11,12 +12,16 @@ import type { IntegrationStatus } from '@integrations/status';
 export default function Sidebar({
   locale,
   statuses,
+  role,
 }: {
   locale: Locale;
   statuses: IntegrationStatus[];
+  role: Role;
 }) {
   const pathname = usePathname();
   const t = (k: string) => translate(locale, k);
+  const nav = navForRole(role);
+  const showSystems = canAccessSection(role, 'settings');
   const allConnected = statuses.every((s) => s.configured);
   const connectedCount = statuses.filter((s) => s.configured).length;
 
@@ -42,7 +47,7 @@ export default function Sidebar({
 
       {/* nav */}
       <nav className="scroll-thin flex-1 overflow-y-auto px-3 py-5">
-        {NAV.map((group) => (
+        {nav.map((group) => (
           <div key={group.titleKey} className="mb-5">
             <p className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-faint">
               {t(group.titleKey)}
@@ -73,8 +78,8 @@ export default function Sidebar({
         ))}
       </nav>
 
-      {/* footer: system pulse */}
-      <div className="border-t border-line/70 p-3">
+      {/* footer: system pulse (owner-only — links into Settings) */}
+      {showSystems && <div className="border-t border-line/70 p-3">
         <Link
           href="/settings"
           className="flex items-center justify-between rounded-xl border border-line bg-surface2/60 px-3 py-2.5 text-xs transition hover:border-accent/30"
@@ -94,7 +99,7 @@ export default function Sidebar({
             <span className="ms-1 font-medium text-fg">{connectedCount}/{statuses.length}</span>
           </span>
         </Link>
-      </div>
+      </div>}
     </aside>
   );
 }

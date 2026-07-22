@@ -21,6 +21,7 @@ import {
   SESSION_COOKIE, SESSION_TTL_SECONDS, isAuthConfigured,
   signSessionJwt, verifySessionToken,
 } from './auth-edge';
+import { normalizeRole, type Role } from './rbac';
 
 export { SESSION_COOKIE, isAuthConfigured, verifySessionToken };
 
@@ -28,7 +29,8 @@ export interface AdminContext {
   id: string;
   username: string;
   displayName: string | null;
-  role: 'owner' | 'admin';
+  role: Role;
+  /** Legacy column kept only for migration compatibility — never used for authz. */
   fullAccess: boolean;
   sessionId: string;
 }
@@ -40,7 +42,7 @@ export function sha256(value: string): string {
 /** Create a DB-backed session + signed cookie token for an admin. */
 export async function createSession(
   db: Kysely<DB>,
-  admin: { id: string; username: string },
+  admin: { id: string; username: string; role: Role },
   meta: { ip?: string | null; userAgent?: string | null } = {},
 ): Promise<string | null> {
   if (!isAuthConfigured()) return null;
@@ -53,7 +55,7 @@ export async function createSession(
     user_agent: (meta.userAgent ?? '').slice(0, 300) || null,
     expires_at: expiresAt,
   }).execute();
-  return signSessionJwt(admin.id, sessionId, admin.username);
+  return signSessionJwt(admin.id, sessionId, admin.username, admin.role);
 }
 
 /**
@@ -82,7 +84,7 @@ export async function requireAdmin(cookieValue: string | undefined | null): Prom
     id: admin.id,
     username: admin.username,
     displayName: admin.display_name,
-    role: (admin.role as 'owner' | 'admin') ?? 'admin',
+    role: normalizeRole(admin.role),
     fullAccess: admin.full_access !== false,
     sessionId: parsed.sessionId,
   };

@@ -24,7 +24,7 @@ export default function LoginPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        router.push('/dashboard');
+        router.push(typeof data?.redirect === 'string' ? data.redirect : '/dashboard');
         router.refresh();
         return;
       }

@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await requireAdminApi(req); if (!auth.ok) return auth.res;
   const { db, admin } = auth.ctx;
-  if (!admin.fullAccess) return NextResponse.json({ error:'forbidden' }, { status:403 });
+  if (admin.role !== 'owner') return NextResponse.json({ error:'forbidden' }, { status:403 });
   if (!isStorageConfigured()) return NextResponse.json({ error:'storage_not_configured' }, { status:503 });
   const form = await req.formData().catch(() => null);
   const file = form?.get('logo');
