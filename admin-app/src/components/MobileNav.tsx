@@ -7,22 +7,28 @@ import { LayoutDashboard, Inbox, Package, Clapperboard, BarChart3, MoreHorizonta
 import ThemeToggle from './ThemeToggle';
 import LanguageSwitcher from './LanguageSwitcher';
 import LogoutButton from './LogoutButton';
-import { canAccessSection, type Role } from '@/lib/rbac';
+import { type Role } from '@/lib/rbac';
 import type { Locale } from '@/lib/i18n/config';
 import type { Theme } from '@/lib/theme';
 import type { IntegrationStatus } from '@integrations/status';
 
-type Item = { href: string; ar: string; en: string; icon: LucideIcon; section: Parameters<typeof canAccessSection>[1] };
+type Item = { href: string; ar: string; en: string; icon: LucideIcon };
 
-// Phone primary bar, in the order each role should see it. Filtered by section
-// so the bar never shows a tab the role cannot open (Studio is shared by all).
-const ITEMS: Item[] = [
-  { href: '/dashboard', ar: 'الرئيسية', en: 'Home', icon: LayoutDashboard, section: 'dashboard' },
-  { href: '/inbox', ar: 'الرسائل', en: 'Inbox', icon: Inbox, section: 'inbox' },
-  { href: '/analytics', ar: 'التحليلات', en: 'Analytics', icon: BarChart3, section: 'analytics' },
-  { href: '/catalog', ar: 'الكتالوج', en: 'Catalog', icon: Package, section: 'catalog' },
-  { href: '/content-studio', ar: 'المحتوى', en: 'Studio', icon: Clapperboard, section: 'content-studio' },
-];
+const ITEMS: Record<string, Item> = {
+  '/dashboard': { href: '/dashboard', ar: 'الرئيسية', en: 'Home', icon: LayoutDashboard },
+  '/inbox': { href: '/inbox', ar: 'الرسائل', en: 'Inbox', icon: Inbox },
+  '/analytics': { href: '/analytics', ar: 'التحليلات', en: 'Analytics', icon: BarChart3 },
+  '/catalog': { href: '/catalog', ar: 'الكتالوج', en: 'Catalog', icon: Package },
+  '/content-studio': { href: '/content-studio', ar: 'المحتوى', en: 'Studio', icon: Clapperboard },
+};
+
+// The phone primary bar per role — exactly as specified (the rest lives in More).
+const PRIMARY_BY_ROLE: Record<Role, string[]> = {
+  owner: ['/dashboard', '/inbox', '/catalog', '/content-studio'],
+  analyzer: ['/inbox', '/analytics', '/content-studio'],
+  poster: ['/content-studio'],
+  messager: ['/inbox', '/content-studio'],
+};
 
 export default function MobileNav({ locale, theme, userEmail, statuses, role }: {
   locale: Locale; theme: Theme; userEmail?: string | null; statuses: IntegrationStatus[]; role: Role;
@@ -44,7 +50,7 @@ export default function MobileNav({ locale, theme, userEmail, statuses, role }: 
   const active = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
   const connected = statuses.filter((s) => s.configured).length;
 
-  const primary = ITEMS.filter((i) => canAccessSection(role, i.section)).slice(0, 4);
+  const primary = (PRIMARY_BY_ROLE[role] ?? []).map((href) => ITEMS[href]).filter(Boolean).slice(0, 4);
   const isOwner = role === 'owner';
   const cols = primary.length + 1; // + the More button
   const moreActivePaths = ['/ai-control', '/settings'];
