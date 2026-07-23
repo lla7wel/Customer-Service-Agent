@@ -127,7 +127,7 @@ test.describe('signed-in application', () => {
     await page.getByRole('button', { name: /الغرض/ }).click();
     await expect(page.getByRole('heading', { name: 'حدد الغرض وشكل الإخراج' })).toBeVisible();
     await page.getByRole('button', { name: /النص والتوليد/ }).click();
-    await expect(page.getByRole('heading', { name: 'راجع العبارة والكابشن' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'العبارة والكابشن' })).toBeVisible();
     await page.getByRole('button', { name: /المعاينة والنشر/ }).click();
     await expect(page.getByRole('heading', { name: 'المعاينة والنشر' })).toBeVisible();
     await expectNoHorizontalOverflow(page);
@@ -149,9 +149,11 @@ test.describe('signed-in application', () => {
 
   test('Settings readiness reports truthfully — never a fake "connected"', async ({ page }) => {
     await page.goto('/settings?tab=channels');
-    await page.getByRole('button', { name: /فحص الآن/ }).click();
+    // The connection center shows the honest state: with no credentials the
+    // connection is "not connected" and a full check reports untruthful nothing.
+    await page.getByRole('button', { name: /فحص شامل/ }).click();
     await expect(page.getByText(/is not connected|is not configured/).first()).toBeVisible({ timeout: 20_000 });
-    // With no credentials configured nothing may claim to be connected.
+    // Nothing may claim to be connected to a Page without a proven capability.
     await expect(page.getByText(/^Connected to Page/)).toHaveCount(0);
   });
 

@@ -1,5 +1,11 @@
 import type { Metadata } from 'next';
-import localFont from 'next/font/local';
+// Self-hosted IBM Plex Sans Arabic (SIL OFL 1.1) — bundled woff2, no runtime
+// CDN. Regular / Medium / SemiBold / Bold for the Arabic-first UI. License:
+// see src/fonts/IBM-Plex-OFL.txt (copied from the @fontsource package).
+import '@fontsource/ibm-plex-sans-arabic/400.css';
+import '@fontsource/ibm-plex-sans-arabic/500.css';
+import '@fontsource/ibm-plex-sans-arabic/600.css';
+import '@fontsource/ibm-plex-sans-arabic/700.css';
 import './globals.css';
 import { getLocale } from '@/lib/i18n/server';
 import { dir } from '@/lib/i18n/config';
@@ -10,21 +16,12 @@ export const metadata: Metadata = {
   description: 'The online operations center for English Home Libya.',
 };
 
-const tajawal = localFont({
-  src: [
-    { path: '../../../integrations/content/fonts/Tajawal-Regular.ttf', weight: '400' },
-    { path: '../../../integrations/content/fonts/Tajawal-Bold.ttf', weight: '700' },
-  ],
-  variable: '--font-ui',
-  display: 'swap',
-});
-
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const locale = await getLocale();
   const theme = await getTheme();
   return (
     <html lang={locale} dir={dir(locale)} className={theme === 'dark' ? 'dark' : ''}>
-      <body className={tajawal.variable}>{children}</body>
+      <body>{children}</body>
     </html>
   );
 }

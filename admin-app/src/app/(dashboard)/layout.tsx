@@ -15,6 +15,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const locale = await getLocale();
   const theme = await getTheme();
   const statuses = allIntegrationStatuses();
+  const { getDb } = await import('@/lib/db');
+  const brandLogo = await getDb()?.selectFrom('brand_kit').select('logo_public_url').where('id', '=', 1).executeTakeFirst().then((r) => r?.logo_public_url ?? null).catch(() => null);
 
   const admin = await requireAdmin((await cookies()).get(SESSION_COOKIE)?.value);
   // Defense in depth: the middleware already gated this, but never render the
@@ -32,7 +34,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <div className="premium-shell flex h-dvh overflow-hidden">
-      <Sidebar locale={locale} statuses={statuses} role={admin.role} />
+      <Sidebar locale={locale} statuses={statuses} role={admin.role} brandLogo={brandLogo} />
       <div className="relative flex min-w-0 flex-1 flex-col">
         <Topbar locale={locale} theme={theme} statuses={statuses} userEmail={userEmail} />
         <main className="scroll-thin safe-x relative flex-1 overflow-y-auto overflow-x-hidden">

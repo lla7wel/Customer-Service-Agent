@@ -3,6 +3,7 @@ import LogoutButton from './LogoutButton';
 import LanguageSwitcher from './LanguageSwitcher';
 import ThemeToggle from './ThemeToggle';
 import SearchBar from './SearchBar';
+import BrandMark from './BrandMark';
 import type { Locale } from '@/lib/i18n/config';
 import type { Theme } from '@/lib/theme';
 import { translate } from '@/lib/i18n/dictionaries';
@@ -25,8 +26,7 @@ export default function Topbar({
   return (
     <header className="safe-t safe-x sticky top-0 z-20 flex h-16 items-center justify-between gap-3 border-b border-line bg-surface/95 px-4 backdrop-blur-xl sm:px-5">
       <div className="flex min-w-0 flex-1 items-center gap-3">
-        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-xs font-bold text-white md:hidden">EH</span>
-        <span className="min-w-0 truncate text-sm font-bold text-fg md:hidden">{t('app_subtitle')}</span>
+        <div className="shrink-0 md:hidden"><BrandMark size="sm" /></div>
         <div className="hidden w-full md:block"><SearchBar placeholder={t('search_ph')} ar={locale === 'ar'} /></div>
       </div>
 

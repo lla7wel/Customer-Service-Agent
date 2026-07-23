@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { LogIn, ShieldAlert } from 'lucide-react';
+import BrandMark from '@/components/BrandMark';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -42,9 +43,8 @@ export default function LoginPage() {
     <div className="premium-shell relative flex min-h-screen items-center justify-center p-4">
       <div className="relative w-full max-w-sm">
         <div className="mb-6 flex flex-col items-center text-center">
-          <span className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-navy text-base font-bold text-white">EH</span>
-          <h1 className="mt-3 text-xl font-semibold tracking-tight text-fg">English Home Libya</h1>
-          <p className="mt-1 text-xs uppercase tracking-[.18em] text-muted">Operations Center</p>
+          <BrandMark size="lg" animate />
+          <p className="mt-3 text-xs uppercase tracking-[.18em] text-muted">Operations Center</p>
         </div>
 
         <div className="command-surface p-6">

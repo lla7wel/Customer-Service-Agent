@@ -134,6 +134,8 @@
 @layer utilities {
   /* Editorial English Home operations palette. */
   :root {
+    /* Self-hosted IBM Plex Sans Arabic (see app/layout.tsx). */
+    --font-ui: 'IBM Plex Sans Arabic';
     --font-sans: var(--font-ui), 'Segoe UI', Arial, sans-serif;
     --bg: 246 245 241;
     --surface: 255 255 253;
@@ -253,6 +255,14 @@
   0%, 100% { transform: translateZ(34px) translateY(0); }
   50% { transform: translateZ(46px) translateY(-6px); }
 }
+
+/* Restrained brand entrance — a gentle line reveal, ~200ms, once. Decorative
+   motion is disabled under prefers-reduced-motion by the block below. */
+@keyframes brand-reveal {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.brand-reveal { animation: brand-reveal 200ms ease-out both; }
 
 /* Respect the OS "reduce motion" setting: no decorative motion anywhere. */
 @media (prefers-reduced-motion: reduce) {

@@ -6,6 +6,7 @@ import { Sparkles } from 'lucide-react';
 import { navForRole } from '@/lib/nav';
 import { canAccessSection, type Role } from '@/lib/rbac';
 import { translate } from '@/lib/i18n/dictionaries';
+import BrandMark from '@/components/BrandMark';
 import type { Locale } from '@/lib/i18n/config';
 import type { IntegrationStatus } from '@integrations/status';
 
@@ -13,10 +14,12 @@ export default function Sidebar({
   locale,
   statuses,
   role,
+  brandLogo,
 }: {
   locale: Locale;
   statuses: IntegrationStatus[];
   role: Role;
+  brandLogo?: string | null;
 }) {
   const pathname = usePathname();
   const t = (k: string) => translate(locale, k);
@@ -36,13 +39,10 @@ export default function Sidebar({
     <aside className="hidden w-60 shrink-0 flex-col border-e border-line bg-surface md:flex">
       {/* brand */}
       <div className="flex h-18 items-center gap-3 border-b border-line px-5">
-        <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-accent text-sm font-bold tracking-wide text-white">
-          EH
-        </span>
-        <div className="leading-tight">
-          <p className="text-sm font-semibold tracking-tight text-fg">{t('app_subtitle')}</p>
-          <p className="text-[10px] uppercase tracking-[0.16em] text-muted">Operations Center</p>
-        </div>
+        <BrandMark logoUrl={brandLogo} size="md" animate />
+        {!brandLogo && (
+          <span className="ms-1 border-s border-line ps-3 text-[10px] uppercase tracking-[0.16em] text-muted">Operations<br />Center</span>
+        )}
       </div>
 
       {/* nav */}
