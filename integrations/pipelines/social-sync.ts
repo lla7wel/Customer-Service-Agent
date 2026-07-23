@@ -170,7 +170,13 @@ async function setState(db: Kysely<DB>, key: string, patch: { cursor?: string | 
 
 /* --------------------------------- sync ----------------------------------- */
 
-const FB_FIELDS = 'id,message,story,status_type,created_time,permalink_url,full_picture,attachments{media_type,type,media,subattachments},comments.summary(true),reactions.summary(true)';
+// The engagement summaries (comments.summary/reactions.summary) require the
+// `pages_read_user_content` permission / Page Public Content Access (App
+// Review). We omit them so Facebook posts sync WITHOUT extra permissions;
+// engagement is added opportunistically per post and simply left blank when the
+// app lacks the capability (never a fabricated count).
+const FB_FIELDS = 'id,message,story,status_type,created_time,permalink_url,full_picture,attachments{media_type,type,media,subattachments}';
+const FB_FIELDS_WITH_ENGAGEMENT = `${FB_FIELDS},comments.summary(true),reactions.summary(true)`;
 const IG_FIELDS = 'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count,children{media_url,thumbnail_url,media_type}';
 
 /**
@@ -184,11 +190,17 @@ export async function syncFacebookPage(db: Kysely<DB>, opts: { pageSize?: number
   const key = 'facebook:posts';
   const state = await getState(db, key);
   try {
-    const res = await graphCall<{ data?: any[]; paging?: { cursors?: { after?: string }; next?: string } }>(`${creds.pageId}/published_posts`, {
-      accessToken: creds.pageAccessToken,
-      params: { fields: FB_FIELDS, limit: opts.pageSize ?? 25, ...(state?.cursor ? { after: state.cursor } : {}) },
-      retries: 1,
-    });
+    const params = (fields: string) => ({ fields, limit: opts.pageSize ?? 25, ...(state?.cursor ? { after: state.cursor } : {}) });
+    // Prefer engagement counts; fall back to the no-extra-permission field set
+    // if the app lacks pages_read_user_content (Meta error #10).
+    let res: { data?: any[]; paging?: { cursors?: { after?: string }; next?: string } };
+    try {
+      res = await graphCall(`${creds.pageId}/published_posts`, { accessToken: creds.pageAccessToken, params: params(FB_FIELDS_WITH_ENGAGEMENT), retries: 1 });
+    } catch (e: any) {
+      if (Number(e?.code) === 10) {
+        res = await graphCall(`${creds.pageId}/published_posts`, { accessToken: creds.pageAccessToken, params: params(FB_FIELDS), retries: 1 });
+      } else { throw e; }
+    }
     let count = 0;
     for (const raw of res.data ?? []) {
       const post = normalizeFacebookPost(raw, creds.pageId);
