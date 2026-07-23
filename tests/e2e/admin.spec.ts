@@ -28,8 +28,14 @@ test.describe('authentication', () => {
     await expect(page.getByPlaceholder('username')).toBeVisible();
     await expect(page.locator('meta[name="facebook-domain-verification"]')).toHaveAttribute(
       'content',
-      '70t4mpxdj37vynq0mpgjezniwyxtgf',
+      '70t4mpxdj37vynq0mpqieznjwvtxgf',
     );
+  });
+
+  test('Meta domain verification file is public and byte-exact', async ({ page }) => {
+    const response = await page.goto('/70t4mpxdj37vynq0mpqieznjwvtxgf.html');
+    expect(response?.status()).toBe(200);
+    await expect(page.locator('body')).toHaveText('70t4mpxdj37vynq0mpqieznjwvtxgf');
   });
 
   test('protected routes redirect to sign-in when signed out', async ({ page }) => {

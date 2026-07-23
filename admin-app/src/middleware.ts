@@ -20,6 +20,7 @@ import { SESSION_COOKIE, verifySessionToken, isAuthConfigured } from '@/lib/auth
 import { canAccessPath, landingPath } from '@/lib/rbac';
 
 const PUBLIC_API_PREFIXES = ['/api/meta/webhook', '/api/health', '/api/auth/'];
+const META_DOMAIN_VERIFICATION_PATH = '/70t4mpxdj37vynq0mpqieznjwvtxgf.html';
 
 /** Propagate the real request path so the (dashboard) layout can run the
  *  authoritative (DB-role) section guard — layouts do not receive the pathname. */
@@ -33,6 +34,9 @@ export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   if (PUBLIC_API_PREFIXES.some((p) => pathname.startsWith(p))) {
+    return NextResponse.next();
+  }
+  if (pathname === META_DOMAIN_VERIFICATION_PATH) {
     return NextResponse.next();
   }
 
