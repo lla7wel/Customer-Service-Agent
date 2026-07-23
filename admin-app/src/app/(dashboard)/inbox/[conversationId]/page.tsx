@@ -15,6 +15,7 @@ import CustomerMemoryPanel from '@/components/inbox/CustomerMemoryPanel';
 import { getDb } from '@integrations/db/client';
 import { getCustomerMemory } from '@integrations/tools';
 import { hydrateMessagesWithCandidates, hydrateUiCandidates, type UiCandidate } from '@/lib/product-candidates';
+import ConversationDetailsSheet from '@/components/inbox/ConversationDetailsSheet';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,7 +63,7 @@ export default async function ConversationPage(props: { params: Promise<{ conver
       <Back ar={ar} />
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-accent-grad text-sm font-bold text-black">
+          <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-navy text-sm font-bold text-white">
             {(title[0] || '#').toUpperCase()}
           </span>
           <div>
@@ -73,6 +74,13 @@ export default async function ConversationPage(props: { params: Promise<{ conver
         <Badge tone={conversationTone(convo.status)} dot>{humanize(convo.status)}</Badge>
       </div>
 
+      <div className="mb-3 lg:hidden">
+        <AiControls conversationId={convo.id} aiEnabled={convo.ai_enabled} locale={locale} />
+      </div>
+      <ConversationDetailsSheet ar={ar}>
+        <CustomerMemoryPanel conversationId={convo.id} memory={memory} locale={locale} />
+        <CustomerInfoPanel locale={locale} customer={customer} conversation={{status:convo.status,ai_enabled:convo.ai_enabled,channel:convo.channel,customer_language:convo.customer_language,detected_intent:convo.detected_intent,last_message_at:formatDate(convo.last_message_at,locale)}} />
+      </ConversationDetailsSheet>
       <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
         {/* chat workspace */}
         <ConversationWorkspace
@@ -90,7 +98,7 @@ export default async function ConversationPage(props: { params: Promise<{ conver
         />
 
         {/* right rail */}
-        <aside className="space-y-4">
+        <aside className="hidden space-y-4 lg:block">
           <AiControls conversationId={convo.id} aiEnabled={convo.ai_enabled} locale={locale} />
 
           <CustomerMemoryPanel conversationId={convo.id} memory={memory} locale={locale} />

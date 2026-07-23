@@ -12,23 +12,15 @@ import { allIntegrationStatuses, databaseStatus } from '@integrations/status';
 import { getDb } from '@/lib/db';
 import { sql } from 'kysely';
 import { timeAgo } from '@/lib/format';
+import { getAnalytics } from '@integrations/pipelines/analytics-query';
 
 export const dynamic = 'force-dynamic';
 
-async function liveCounts(db: NonNullable<ReturnType<typeof getDb>>) {
-  const day7 = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
-  const [inbound, aiReplies, handoffs, attention, published, failedPubs, deliveryProblems, deadJobs] = await Promise.all([
-    db.selectFrom('messages').select(db.fn.countAll<number>().as('n'))
-      .where('direction', '=', 'inbound').where('created_at', '>', day7).executeTakeFirst(),
-    db.selectFrom('messages').select(db.fn.countAll<number>().as('n'))
-      .where('direction', '=', 'outbound').where('sender_type', '=', 'ai')
-      .where('delivery_status', 'in', ['sent', 'partial']).where('created_at', '>', day7).executeTakeFirst(),
-    db.selectFrom('conversations').select(db.fn.countAll<number>().as('n'))
-      .where('handoff_sent_at', '>', day7).executeTakeFirst(),
+/** Operational snapshots — current-state counts (not dated series). */
+async function liveSnapshots(db: NonNullable<ReturnType<typeof getDb>>) {
+  const [attention, failedPubs, deliveryProblems, deadJobs] = await Promise.all([
     db.selectFrom('conversations').select(db.fn.countAll<number>().as('n'))
       .where('human_attention', '=', true).executeTakeFirst(),
-    db.selectFrom('content_publications').select(db.fn.countAll<number>().as('n'))
-      .where('status', '=', 'published').where('published_at', '>', day7).executeTakeFirst(),
     db.selectFrom('content_publications').select(db.fn.countAll<number>().as('n'))
       .where('status', '=', 'failed').executeTakeFirst(),
     db.selectFrom('outbox_messages').select(db.fn.countAll<number>().as('n'))
@@ -37,11 +29,7 @@ async function liveCounts(db: NonNullable<ReturnType<typeof getDb>>) {
       .where('status', '=', 'dead').executeTakeFirst(),
   ]);
   return {
-    inbound: Number(inbound?.n ?? 0),
-    aiReplies: Number(aiReplies?.n ?? 0),
-    handoffs: Number(handoffs?.n ?? 0),
     attention: Number(attention?.n ?? 0),
-    published: Number(published?.n ?? 0),
     failedPubs: Number(failedPubs?.n ?? 0),
     deliveryProblems: Number(deliveryProblems?.n ?? 0),
     deadJobs: Number(deadJobs?.n ?? 0),
@@ -62,15 +50,9 @@ export default async function DashboardPage() {
     );
   }
 
-  const [counts, trend, topProducts, upcoming, recentAttention] = await Promise.all([
-    liveCounts(db),
-    db.selectFrom('analytics_daily')
-      .select(['day', 'metric', 'value'])
-      .where('metric', 'in', ['inbound_messages', 'ai_replies'])
-      .where('day', '>=', sql<any>`current_date - 14`)
-      .orderBy('day', 'asc')
-      .execute()
-      .catch(() => [] as { day: string; metric: string; value: number }[]),
+  const [analytics, counts, topProducts, upcoming, recentAttention, insightsReadiness] = await Promise.all([
+    getAnalytics(db, { days: 7 }),
+    liveSnapshots(db),
     sql<{ product_id: string; name: string | null; hits: number }>`
       select p.id as product_id,
              coalesce(p.libyan_display_name, p.arabic_name, p.english_name) as name,
@@ -95,10 +77,30 @@ export default async function DashboardPage() {
       .orderBy('human_attention_at', 'desc')
       .limit(6)
       .execute(),
+    db.selectFrom('provider_readiness').select(['ok', 'checked_at']).where('check_key', '=', 'insights').executeTakeFirst(),
   ]);
 
-  const inboundSeries = trend.filter((r) => r.metric === 'inbound_messages').map((r) => Number(r.value));
-  const aiSeries = trend.filter((r) => r.metric === 'ai_replies').map((r) => Number(r.value));
+  // Every number below comes from the ONE shared analytics service, so the
+  // Dashboard, /api/dashboard and the Analytics workspace never disagree.
+  const m = analytics.metrics;
+  const total = (k: string) => m[k]?.total ?? 0;
+  const inboundSeries = m.inbound_messages?.values ?? [];
+  const aiSeries = m.ai_replies?.values ?? [];
+  const PROVIDER_LABELS: Record<string, { ar: string; en: string }> = {
+    facebook_page_engagements: { ar: 'تفاعل فيسبوك', en: 'Facebook engagement' },
+    facebook_page_views: { ar: 'مشاهدات صفحة فيسبوك', en: 'Facebook Page views' },
+    instagram_reach: { ar: 'وصول إنستغرام', en: 'Instagram reach' },
+    instagram_views: { ar: 'مشاهدات إنستغرام', en: 'Instagram views' },
+    instagram_interactions: { ar: 'تفاعل إنستغرام', en: 'Instagram interactions' },
+  };
+  // Reach is unique (non-additive): its period total is intentionally null, so
+  // it is shown as "daily only" instead of an overstated sum.
+  const providerMetrics = analytics.provider.filter((p) => p.available).map((p) => ({
+    key: p.metric,
+    ar: PROVIDER_LABELS[p.metric]?.ar ?? p.metric,
+    en: PROVIDER_LABELS[p.metric]?.en ?? p.metric,
+    total: p.total,
+  }));
   const problems = counts.deliveryProblems + counts.deadJobs + counts.failedPubs;
 
   return (
@@ -138,16 +140,16 @@ export default async function DashboardPage() {
       )}
 
       <section className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard icon={MessageSquare} label={ar ? 'رسائل واردة (٧ أيام)' : 'Inbound (7d)'} value={counts.inbound.toLocaleString()} />
-        <StatCard icon={Bot} label={ar ? 'ردود الذكاء (٧ أيام)' : 'AI replies (7d)'} value={counts.aiReplies.toLocaleString()} />
-        <StatCard icon={HandHelping} label={ar ? 'تحويلات طلب (٧ أيام)' : 'Order handoffs (7d)'} value={counts.handoffs.toLocaleString()} hint={ar ? 'نية شراء — ليست طلبات مؤكدة' : 'Buying intent — not confirmed orders'} />
-        <StatCard icon={Clapperboard} label={ar ? 'منشورات ناجحة (٧ أيام)' : 'Published (7d)'} value={counts.published.toLocaleString()} />
+        <StatCard icon={MessageSquare} label={ar ? 'رسائل واردة (٧ أيام)' : 'Inbound (7d)'} value={total('inbound_messages').toLocaleString()} hint={deltaHint(m.inbound_messages?.changePct, ar)} />
+        <StatCard icon={Bot} label={ar ? 'ردود الذكاء (٧ أيام)' : 'AI replies (7d)'} value={total('ai_replies').toLocaleString()} hint={deltaHint(m.ai_replies?.changePct, ar)} />
+        <StatCard icon={HandHelping} label={ar ? 'تحويلات واتساب (٧ أيام)' : 'WhatsApp handoffs (7d)'} value={total('order_handoffs').toLocaleString()} hint={ar ? 'نية شراء — ليست طلبات مؤكدة' : 'Buying intent — not confirmed orders'} />
+        <StatCard icon={Clapperboard} label={ar ? 'منشورات ناجحة (٧ أيام)' : 'Published (7d)'} value={total('content_published').toLocaleString()} hint={deltaHint(m.content_published?.changePct, ar)} />
       </section>
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
           <Card>
-            <SectionTitle icon={TrendingUp} title={ar ? 'آخر ١٤ يوم' : 'Last 14 days'} />
+            <SectionTitle icon={TrendingUp} title={ar ? 'آخر ٧ أيام' : 'Last 7 days'} action={<Link href="/analytics" className="text-xs font-medium text-accent hover:underline">{ar ? 'التحليلات الكاملة ←' : 'Full analytics →'}</Link>} />
             {inboundSeries.length === 0 ? (
               <p className="text-sm text-muted">
                 {ar
@@ -197,7 +199,7 @@ export default async function DashboardPage() {
                 {recentAttention.map((c) => (
                   <li key={c.id}>
                     <Link href={`/inbox/${c.id}`} className="flex items-center justify-between gap-3 py-2.5 transition hover:bg-surface2/40">
-                      <p className="min-w-0 truncate text-sm text-fg" dir="auto">{c.last_message_preview || '—'}</p>
+                      <p className="min-w-0 whitespace-pre-wrap break-words text-sm text-fg" dir="auto">{c.last_message_preview || '—'}</p>
                       <span className="shrink-0 text-xs text-muted">{c.human_attention_reason ?? ''}</span>
                     </Link>
                   </li>
@@ -228,14 +230,25 @@ export default async function DashboardPage() {
           </Card>
           <Card>
             <SectionTitle icon={Activity} title={ar ? 'رؤى فيسبوك وإنستغرام' : 'Facebook & Instagram insights'} />
-            <p className="text-sm text-muted">
-              {ar
-                ? 'تظهر أرقام الوصول والتفاعل هنا فقط عندما تكون صلاحية read_insights مفعّلة ويمرّ فحص الجاهزية — لا نعرض أرقاماً وهمية.'
-                : 'Reach and engagement appear here only once the Page token has read_insights and the readiness check passes — no fabricated numbers.'}
-            </p>
-            <Link href="/settings?tab=channels" className="mt-2 inline-block text-sm font-medium text-accent hover:underline">
-              {ar ? 'فحص جاهزية القنوات ←' : 'Check channel readiness →'}
-            </Link>
+            {providerMetrics.length > 0 ? (
+              <ul className="space-y-2">
+                {providerMetrics.map((metric) => (
+                  <li key={metric.key} className="flex items-center justify-between gap-3 rounded-lg bg-surface2/60 px-3 py-2 text-sm">
+                    <span className="text-muted">{ar ? metric.ar : metric.en}</span>
+                    {metric.total != null
+                      ? <b className="tabular-nums text-fg">{metric.total.toLocaleString()}</b>
+                      : <span className="text-xs text-faint">{ar ? 'يومي فقط' : 'daily only'}</span>}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted">
+                {insightsReadiness?.ok
+                  ? (ar ? 'الاتصال جاهز. تظهر الأرقام هنا بعد أول مزامنة تتضمن بيانات من Meta.' : 'Connected. Numbers appear after the first sync that contains Meta data.')
+                  : (ar ? 'فعّل صلاحية read_insights من صفحة القنوات لإظهار الوصول والمشاهدات والتفاعل الحقيقي.' : 'Enable read_insights in Channels to show real reach, views and engagement.')}
+              </p>
+            )}
+            <Link href="/settings?tab=channels" className="mt-2 inline-block text-sm font-medium text-accent hover:underline">{ar ? 'إعداد الرؤى والقنوات ←' : 'Set up insights and channels →'}</Link>
           </Card>
         </div>
       </div>
@@ -243,18 +256,27 @@ export default async function DashboardPage() {
   );
 }
 
+/** "▲ 12% عن الفترة السابقة" — null pct means no prior baseline. */
+function deltaHint(pct: number | null | undefined, ar: boolean): string | undefined {
+  if (pct == null) return ar ? 'جديد — لا مقارنة سابقة' : 'New — no prior period';
+  const arrow = pct > 0 ? '▲' : pct < 0 ? '▼' : '—';
+  const suffix = ar ? 'عن الفترة السابقة' : 'vs previous period';
+  return `${arrow} ${Math.abs(pct).toFixed(0)}% ${suffix}`;
+}
+
 function TrendRow({ label, series, tone }: { label: string; series: number[]; tone: 'accent' | 'success' }) {
   const max = Math.max(1, ...series);
   const color = tone === 'accent' ? 'bg-accent' : 'bg-success';
+  const sum = series.reduce((a, b) => a + b, 0);
   return (
     <div>
       <div className="mb-1 flex items-center justify-between text-xs text-muted">
         <span>{label}</span>
-        <span className="font-semibold text-fg">{series.reduce((a, b) => a + b, 0).toLocaleString()}</span>
+        <span className="font-semibold tabular-nums text-fg">{sum.toLocaleString()}</span>
       </div>
-      <div className="flex h-10 items-end gap-1" dir="ltr">
+      <div className="flex h-10 items-end gap-1" dir="ltr" role="img" aria-label={`${label}: ${sum}`}>
         {series.map((v, i) => (
-          <div key={i} className={`${color} min-w-1 flex-1 rounded-t-sm opacity-80`} style={{ height: `${Math.max(6, (v / max) * 100)}%` }} />
+          <div key={i} className={`${color} min-w-1 flex-1 rounded-t-sm opacity-80`} style={{ height: `${Math.max(6, (v / max) * 100)}%` }} title={String(v)} />
         ))}
       </div>
     </div>

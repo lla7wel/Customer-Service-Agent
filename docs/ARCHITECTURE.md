@@ -1,7 +1,7 @@
 # Architecture
 
 A pragmatic modular monolith plus one worker — sized for ~20–30 conversations
-and 10–20 content items per day, three admins, and a 4,700-product catalog.
+and 10–20 content items per day, three admins, and the current full catalog.
 No Redis, no Kubernetes, no distributed queue.
 
 ## Runtime
@@ -72,7 +72,7 @@ all its publications.
 | `integrations/pipelines/` | ingest, turn, outbox, content-create, content-publish, comments, analytics |
 | `integrations/providers/` | Meta adapters: graph client, messaging, publishing, readiness |
 | `integrations/catalog/` | Pricing engine, CSV import, families |
-| `integrations/content/` | Deterministic Arabic typography and composition |
+| `integrations/content/` | Publish-selection and approval safety rules |
 | `integrations/tools/` | Read-only tools exposed to the model |
 | `integrations/db/` | Kysely client and generated types |
 | `worker/` | The background process |

@@ -83,6 +83,11 @@ https://app.<domain>/api/meta/webhook
 with `META_VERIFY_TOKEN` as the verify token, subscribing `messages`,
 `messaging_postbacks`, `feed` and (for Instagram) `comments`.
 
+Grant `pages_read_engagement` and `read_insights` to enable real Page/Instagram
+reach, views, and engagement on the owner dashboard. The authorizing person must
+have the Page's Analyze task. Link the Instagram professional account to the Page
+before setting the detected `META_IG_USER_ID`.
+
 Then open **Settings → Channels** in the app and press *فحص الآن*. It runs real
 checks and tells you exactly what is connected and what is missing.
 

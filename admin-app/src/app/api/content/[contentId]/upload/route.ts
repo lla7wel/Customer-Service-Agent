@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi, badRequest, notFound } from '@/lib/api';
 import { putObject, isStorageConfigured } from '@integrations/storage';
+import { sql } from 'kysely';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -56,9 +57,21 @@ export async function POST(req: NextRequest, props: { params: Promise<{ contentI
   const asset = await db.insertInto('content_assets').values({
     content_item_id: contentId,
     kind: 'uploaded',
+    asset_role: 'source',
+    selected_for_publish: false,
     storage_path: stored.data.path,
     public_url: stored.data.publicUrl,
     position: Number(position?.n ?? 0),
   }).returningAll().executeTakeFirst();
+  await db.transaction().execute(async (trx) => {
+    await trx.updateTable('content_assets').set({ selected_for_publish: false })
+      .where('content_item_id', '=', contentId).where('asset_role', '=', 'output').execute();
+    await trx.updateTable('content_items').set({
+      config_revision: sql`config_revision + 1` as any,
+      selected_generation_run_id: null,
+      status: 'draft',
+      last_error: null,
+    }).where('id', '=', contentId).execute();
+  });
   return NextResponse.json({ asset }, { status: 201 });
 }

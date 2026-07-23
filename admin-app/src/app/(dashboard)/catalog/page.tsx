@@ -8,6 +8,7 @@ import CsvImportButton from '@/components/products/CsvImportButton';
 import { getT } from '@/lib/i18n/server';
 import { databaseStatus } from '@integrations/status';
 import { jsonArrayFrom } from 'kysely/helpers/postgres';
+import { sql } from 'kysely';
 import { getDb } from '@/lib/db';
 import { formatPrice, humanize, resolveProductName } from '@/lib/format';
 
@@ -50,8 +51,8 @@ export default async function ProductsPage(
   const page = Math.max(0, parseInt(searchParams.page ?? '0', 10) || 0);
   const q = (searchParams.q ?? '').trim();
   const category = searchParams.category ?? '';
-  const statusF = searchParams.status ?? '';
-  const imagesF = searchParams.images ?? '';
+  const statusF = searchParams.status ?? 'active';
+  const imagesF = searchParams.images ?? 'with';
 
   const supabase = getDb();
   if (!supabase) {
@@ -88,15 +89,20 @@ export default async function ProductsPage(
   let total = 0;
   let error: { message: string } | null = null;
   let categories: string[] = [];
+  let globalStats = { total: 0, withImages: 0, imageRecords: 0 };
   try {
-    const [data, countRow, catRes] = await Promise.all([
-      query.orderBy('updated_at', 'desc').limit(PAGE_SIZE).offset(page * PAGE_SIZE).execute(),
+    const [data, countRow, catRes, globalTotal, globalWithImages, globalImageRecords] = await Promise.all([
+      query.orderBy(sql`case when primary_image_id is null then 1 else 0 end`).orderBy('products.status','asc').orderBy('updated_at', 'desc').limit(PAGE_SIZE).offset(page * PAGE_SIZE).execute(),
       query.clearSelect().select((eb) => eb.fn.countAll().as('n')).executeTakeFirst(),
       supabase.selectFrom('products').select('category').distinct().where('category', 'is not', null).execute(),
+      supabase.selectFrom('products').select((eb)=>eb.fn.countAll<number>().as('n')).executeTakeFirst(),
+      supabase.selectFrom('products').select((eb)=>eb.fn.countAll<number>().as('n')).where(({exists,selectFrom})=>exists(selectFrom('product_images').select('id').whereRef('product_images.product_id','=','products.id').where('public_url','is not',null))).executeTakeFirst(),
+      supabase.selectFrom('product_images').select((eb)=>eb.fn.countAll<number>().as('n')).executeTakeFirst(),
     ]);
     rows = data as unknown as Row[];
     total = Number(countRow?.n ?? 0);
     categories = catRes.map((r) => r.category).filter(Boolean).sort() as string[];
+    globalStats = { total:Number(globalTotal?.n??0), withImages:Number(globalWithImages?.n??0), imageRecords:Number(globalImageRecords?.n??0) };
   } catch (e: any) {
     error = { message: e?.message ?? 'query_failed' };
   }
@@ -121,10 +127,11 @@ export default async function ProductsPage(
             <p className="text-xs text-muted">{ar ? 'ابحث، راجع الصور، وثبّت أسعار المنتجات النشطة.' : 'Search, inspect image coverage, and keep active pricing ready.'}</p>
           </div>
         </div>
-        <div className="relative grid grid-cols-3 gap-2 text-xs sm:w-96">
-          <CatalogChip icon={Search} label={ar ? 'النتائج' : 'Results'} value={total} />
-          <CatalogChip icon={Image} label={ar ? 'بصور' : 'With images'} value={rows.filter((r) => primaryUrl(r)).length} />
-          <CatalogChip icon={ImageOff} label={ar ? 'بدون صور' : 'Missing'} value={rows.filter((r) => !primaryUrl(r)).length} tone="warn" />
+        <div className="relative grid grid-cols-2 gap-2 text-xs sm:w-[480px] sm:grid-cols-4">
+          <CatalogChip icon={Search} label={ar ? 'كل المنتجات' : 'All products'} value={globalStats.total} />
+          <CatalogChip icon={Image} label={ar ? 'منتجات بصور' : 'With images'} value={globalStats.withImages} />
+          <CatalogChip icon={ImageOff} label={ar ? 'بدون صور' : 'Missing'} value={Math.max(0,globalStats.total-globalStats.withImages)} tone="warn" />
+          <CatalogChip icon={Image} label={ar ? 'سجلات الصور' : 'Image records'} value={globalStats.imageRecords} />
         </div>
       </section>
 
@@ -145,7 +152,11 @@ export default async function ProductsPage(
           ))}
         </div>
       ) : (
-        <Card pad={false} className="overflow-hidden">
+        <>
+        <div className="grid gap-3 md:hidden">
+          {rows.map((r) => <ProductListCard key={r.id} r={r} ar={ar} />)}
+        </div>
+        <Card pad={false} className="hidden overflow-x-auto md:block">
           <table className="w-full text-sm">
             <thead className="border-b border-line text-xs uppercase tracking-wide text-faint">
               <tr>
@@ -163,6 +174,7 @@ export default async function ProductsPage(
             </tbody>
           </table>
         </Card>
+        </>
       )}
 
       {totalPages > 1 && <Pager page={page} totalPages={totalPages} sp={searchParams} ar={ar} />}
@@ -186,8 +198,9 @@ function Thumb({ url, size = 'card' }: { url: string | null; size?: 'card' | 'ro
   const cls = size === 'card' ? 'aspect-square w-full' : 'h-11 w-11 rounded-md';
   if (!url) {
     return (
-      <div className={`flex items-center justify-center bg-surface2 text-faint ${size === 'card' ? 'aspect-square w-full' : 'h-11 w-11 rounded-md'}`}>
+      <div className={`flex flex-col items-center justify-center gap-2 bg-surface2 text-faint ${size === 'card' ? 'aspect-square w-full' : 'h-11 w-11 rounded-md'}`}>
         <ImageOff size={size === 'card' ? 22 : 16} />
+        {size === 'card' && <span className="text-[11px]">لا توجد صورة محفوظة</span>}
       </div>
     );
   }
@@ -218,7 +231,7 @@ function ProductCard({ r, ar }: { r: Row; ar: boolean }) {
   const imageCount = r.product_images?.length ?? 0;
   const hasImage = !!primaryUrl(r);
   return (
-    <Link href={`/catalog/${r.id}`} className="card tilt-card group overflow-hidden p-0 transition hover:border-accent/40 hover:shadow-glow">
+    <Link href={`/catalog/${r.id}`} className="card group overflow-hidden p-0 transition hover:border-accent/35">
       <div className="relative overflow-hidden">
         <Thumb url={primaryUrl(r)} />
         <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-linear-to-t from-black/75 to-transparent p-2 opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100">
@@ -228,9 +241,7 @@ function ProductCard({ r, ar }: { r: Row; ar: boolean }) {
         {r.campaign_price != null && r.campaign_price !== r.base_price && (
           <span className="absolute inset-s-2 top-2 rounded-full bg-success px-2 py-0.5 text-[10px] font-bold text-black">{ar ? 'عرض' : 'SALE'}</span>
         )}
-        {!hasImage && (
-          <span className="absolute inset-e-2 top-2 rounded-full bg-warning px-2 py-0.5 text-[10px] font-bold text-black">{ar ? 'صورة' : 'IMAGE'}</span>
-        )}
+        {!hasImage && <span className="absolute inset-e-2 top-2 rounded-full bg-warning/90 px-2 py-0.5 text-[10px] font-bold text-white">{ar ? 'بدون صورة' : 'No image'}</span>}
       </div>
       <div className="p-3">
         <ProductName r={r} ar={ar} />
@@ -242,6 +253,10 @@ function ProductCard({ r, ar }: { r: Row; ar: boolean }) {
       </div>
     </Link>
   );
+}
+
+function ProductListCard({ r, ar }: { r: Row; ar: boolean }) {
+  return <Link href={`/catalog/${r.id}`} className="flex min-h-28 gap-3 rounded-2xl border border-line bg-surface p-3 shadow-card"><div className="h-24 w-24 shrink-0 overflow-hidden rounded-xl"><Thumb url={primaryUrl(r)}/></div><div className="min-w-0 flex-1"><ProductName r={r} ar={ar}/><p className="mt-1 font-mono text-[11px] text-faint">{r.product_code}</p><div className="mt-2 flex items-center justify-between gap-2"><PriceBlock r={r}/><Badge tone={r.status==='active'?'good':'neutral'}>{humanize(r.status)}</Badge></div></div></Link>;
 }
 
 function CatalogChip({

@@ -22,6 +22,7 @@ async function seedContentItem(t: TestDb, over: Partial<Record<string, unknown>>
   await t.db.insertInto('content_assets').values({
     content_item_id: item!.id, kind: 'composed',
     public_url: 'https://media.example/content/a.jpg', position: 0,
+    asset_role: 'output', selected_for_publish: true, config_revision: 1,
   }).execute();
   return { itemId: item!.id, productId };
 }
@@ -41,6 +42,58 @@ describe('exactly-once content publishing', () => {
     await t.destroy();
   });
   beforeEach(() => vi.restoreAllMocks());
+
+  it('never publishes a source upload when no selected output exists', async () => {
+    const { itemId } = await seedContentItem(t, { platforms: ['facebook'] });
+    await t.db.deleteFrom('content_assets').where('content_item_id', '=', itemId).execute();
+    await t.db.insertInto('content_assets').values({
+      content_item_id: itemId,
+      kind: 'uploaded',
+      public_url: 'https://media.example/content/source-only.jpg',
+      position: 0,
+      asset_role: 'source',
+      selected_for_publish: false,
+      config_revision: 1,
+    }).execute();
+
+    const result = await startPublishing(t.db, itemId);
+    expect(result).toEqual({ started: false, publicationIds: [] });
+    expect(await t.db.selectFrom('content_publications').selectAll().where('content_item_id', '=', itemId).execute()).toEqual([]);
+    const item = await t.db.selectFrom('content_items').select(['status', 'last_error']).where('id', '=', itemId).executeTakeFirstOrThrow();
+    expect(item.status).toBe('failed');
+    expect(item.last_error).toMatch(/no assets to publish/i);
+  });
+
+  it('publishes only the selected current-revision output', async () => {
+    const { itemId } = await seedContentItem(t, { platforms: ['facebook'] });
+    await t.db.insertInto('content_assets').values([
+      {
+        content_item_id: itemId, kind: 'uploaded', public_url: 'https://media.example/content/source.jpg', position: 0,
+        asset_role: 'source', selected_for_publish: false, config_revision: 1,
+      },
+      {
+        content_item_id: itemId, kind: 'generated', public_url: 'https://media.example/content/old-revision.jpg', position: 1,
+        asset_role: 'output', selected_for_publish: true, config_revision: 0,
+      },
+      {
+        content_item_id: itemId, kind: 'generated', public_url: 'https://media.example/content/unselected.jpg', position: 2,
+        asset_role: 'output', selected_for_publish: false, config_revision: 1,
+      },
+    ]).execute();
+    const { publicationIds } = await startPublishing(t.db, itemId);
+    const requested: string[] = [];
+    vi.spyOn(globalThis, 'fetch' as any).mockImplementation(async (url: any, init: any) => {
+      requested.push(`${String(url)} ${String(init?.body ?? '')}`);
+      return jsonRes({ id: 'photo1', post_id: 'post_selected' });
+    });
+
+    expect(await processPublication(t.db, publicationIds[0])).toBe('published');
+    const request = requested.join('\n');
+    expect(request).toContain('https://media.example/content/a.jpg');
+    expect(request).not.toContain('source.jpg');
+    expect(request).not.toContain('old-revision.jpg');
+    expect(request).not.toContain('unselected.jpg');
+  });
 
   it('startPublishing is idempotent: one publication row per platform, ever', async () => {
     const { itemId } = await seedContentItem(t);
@@ -131,6 +184,7 @@ describe('exactly-once content publishing', () => {
     const { itemId } = await seedContentItem(t, { platforms: ['facebook'] });
     await t.db.insertInto('content_assets').values({
       content_item_id: itemId, kind: 'composed', public_url: 'https://media.example/content/b.jpg', position: 1,
+      asset_role: 'output', selected_for_publish: true, config_revision: 1,
     }).execute();
     await startPublishing(t.db, itemId);
     const pub = await t.db.selectFrom('content_publications').select(['id', 'format']).where('content_item_id', '=', itemId).executeTakeFirst();

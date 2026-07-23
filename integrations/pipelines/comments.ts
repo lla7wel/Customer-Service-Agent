@@ -23,6 +23,7 @@ import type { Kysely } from 'kysely';
 import type { DB } from '../db/types';
 import { fbGetComments, igGetComments, replyToComment, type ProviderComment } from '../providers/publishing';
 import { classifyIntent } from './intent';
+import { claimComment, releaseClaim } from './comment-ledger';
 
 const MAX_COMMENT_AGE_DAYS = 7;
 const POLL_WINDOW_DAYS = 14;
@@ -148,6 +149,15 @@ export async function pollAndProcessComments(db: Kysely<DB>): Promise<{ seen: nu
           .where('id', '=', inserted.id).execute();
         continue;
       }
+      // Atomically claim through the shared ledger — if a human already claimed
+      // this comment (manual precedence), skip the automatic reply entirely.
+      const claim = await claimComment(db, inserted.id, 'auto', null);
+      if (!claim) {
+        await db.updateTable('content_comments')
+          .set({ decision: decision.decision, decision_reason: 'superseded by manual reply', reply_status: 'skipped' })
+          .where('id', '=', inserted.id).execute();
+        continue;
+      }
       try {
         const res = await replyToComment(comment.id, decision.replyText);
         await db.updateTable('content_comments')
@@ -165,6 +175,7 @@ export async function pollAndProcessComments(db: Kysely<DB>): Promise<{ seen: nu
             reply_error: String(e?.message ?? 'reply failed').slice(0, 500),
           })
           .where('id', '=', inserted.id).execute();
+        await releaseClaim(db, inserted.id); // let a retry (auto or manual) answer later
         failed++;
       }
     }

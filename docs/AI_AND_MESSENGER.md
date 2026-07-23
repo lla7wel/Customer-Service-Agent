@@ -72,8 +72,7 @@ arrange delivery, finalise a purchase):
 
 ```
 تمام، الفريق بيكمل معاك في الطلب 🤍
-وتقدر تطلب مباشرة على واتساب: https://wh.ms/218923322008
-واتساب فرع بنغازي: 0924565511
+وتقدر تتواصل وتطلب مباشرة على واتساب: +218 91-1315900
 ولو عندك سؤال على المقاس أو اللون أو المنتج، أنا معاك.
 ```
 
@@ -82,7 +81,7 @@ arrange delivery, finalise a purchase):
 5. the assistant **keeps answering ordinary product questions** until an admin
    presses **Take Over**.
 
-The WhatsApp numbers are editable Business Facts. WhatsApp is a handoff
+The WhatsApp contact list is an editable Business Fact. WhatsApp is a handoff
 destination only — there is no WhatsApp webhook, inbox or API integration.
 
 Complaints, refunds, payment issues, delivery disputes and missing critical

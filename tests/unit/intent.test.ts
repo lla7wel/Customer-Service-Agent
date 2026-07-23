@@ -55,16 +55,13 @@ describe('shouldSendHandoff (anti-loop)', () => {
 describe('buildOrderHandoffMessage', () => {
   it('produces the exact official handoff with the configured contacts', () => {
     const msg = buildOrderHandoffMessage({
-      branches: [], workingHours: null, phone: null,
+      branches: [], contacts: ['+218 91-1315900'], workingHours: null,
       deliveryAvailable: true, pickupAvailable: true,
-      orderWhatsappUrl: 'https://wh.ms/218923322008',
-      orderWhatsappBenghazi: '0924565511',
       raw: {},
     });
     expect(msg).toBe([
       'تمام، الفريق بيكمل معاك في الطلب 🤍',
-      'وتقدر تطلب مباشرة على واتساب: https://wh.ms/218923322008',
-      'واتساب فرع بنغازي: 0924565511',
+      'وتقدر تتواصل وتطلب مباشرة على واتساب: +218 91-1315900',
       'ولو عندك سؤال على المقاس أو اللون أو المنتج، أنا معاك.',
     ].join('\n'));
   });

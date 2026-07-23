@@ -8,12 +8,10 @@ export const dynamic = 'force-dynamic';
 /** Editable keys and their value shapes. New facts are added here, not free-form. */
 const EDITABLE: Record<string, 'string' | 'boolean' | 'string_array'> = {
   branches: 'string_array',
+  contacts: 'string_array',
   working_hours: 'string',
-  phone: 'string',
   delivery_available: 'boolean',
   pickup_available: 'boolean',
-  order_whatsapp_url: 'string',
-  order_whatsapp_benghazi: 'string',
 };
 
 export async function GET(req: NextRequest) {
@@ -22,6 +20,7 @@ export async function GET(req: NextRequest) {
   const { db } = auth.ctx;
   const facts = await db.selectFrom('business_facts')
     .select(['key', 'value', 'label_ar', 'label_en', 'updated_at'])
+    .where('key', 'in', Object.keys(EDITABLE))
     .orderBy('key', 'asc')
     .execute();
   return NextResponse.json({ facts });

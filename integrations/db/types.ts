@@ -168,12 +168,45 @@ export interface AiEvents {
   trace_id: string | null;
 }
 
+export interface AiTaskPrompts {
+  created_at: Generated<Timestamp>;
+  enabled: Generated<boolean>;
+  prompt: string;
+  task_key: string;
+  title: string;
+  updated_at: Generated<Timestamp>;
+  updated_by: string | null;
+}
+
+export interface AiTaskPromptVersions {
+  created_at: Generated<Timestamp>;
+  enabled: boolean;
+  id: Generated<Int8>;
+  note: string | null;
+  prompt: string;
+  saved_by: string | null;
+  task_key: string;
+  title: string;
+}
+
 export interface AnalyticsDaily {
   computed_at: Generated<Timestamp>;
   day: Timestamp;
   detail: Generated<Json>;
   metric: string;
   value: Generated<Numeric>;
+}
+
+export interface BrandKit {
+  accent_color: Generated<string>;
+  created_at: Generated<Timestamp>;
+  id: Generated<number>;
+  logo_public_url: string | null;
+  logo_storage_path: string | null;
+  primary_color: Generated<string>;
+  updated_at: Generated<Timestamp>;
+  updated_by: string | null;
+  wordmark: Generated<string>;
 }
 
 export interface BusinessFacts {
@@ -257,8 +290,12 @@ export interface CatalogMatchSuggestions {
 }
 
 export interface ContentAssets {
+  aspect_ratio: string | null;
+  asset_role: Generated<string>;
+  config_revision: number | null;
   content_item_id: string;
   created_at: Generated<Timestamp>;
+  generation_run_id: string | null;
   height: number | null;
   id: Generated<string>;
   kind: string;
@@ -266,8 +303,10 @@ export interface ContentAssets {
   position: Generated<number>;
   product_id: string | null;
   public_url: string | null;
+  selected_for_publish: Generated<boolean>;
   source_model: string | null;
   storage_path: string | null;
+  verification: Generated<Json>;
   width: number | null;
 }
 
@@ -282,32 +321,65 @@ export interface ContentComments {
   id: Generated<string>;
   parent_comment_id: string | null;
   provider_comment_id: string;
-  publication_id: string;
+  publication_id: string | null;
+  reply_by_admin_id: string | null;
+  reply_claimed_at: Timestamp | null;
   reply_error: string | null;
+  reply_idempotency_key: string | null;
   reply_provider_id: string | null;
+  reply_source: string | null;
   reply_status: string | null;
   reply_text: string | null;
+  social_post_id: string | null;
   updated_at: Generated<Timestamp>;
+}
+
+export interface ContentGenerationRuns {
+  attempt_count: Generated<number>;
+  config_fingerprint: string;
+  config_revision: number;
+  content_item_id: string;
+  created_at: Generated<Timestamp>;
+  created_by: string | null;
+  finished_at: Timestamp | null;
+  id: Generated<string>;
+  last_error: string | null;
+  prompt_trace_id: string | null;
+  quality_status: Generated<string>;
+  requested_model: string | null;
+  source_model: string | null;
+  stage: Generated<string>;
+  started_at: Timestamp | null;
+  status: Generated<string>;
+  updated_at: Generated<Timestamp>;
+  verification: Generated<Json>;
+  warnings: Generated<Json>;
 }
 
 export interface ContentItems {
   approved_at: Timestamp | null;
   approved_by: string | null;
+  aspect_ratio: Generated<string>;
   caption: string | null;
   comment_automation: Generated<boolean>;
+  config_revision: Generated<number>;
   content_type: Generated<string>;
   created_at: Generated<Timestamp>;
   created_by: string | null;
+  creative_treatment: Generated<string>;
   id: Generated<string>;
   image_text: string | null;
+  image_text_approved: Generated<boolean>;
   image_text_mode: Generated<string>;
   last_error: string | null;
   legacy_campaign_id: string | null;
+  multi_product_layout: Generated<string>;
   output_mode: Generated<string>;
   platforms: Generated<string[]>;
   promotion_ends_at: Timestamp | null;
   purpose: Generated<string>;
   scheduled_for: Timestamp | null;
+  selected_generation_run_id: string | null;
   status: Generated<string>;
   title: string | null;
   updated_at: Generated<Timestamp>;
@@ -727,6 +799,41 @@ export interface Promotions {
   updated_at: Generated<Timestamp>;
 }
 
+export interface ProviderConnections {
+  app_id: string | null;
+  app_secret_enc: string | null;
+  connected_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  granted_scopes: Generated<string[]>;
+  id: Generated<number>;
+  ig_subscribed_fields: Generated<string[]>;
+  ig_user_id: string | null;
+  ig_username: string | null;
+  last_verified_at: Timestamp | null;
+  last_webhook_at: Timestamp | null;
+  page_access_token_enc: string | null;
+  page_id: string | null;
+  page_name: string | null;
+  page_subscribed_fields: Generated<string[]>;
+  page_token_tail: string | null;
+  provider: Generated<string>;
+  source: Generated<string>;
+  status: Generated<string>;
+  token_expires_at: Timestamp | null;
+  updated_at: Generated<Timestamp>;
+  user_access_token_enc: string | null;
+  verify_token_enc: string | null;
+}
+
+export interface ProviderOauthStates {
+  admin_id: string | null;
+  consumed_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  redirect_uri: string;
+  state: string;
+}
+
 export interface ProviderReadiness {
   check_key: string;
   checked_at: Generated<Timestamp>;
@@ -742,6 +849,38 @@ export interface SchemaMigrations {
   version: string;
 }
 
+export interface SocialPosts {
+  account_id: string | null;
+  caption: string | null;
+  comment_count: Generated<number>;
+  content_item_id: string | null;
+  created_at: Generated<Timestamp>;
+  engagement: Generated<Json>;
+  id: Generated<string>;
+  last_synced_at: Timestamp | null;
+  media: Generated<Json>;
+  media_type: string | null;
+  media_url: string | null;
+  permalink: string | null;
+  platform: string;
+  post_type: string | null;
+  provider_created_at: Timestamp | null;
+  provider_deleted: Generated<boolean>;
+  provider_post_id: string;
+  publication_id: string | null;
+  source: Generated<string>;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface SocialSyncState {
+  backfill_done: Generated<boolean>;
+  cursor: string | null;
+  key: string;
+  last_error: string | null;
+  last_run_at: Timestamp | null;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface DB {
   activity_logs: ActivityLogs;
   admin_accounts: AdminAccounts;
@@ -751,7 +890,10 @@ export interface DB {
   ai_behavior_versions: AiBehaviorVersions;
   ai_behaviors: AiBehaviors;
   ai_events: AiEvents;
+  ai_task_prompt_versions: AiTaskPromptVersions;
+  ai_task_prompts: AiTaskPrompts;
   analytics_daily: AnalyticsDaily;
+  brand_kit: BrandKit;
   business_facts: BusinessFacts;
   campaign_assets: CampaignAssets;
   campaign_products: CampaignProducts;
@@ -759,6 +901,7 @@ export interface DB {
   catalog_match_suggestions: CatalogMatchSuggestions;
   content_assets: ContentAssets;
   content_comments: ContentComments;
+  content_generation_runs: ContentGenerationRuns;
   content_items: ContentItems;
   content_products: ContentProducts;
   content_publications: ContentPublications;
@@ -787,6 +930,10 @@ export interface DB {
   product_relations: ProductRelations;
   products: Products;
   promotions: Promotions;
+  provider_connections: ProviderConnections;
+  provider_oauth_states: ProviderOauthStates;
   provider_readiness: ProviderReadiness;
   schema_migrations: SchemaMigrations;
+  social_posts: SocialPosts;
+  social_sync_state: SocialSyncState;
 }

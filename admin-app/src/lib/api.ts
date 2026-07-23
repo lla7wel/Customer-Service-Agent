@@ -8,9 +8,16 @@ import type { Kysely } from 'kysely';
 import type { DB } from '@integrations/db/types';
 import { getDb } from '@integrations/db/client';
 import { requireAdmin, SESSION_COOKIE, type AdminContext } from '@/lib/auth';
+import { canCallApi } from '@/lib/rbac';
 
 export type ApiContext = { db: Kysely<DB>; admin: AdminContext };
 
+/**
+ * Authenticated admin context for an API route, with centralized role
+ * authorization. Every route resolves its required roles through the ONE
+ * capability matrix (apiAccessRoles), so a caller outside a section receives a
+ * 403 — including read APIs and direct URL access — without per-route drift.
+ */
 export async function requireAdminApi(req: NextRequest): Promise<
   { ok: true; ctx: ApiContext } | { ok: false; res: NextResponse }
 > {
@@ -31,6 +38,9 @@ export async function requireAdminApi(req: NextRequest): Promise<
   const admin = await requireAdmin(req.cookies.get(SESSION_COOKIE)?.value);
   if (!admin) {
     return { ok: false, res: NextResponse.json({ error: 'unauthorized' }, { status: 401 }) };
+  }
+  if (!canCallApi(admin.role, req.nextUrl.pathname, req.method)) {
+    return { ok: false, res: forbidden('Your role does not have access to this resource.') };
   }
   return { ok: true, ctx: { db, admin } };
 }

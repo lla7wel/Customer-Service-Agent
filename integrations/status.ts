@@ -5,7 +5,7 @@ import { envAny } from './env';
  * built on this: if `configured` is false, the UI shows a setup card and server
  * endpoints return 503 — nothing is ever faked.
  */
-export type IntegrationKey = 'database' | 'gemini' | 'meta' | 'cron';
+export type IntegrationKey = 'database' | 'gemini' | 'meta';
 
 export interface IntegrationStatus {
   key: IntegrationKey;
@@ -28,7 +28,7 @@ export function databaseStatus(): IntegrationStatus {
   };
 }
 
-/** Where product/campaign images live and the public base URL they are served from. */
+/** Where product/content images live and the public base URL they are served from. */
 export function mediaStatus(): { configured: boolean; missing: string[] } {
   const missing: string[] = [];
   if (!envAny('MEDIA_ROOT')) missing.push('MEDIA_ROOT');
@@ -57,26 +57,17 @@ export function metaStatus(): IntegrationStatus {
   const missing = checks.filter(([, v]) => !v).map(([k]) => k);
   return {
     key: 'meta',
-    label: 'Meta / Facebook',
+    label: 'Meta channels',
     configured: missing.length === 0,
     missing,
-    hint: 'Messenger DMs and page posting.',
-  };
-}
-
-export function cronStatus(): IntegrationStatus {
-  const secret = envAny('CRON_SECRET', 'CLOUDFLARE_WEBHOOK_SECRET');
-  return {
-    key: 'cron',
-    label: 'Scheduler',
-    configured: !!secret,
-    missing: secret ? [] : ['CRON_SECRET'],
-    hint: 'Shared secret for the campaign-scheduler cron endpoint.',
+    hint: 'Messenger, Instagram DMs, publishing and comment automation.',
   };
 }
 
 export function allIntegrationStatuses(): IntegrationStatus[] {
-  return [databaseStatus(), geminiStatus(), metaStatus(), cronStatus()];
+  // Scheduling is a proven worker-health state, exposed separately by
+  // /api/health. It is not an external integration and requires no cron secret.
+  return [databaseStatus(), geminiStatus(), metaStatus()];
 }
 
 /** The public base URL of the deployed app (used for Meta webhook callbacks). */

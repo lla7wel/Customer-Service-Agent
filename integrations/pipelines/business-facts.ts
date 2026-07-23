@@ -9,12 +9,10 @@ import type { DB } from '../db/types';
 
 export interface BusinessFacts {
   branches: string[];
+  contacts: string[];
   workingHours: string | null;
-  phone: string | null;
   deliveryAvailable: boolean;
   pickupAvailable: boolean;
-  orderWhatsappUrl: string | null;
-  orderWhatsappBenghazi: string | null;
   /** Raw map for the Settings editor. */
   raw: Record<string, unknown>;
 }
@@ -25,12 +23,10 @@ export async function loadBusinessFacts(db: Kysely<DB>): Promise<BusinessFacts> 
   for (const r of rows) map[r.key] = r.value;
   return {
     branches: Array.isArray(map.branches) ? (map.branches as string[]) : [],
+    contacts: Array.isArray(map.contacts) ? (map.contacts as string[]) : [],
     workingHours: typeof map.working_hours === 'string' ? map.working_hours : null,
-    phone: typeof map.phone === 'string' ? map.phone : null,
     deliveryAvailable: map.delivery_available === true,
     pickupAvailable: map.pickup_available === true,
-    orderWhatsappUrl: typeof map.order_whatsapp_url === 'string' ? map.order_whatsapp_url : null,
-    orderWhatsappBenghazi: typeof map.order_whatsapp_benghazi === 'string' ? map.order_whatsapp_benghazi : null,
     raw: map,
   };
 }
@@ -39,8 +35,8 @@ export async function loadBusinessFacts(db: Kysely<DB>): Promise<BusinessFacts> 
 export function businessFactsRuntime(facts: BusinessFacts): Record<string, unknown> {
   return {
     branches: facts.branches,
+    contacts: facts.contacts,
     working_hours: facts.workingHours,
-    phone: facts.phone,
     delivery_available: facts.deliveryAvailable,
     pickup_available: facts.pickupAvailable,
   };
@@ -53,8 +49,11 @@ export function businessFactsRuntime(facts: BusinessFacts): Record<string, unkno
  */
 export function buildOrderHandoffMessage(facts: BusinessFacts): string {
   const lines = ['تمام، الفريق بيكمل معاك في الطلب 🤍'];
-  if (facts.orderWhatsappUrl) lines.push(`وتقدر تطلب مباشرة على واتساب: ${facts.orderWhatsappUrl}`);
-  if (facts.orderWhatsappBenghazi) lines.push(`واتساب فرع بنغازي: ${facts.orderWhatsappBenghazi}`);
+  if (facts.contacts.length === 1) lines.push(`وتقدر تتواصل وتطلب مباشرة على واتساب: ${facts.contacts[0]}`);
+  else if (facts.contacts.length > 1) {
+    lines.push('وتقدر تتواصل وتطلب مباشرة على واتساب:');
+    for (const contact of facts.contacts) lines.push(`• ${contact}`);
+  }
   lines.push('ولو عندك سؤال على المقاس أو اللون أو المنتج، أنا معاك.');
   return lines.join('\n');
 }

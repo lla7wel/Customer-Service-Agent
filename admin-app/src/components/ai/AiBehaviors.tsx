@@ -1,225 +1,63 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { Check, CircleAlert, Eye, History, Loader2, RotateCcw, Save, ShieldCheck } from 'lucide-react';
-import { Card } from '@/components/ui';
-import type { AiBehavior } from '@integrations/db/rows';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Bot, Check, ChevronLeft, CircleAlert, Clock3, Code2, Eye, FlaskConical,
+  History, ScanSearch, Languages, Loader2, MemoryStick, MessageCircle,
+  PackageSearch, RefreshCw, Save, Search, ShoppingBag, Sparkles,
+} from 'lucide-react';
+import Playground from './Playground';
 import type { Locale } from '@/lib/i18n/config';
 
-const SECTION_ORDER = [
-  'brand_identity', 'customer_service', 'reply_language', 'product_recommendation',
-  'image_matching', 'memory_summary', 'human_handoff', 'campaign_caption',
-  'campaign_image', 'product_preservation', 'image_typography', 'memory_context',
-  'missing_price', 'advanced_task_instructions',
+interface TaskPrompt { task_key:string; title:string; prompt:string; enabled:boolean; updated_at:string }
+interface LintIssue { code:string; level:'error'|'warning'; message:string }
+const AREAS = [
+  {id:'replies',title:'ردود العملاء',en:'Customer Replies',icon:MessageCircle,tasks:['customer_reply'],desc:'النبرة العربية الليبية، الإجابات المختصرة، والحقائق المؤكدة.'},
+  {id:'search',title:'بحث واقتراح المنتجات',en:'Product Search & Recommendations',icon:PackageSearch,tasks:['product_recommendation'],desc:'اختيار العائلة الصحيحة، الأسعار المؤكدة، والأسئلة التوضيحية المفيدة.'},
+  {id:'handoff',title:'اكتشاف الطلب والتسليم',en:'Order Detection & Handoff',icon:ShoppingBag,tasks:['handoff_reply'],desc:'عدم تأكيد الطلب، ذكر واتساب مرة واحدة، واستمرار خدمة العميل.'},
+  {id:'copy',title:'النص التسويقي',en:'Marketing Copy',icon:Languages,tasks:['campaign_caption'],desc:'عبارات وكابشن عربية ليبية قصيرة لاستوديو المحتوى.'},
+  {id:'visuals',title:'التصاميم التسويقية',en:'Marketing Visuals',icon:Sparkles,tasks:['campaign_image','campaign_image_verify'],desc:'مشاهد تجارية واقعية، حفظ المنتج، النص والسعر والعلامة.'},
+  {id:'matching',title:'مطابقة الصور',en:'Image Matching',icon:ScanSearch,tasks:['vision_describe','vision_rank'],desc:'تحليل الصورة وترتيب المنتجات الأقرب من الكتالوج من دون تخمين.'},
+  {id:'memory',title:'الذاكرة',en:'Memory',icon:MemoryStick,tasks:['memory_summary'],desc:'تلخيص المحادثة وحفظ السياق الضروري للردود القادمة.'},
 ];
+const TASK_LABEL:Record<string,string>={customer_reply:'ردود العملاء',product_recommendation:'اقتراح المنتجات',handoff_reply:'التسليم عند نية الطلب',vision_describe:'تحليل صورة العميل',vision_rank:'ترتيب المطابقات',memory_summary:'تلخيص الذاكرة',campaign_caption:'النص التسويقي',campaign_image:'إنشاء التصميم',campaign_image_verify:'فحص التصميم'};
 
-const INFO: Record<string, { en: string; ar: string; tasks: string[] }> = {
-  brand_identity: { en: 'Master brand personality shared by service and marketing.', ar: 'شخصية العلامة الرئيسية المشتركة بين خدمة العملاء والتسويق.', tasks: ['customer_reply', 'recommendation', 'handoff', 'campaign_caption'] },
-  customer_service: { en: 'Customer-service tone, greetings, length and formatting.', ar: 'نبرة خدمة العملاء والترحيب وطول وتنسيق الرد.', tasks: ['customer_reply', 'handoff'] },
-  reply_language: { en: 'Language, dialect and writing style. No hidden language rule is added later.', ar: 'اللغة واللهجة وأسلوب الكتابة. لا تُضاف قاعدة لغة مخفية لاحقاً.', tasks: ['customer_reply', 'recommendation', 'handoff', 'campaign_caption'] },
-  product_recommendation: { en: 'Recommendation, comparison and relevant upselling behavior.', ar: 'سلوك الاقتراح والمقارنة والبيع الإضافي المناسب.', tasks: ['customer_reply', 'product_recommendation'] },
-  image_matching: { en: 'Task-relevant guidance for vision extraction and candidate ranking.', ar: 'توجيهات مطابقة الصور واستخراج خصائص المنتج وترتيب المرشحين.', tasks: ['vision_describe', 'vision_rank', 'image_verify'] },
-  memory_summary: { en: 'How conversation memories are summarized for future turns.', ar: 'كيفية تلخيص المحادثات للردود المستقبلية.', tasks: ['memory_summary'] },
-  human_handoff: { en: 'Wording and information collection when a teammate must take over.', ar: 'صياغة التحويل للموظف والمعلومات المطلوب جمعها.', tasks: ['handoff_reply'] },
-  campaign_caption: { en: 'Master campaign-copy and caption behavior.', ar: 'التوجيه الرئيسي لكتابة الحملات والكابشن.', tasks: ['campaign_caption'] },
-  campaign_image: { en: 'Master English Home visual identity, art direction and campaign aesthetics.', ar: 'الهوية البصرية الرئيسية والتوجيه الفني للحملات.', tasks: ['campaign_image'] },
-  product_preservation: { en: 'How generated scenes must preserve the supplied product.', ar: 'كيفية الحفاظ على المنتج الأصلي داخل المشهد المولد.', tasks: ['campaign_image', 'image_verify'] },
-  image_typography: { en: 'Arabic typography and exact requested text inside campaign images.', ar: 'الخط العربي والنص المطلوب داخل صور الحملات.', tasks: ['campaign_image', 'image_verify'] },
-  memory_context: { en: 'Store facts, branches, hours and operating policies.', ar: 'حقائق المتجر والفروع وساعات العمل والسياسات.', tasks: ['customer_reply', 'recommendation', 'handoff'] },
-  missing_price: { en: 'Configurable wording when verified information is unavailable.', ar: 'صياغة الرد عند غياب السعر أو المعلومة المؤكدة.', tasks: ['customer_reply', 'recommendation'] },
-  advanced_task_instructions: { en: 'Optional advanced instructions appended to every task. Use carefully.', ar: 'تعليمات متقدمة اختيارية تُطبق على كل مهمة. استخدمها بحذر.', tasks: ['all tasks'] },
-};
-
-const PREVIEW_TASKS = ['customer_reply', 'product_recommendation', 'handoff_reply', 'vision_describe', 'vision_rank', 'memory_summary', 'campaign_caption', 'campaign_image', 'campaign_image_verify'];
-
-const DISPLAY_TITLE: Record<string, { en: string; ar: string }> = {
-  memory_context: { en: 'Store Facts and Policies', ar: 'حقائق وسياسات المتجر' },
-  memory_summary: { en: 'Memory and Conversation Context', ar: 'ذاكرة وسياق المحادثة' },
-};
-
-export default function AiBehaviors({ behaviors, locale, geminiConnected }: { behaviors: AiBehavior[]; locale: Locale; geminiConnected: boolean }) {
-  const ar = locale === 'ar';
-  const rows = useMemo(() => [...behaviors].sort((a, b) => {
-    const ai = SECTION_ORDER.indexOf(a.behavior_key); const bi = SECTION_ORDER.indexOf(b.behavior_key);
-    return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
-  }), [behaviors]);
-  const [task, setTask] = useState('customer_reply');
-  const [preview, setPreview] = useState<any>(null);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-  const [previewBusy, setPreviewBusy] = useState(false);
-
-  const loadPreview = useCallback(async () => {
-    setPreviewBusy(true); setPreviewError(null);
-    const res = await fetch(`/api/ai/behaviors?task=${encodeURIComponent(task)}`);
-    const data = await res.json().catch(() => ({}));
-    setPreviewBusy(false);
-    if (res.ok) setPreview(data.preview); else setPreviewError(data.error || 'Preview failed');
-  }, [task]);
-  useEffect(() => { void loadPreview(); }, [loadPreview]);
-
-  return (
-    <div className="space-y-5">
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className={`rounded-xl border px-4 py-3 text-sm ${geminiConnected ? 'border-success/30 bg-success/10 text-success' : 'border-warning/30 bg-warning/10 text-warning'}`}>
-          {geminiConnected ? (ar ? 'Gemini متصل' : 'Gemini connected') : (ar ? 'Gemini غير متصل' : 'Gemini not connected')}
-        </div>
-        <div className="flex items-center gap-2 rounded-xl border border-line bg-surface2 px-4 py-3 text-sm text-muted">
-          <ShieldCheck size={16} className="text-accent" />
-          {ar ? 'النص المحفوظ يصل للمهمة كما هو؛ الحقائق والصلاحيات فقط ثابتة في النظام.' : 'Saved text reaches its task word-for-word; only truth and permissions remain immutable.'}
-        </div>
-      </div>
-
-      <Card>
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="flex items-center gap-2 text-sm font-semibold"><Eye size={15} className="text-accent" />{ar ? 'معاينة البرومبت الفعّال' : 'Effective compiled prompt'}</h2>
-            <p className="text-xs text-faint">{ar ? 'نفس المترجم المستخدم في الإنتاج، بدون بيانات عميل.' : 'The production compiler output, with no customer data.'}</p>
-          </div>
-          <select value={task} onChange={(e) => setTask(e.target.value)} className="input w-auto text-sm">
-            {PREVIEW_TASKS.map((t) => <option key={t} value={t}>{t}</option>)}
-          </select>
-        </div>
-        {previewBusy ? <Loader2 size={18} className="animate-spin text-accent" /> : previewError ? (
-          <p className="flex items-center gap-2 text-sm text-danger"><CircleAlert size={15} />{previewError}</p>
-        ) : preview ? (
-          <div className="space-y-3">
-            <div className="flex flex-wrap gap-2 text-[11px] text-muted">
-              <span className="chip">~{preview.approximate_tokens} tokens</span><span className="chip">trace {preview.trace_id}</span>
-              <span className="chip">{preview.generation_settings?.modelClass} · temp {preview.generation_settings?.temperature}</span>
-              {(preview.contributors ?? []).map((c: any) => <span key={c.behavior_key} className="chip">{c.title}</span>)}
-            </div>
-            <details><summary className="cursor-pointer text-xs font-semibold text-muted">{ar ? 'السياسة الثابتة' : 'Immutable policy'}</summary><pre className="mt-2 whitespace-pre-wrap rounded-lg bg-surface2 p-3 text-xs">{preview.immutable_policy}</pre></details>
-            <details open><summary className="cursor-pointer text-xs font-semibold text-muted">{ar ? 'تعليمات AI Control الدقيقة' : 'Exact AI Control instructions'}</summary><pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded-lg bg-surface2 p-3 text-xs" dir="auto">{preview.editable_instructions || '—'}</pre></details>
-            <p className="text-[11px] text-faint">{ar ? 'بيانات التشغيل والأدوات والمخطط تُضاف منفصلة وقت التنفيذ ولا تظهر هنا.' : 'Runtime data, tools and output schema are attached separately at execution time.'}</p>
-          </div>
-        ) : null}
-      </Card>
-
-      <div className="space-y-4">{rows.map((behavior) => <BehaviorCard key={behavior.id} behavior={behavior} ar={ar} onSaved={loadPreview} />)}</div>
+export default function AiBehaviors({taskPrompts,locale,geminiConnected,owner,initialTab='guided'}:{taskPrompts:TaskPrompt[];locale:Locale;geminiConnected:boolean;owner:boolean;initialTab?:string}){
+  const ar=locale==='ar'; const [tab,setTab]=useState(initialTab==='test'?'test':'guided'); const [rows,setRows]=useState(taskPrompts);
+  const [selected,setSelected]=useState(taskPrompts[0]?.task_key||'customer_reply');
+  const selectedRow=rows.find(r=>r.task_key===selected);
+  const [query,setQuery]=useState('');
+  const filtered=useMemo(()=>rows.filter(r=>(TASK_LABEL[r.task_key]||r.title).toLowerCase().includes(query.toLowerCase())),[rows,query]);
+  return <div>
+    <div className="mb-5 flex max-w-full gap-1 overflow-x-auto rounded-xl border border-line bg-surface p-1">
+      <Tab active={tab==='guided'} onClick={()=>setTab('guided')} icon={Bot} label={ar?'التحكم المبسّط':'Guided controls'}/>
+      {owner&&<Tab active={tab==='advanced'} onClick={()=>setTab('advanced')} icon={Code2} label={ar?'متقدم للمالك':'Owner advanced'}/>}
+      <Tab active={tab==='test'} onClick={()=>setTab('test')} icon={FlaskConical} label={ar?'مركز الاختبار':'Test Center'}/>
+      <span className={`ms-auto hidden items-center gap-2 rounded-lg px-3 text-xs sm:flex ${geminiConnected?'text-success':'text-warning'}`}><span className={`h-2 w-2 rounded-full ${geminiConnected?'bg-success':'bg-warning'}`}/>{geminiConnected?'Gemini متصل':'Gemini غير متصل'}</span>
     </div>
-  );
+    {tab==='guided'&&<Guided rows={rows} ar={ar} test={(task)=>{setSelected(task);setTab('test');}}/>}
+    {tab==='advanced'&&owner&&<div className="grid gap-4 lg:grid-cols-[270px_minmax(0,1fr)]"><aside className="rounded-2xl border border-line bg-surface p-3"><div className="relative mb-2"><Search size={15} className="absolute end-3 top-3.5 text-faint"/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="ابحث في المهام" className="input pe-9"/></div><div className="space-y-1">{filtered.map(r=><button key={r.task_key} onClick={()=>setSelected(r.task_key)} className={`flex min-h-12 w-full items-center justify-between rounded-xl px-3 text-start text-sm ${selected===r.task_key?'bg-navy text-white':'text-muted hover:bg-surface2'}`}><span>{TASK_LABEL[r.task_key]||r.title}</span><ChevronLeft size={14}/></button>)}</div></aside><AdvancedEditor key={selected} row={selectedRow} rows={rows} setRows={setRows}/></div>}
+    {tab==='test'&&<div className="space-y-4"><div className="rounded-2xl border border-line bg-surface p-4"><div className="flex items-start gap-3"><FlaskConical className="text-navy" size={21}/><div><h2 className="font-bold text-fg">مركز اختبار آمن</h2><p className="text-sm leading-6 text-muted">اختبر الردود ومطابقة الصور والنصوص. لا تُرسل أي رسالة أو منشور لأي عميل.</p></div></div></div><Playground locale={locale}/></div>}
+  </div>;
 }
 
-function BehaviorCard({ behavior, ar, onSaved }: { behavior: AiBehavior; ar: boolean; onSaved: () => void }) {
-  const router = useRouter();
-  const [prompt, setPrompt] = useState(behavior.prompt ?? '');
-  const [rules, setRules] = useState(behavior.rules ?? '');
-  const [memory, setMemory] = useState(behavior.memory ?? '');
-  const [enabled, setEnabled] = useState(behavior.enabled);
-  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-  const [error, setError] = useState<string | null>(null);
-  const info = INFO[behavior.behavior_key] ?? { en: 'Production AI behavior section.', ar: 'قسم سلوك مستخدم في الإنتاج.', tasks: [] };
-  const chars = prompt.length + rules.length + memory.length;
-  const warnings = [!prompt.trim() && !rules.trim() && !memory.trim() ? (ar ? 'القسم فارغ' : 'Section is empty') : null, chars > 12_000 ? (ar ? 'التعليمات طويلة جداً' : 'Instructions are very long') : null].filter(Boolean);
+function Guided({rows,ar,test}:{rows:TaskPrompt[];ar:boolean;test:(task:string)=>void}){return <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{AREAS.map(area=>{const Icon=area.icon;const areaRows=rows.filter(r=>area.tasks.includes(r.task_key));const healthy=areaRows.length===area.tasks.length&&areaRows.every(r=>r.enabled&&r.prompt.trim());return <section key={area.id} className="flex min-h-56 flex-col rounded-2xl border border-line bg-surface p-5 shadow-card"><div className="flex items-start justify-between"><span className="grid h-11 w-11 place-items-center rounded-xl bg-navy/8 text-navy"><Icon size={20}/></span><span className={healthy?'badge-good':'badge-warn'}>{healthy?<><Check size={12}/> جاهز</>:<><CircleAlert size={12}/> يحتاج ضبط</>}</span></div><h2 className="mt-5 text-base font-bold text-fg">{ar?area.title:area.en}</h2><p className="mt-1 flex-1 text-sm leading-6 text-muted">{area.desc}</p><div className="mt-4 flex items-center justify-between border-t border-line pt-3"><span className="text-xs text-faint">{areaRows.length} {areaRows.length===1?'مهمة':'مهام'}</span><button onClick={()=>test(area.tasks[0])} className="btn-ghost min-h-11"><FlaskConical size={15}/> اختبار</button></div></section>})}</div>}
 
-  async function save() {
-    setState('saving'); setError(null);
-    const res = await fetch('/api/ai/behaviors', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: behavior.id, prompt, rules, memory, enabled }) });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) { setState('error'); setError(data.error || 'Save failed'); return; }
-    setState('saved'); router.refresh(); onSaved();
-  }
-
-  return (
-    <Card>
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-        <div><h3 className="text-sm font-semibold">{DISPLAY_TITLE[behavior.behavior_key]?.[ar ? 'ar' : 'en'] || behavior.title}</h3><p className="text-xs text-faint">{ar ? info.ar : info.en}</p><p className="mt-1 text-[11px] text-accent">{info.tasks.join(' · ')}</p></div>
-        <label className="flex items-center gap-2 text-xs text-muted"><input type="checkbox" checked={enabled} onChange={(e) => { setEnabled(e.target.checked); setState('idle'); }} />{ar ? 'مفعّل' : 'Enabled'}</label>
-      </div>
-      <div className="grid gap-3 lg:grid-cols-3">
-        <Field label={ar ? 'التعليمات' : 'Prompt'} value={prompt} onChange={(v) => { setPrompt(v); setState('idle'); }} />
-        <Field label={ar ? 'القواعد' : 'Rules'} value={rules} onChange={(v) => { setRules(v); setState('idle'); }} />
-        <Field label={ar ? 'الذاكرة / الحقائق' : 'Memory / facts'} value={memory} onChange={(v) => { setMemory(v); setState('idle'); }} />
-      </div>
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-        <div className="text-[11px] text-warning">{warnings.join(' · ')}</div>
-        <div className="flex items-center gap-2">{error && <span className="text-xs text-danger">{error}</span>}<span className="text-[11px] text-faint">{chars} chars · ~{Math.ceil(chars / 4)} tokens</span><button onClick={save} disabled={state === 'saving'} className="btn-primary">{state === 'saving' ? <Loader2 size={14} className="animate-spin" /> : state === 'saved' ? <Check size={14} /> : <Save size={14} />}{state === 'saved' ? (ar ? 'تم الحفظ' : 'Saved') : (ar ? 'حفظ' : 'Save')}</button></div>
-      </div>
-      <VersionHistory behaviorKey={behavior.behavior_key} currentPrompt={prompt} ar={ar} onRestored={() => { router.refresh(); onSaved(); }} />
-    </Card>
-  );
+function AdvancedEditor({row,rows,setRows}:{row?:TaskPrompt;rows:TaskPrompt[];setRows:(r:TaskPrompt[])=>void}){
+  const [prompt,setPrompt]=useState(row?.prompt||''); const [preview,setPreview]=useState<any>(null); const [lint,setLint]=useState<LintIssue[]>([]); const [busy,setBusy]=useState<string|null>(null); const [error,setError]=useState<string|null>(null); const [versions,setVersions]=useState<any[]|null>(null);
+  useEffect(()=>{if(!row)return;setPrompt(row.prompt);setVersions(null);fetch(`/api/ai/tasks?task=${row.task_key}`).then(r=>r.json()).then(d=>{setPreview(d.preview);setLint(d.lint||[]);});},[row]);
+  if(!row)return <div className="rounded-2xl border border-line bg-surface p-8 text-muted">لا توجد مهمة.</div>;
+  const save=async()=>{setBusy('save');setError(null);const res=await fetch('/api/ai/tasks',{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({task_key:row.task_key,prompt})});const data=await res.json();setLint(data.lint||[]);if(res.ok){setRows(rows.map(r=>r.task_key===row.task_key?{...r,prompt}:r));const fresh=await fetch(`/api/ai/tasks?task=${row.task_key}`).then(r=>r.json());setPreview(fresh.preview);}else setError(data.error==='prompt_validation_failed'?'أصلح أخطاء التحقق قبل الحفظ.':data.detail||data.error);setBusy(null);};
+  const loadVersions=async()=>{setBusy('history');const d=await fetch(`/api/ai/tasks/versions?task=${row.task_key}`).then(r=>r.json());setVersions(d.versions||[]);setBusy(null);};
+  const restore=async(id:number)=>{setBusy(`restore:${id}`);await fetch('/api/ai/tasks',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({version_id:id})});const d=await fetch(`/api/ai/tasks?task=${row.task_key}`).then(r=>r.json());setPrompt(d.row.prompt);setRows(rows.map(r=>r.task_key===row.task_key?d.row:r));setPreview(d.preview);setLint(d.lint||[]);setVersions(null);setBusy(null);};
+  return <section className="min-w-0 rounded-2xl border border-line bg-surface p-5 shadow-card"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-bold text-sand-dark">إعداد إنتاجي موحّد</p><h2 className="mt-1 text-xl font-bold text-fg">{TASK_LABEL[row.task_key]||row.title}</h2><p className="mt-1 text-xs text-muted">{row.task_key} · آخر تحديث {new Date(row.updated_at).toLocaleString('ar-LY')}</p></div><span className="badge-muted">~{Math.ceil(prompt.length/4)} token</span></div>
+    <label className="mt-5 block"><span className="mb-2 block text-sm font-bold text-fg">برومبت المهمة الكامل</span><textarea value={prompt} onChange={e=>setPrompt(e.target.value)} rows={18} dir="auto" className="input resize-y font-mono text-xs leading-6"/></label>
+    <div className="mt-3 space-y-2">{lint.length===0?<p className="flex items-center gap-2 text-sm text-success"><Check size={15}/> لا توجد تناقضات ظاهرة</p>:lint.map((x,i)=><p key={`${x.code}-${i}`} className={`flex items-start gap-2 rounded-lg px-3 py-2 text-xs ${x.level==='error'?'bg-danger/8 text-danger':'bg-warning/8 text-warning'}`}><CircleAlert className="mt-0.5 shrink-0" size={14}/>{x.message}</p>)}</div>
+    {error&&<p className="mt-3 text-sm text-danger">{error}</p>}
+    <div className="mt-4 flex flex-wrap gap-2"><button onClick={save} disabled={busy!==null} className="btn-primary min-h-11">{busy==='save'?<Loader2 className="animate-spin" size={15}/>:<Save size={15}/>} حفظ ونشر فوراً</button><button onClick={loadVersions} disabled={busy!==null} className="btn-secondary"><History size={15}/> سجل النسخ</button></div>
+    {preview&&<details className="mt-5 rounded-xl border border-line"><summary className="flex min-h-12 cursor-pointer items-center gap-2 px-4 text-sm font-bold text-fg"><Eye size={15}/> معاينة البرومبت الفعّال <span className="ms-auto text-xs font-normal text-muted">{preview.approximate_tokens} token</span></summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap border-t border-line bg-surface2 p-4 text-xs leading-5" dir="auto">{preview.effective_system_instruction}</pre></details>}
+    {versions&&<div className="mt-4 rounded-xl border border-line p-3"><h3 className="mb-2 text-sm font-bold text-fg">النسخ السابقة</h3>{versions.length===0?<p className="text-xs text-muted">لا توجد نسخ سابقة.</p>:<div className="max-h-72 space-y-2 overflow-auto">{versions.map(v=><div key={v.id} className="flex items-center gap-2 rounded-lg bg-surface2 p-2 text-xs"><span className="min-w-0 flex-1 text-muted">#{v.id} · {v.note||'نسخة محفوظة'} · {v.saved_by_username||'النظام'}<small className="block"><Clock3 className="me-1 inline" size={11}/>{new Date(v.created_at).toLocaleString('ar-LY')}</small></span><button onClick={()=>restore(Number(v.id))} disabled={busy!==null} className="btn-ghost"><RefreshCw size={13}/> استعادة</button></div>)}</div>}</div>}
+  </section>;
 }
 
-interface VersionRow {
-  id: number; title: string | null; prompt: string | null; rules: string | null; memory: string | null;
-  enabled: boolean; note: string | null; created_at: string; saved_by_username: string | null;
-}
-
-/** Version history with diff-at-a-glance and one-click restore (no deploy). */
-function VersionHistory({ behaviorKey, currentPrompt, ar, onRestored }: {
-  behaviorKey: string; currentPrompt: string; ar: boolean; onRestored: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [versions, setVersions] = useState<VersionRow[] | null>(null);
-  const [busy, setBusy] = useState<number | null>(null);
-
-  const load = async () => {
-    const res = await fetch(`/api/ai/behaviors/versions?key=${encodeURIComponent(behaviorKey)}`);
-    const data = await res.json().catch(() => ({}));
-    setVersions(data.versions ?? []);
-  };
-
-  const restore = async (versionId: number) => {
-    setBusy(versionId);
-    await fetch('/api/ai/behaviors/versions', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ versionId }),
-    });
-    setBusy(null);
-    onRestored();
-    await load();
-  };
-
-  return (
-    <div className="mt-3 border-t border-line pt-2">
-      <button
-        onClick={() => { setOpen((v) => !v); if (!versions) void load(); }}
-        className="flex items-center gap-1.5 text-xs font-medium text-muted transition hover:text-fg"
-      >
-        <History size={13} /> {ar ? 'سجل النسخ والاستعادة' : 'Version history & restore'}
-      </button>
-      {open && (
-        versions === null ? <Loader2 size={14} className="mt-2 animate-spin text-muted" /> : versions.length === 0 ? (
-          <p className="mt-2 text-xs text-faint">{ar ? 'لا توجد نسخ محفوظة بعد.' : 'No saved versions yet.'}</p>
-        ) : (
-          <ul className="mt-2 max-h-56 space-y-1.5 overflow-y-auto">
-            {versions.map((v) => {
-              const changed = (v.prompt ?? '') !== currentPrompt;
-              return (
-                <li key={v.id} className="rounded-lg border border-line bg-surface2/50 px-2.5 py-1.5 text-xs">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-muted">
-                      #{v.id} · {v.note ?? '—'}{v.saved_by_username ? ` · ${v.saved_by_username}` : ''}
-                      {!changed && <span className="ms-1 text-success">({ar ? 'مطابق للحالي' : 'same as current'})</span>}
-                    </span>
-                    <span className="flex shrink-0 items-center gap-2">
-                      <span className="text-faint" dir="ltr">{new Date(v.created_at).toLocaleString('en-GB')}</span>
-                      <button
-                        onClick={() => restore(v.id)}
-                        disabled={busy !== null}
-                        className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 font-medium text-fg transition hover:bg-surface2"
-                      >
-                        {busy === v.id ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />}
-                        {ar ? 'استعادة' : 'Restore'}
-                      </button>
-                    </span>
-                  </div>
-                  {changed && v.prompt && (
-                    <details className="mt-1">
-                      <summary className="cursor-pointer text-faint">{ar ? 'عرض نص هذه النسخة' : 'Show this version'}</summary>
-                      <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-surface p-2 text-[11px]" dir="auto">{v.prompt}</pre>
-                    </details>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        )
-      )}
-    </div>
-  );
-}
-
-function Field({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  return <label className="block"><span className="mb-1 block text-[11px] font-medium text-muted">{label}</span><textarea value={value} onChange={(e) => onChange(e.target.value)} rows={7} dir="auto" className="input resize-y leading-relaxed" /></label>;
-}
+function Tab({active,onClick,icon:Icon,label}:{active:boolean;onClick:()=>void;icon:typeof Bot;label:string}){return <button onClick={onClick} className={`flex min-h-11 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition ${active?'bg-navy text-white':'text-muted hover:bg-surface2'}`}><Icon size={16}/>{label}</button>}

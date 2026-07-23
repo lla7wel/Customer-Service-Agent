@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { jsonObjectFrom } from 'kysely/helpers/postgres';
-import { getDb } from '@/lib/db';
-import { databaseStatus } from '@integrations/status';
+import { requireAdminApi } from '@/lib/api';
+import { canAccessSection } from '@/lib/rbac';
 import { uiProductQuery, toUiCandidate } from '@/lib/product-candidates';
 
 export const runtime = 'nodejs';
@@ -9,25 +9,29 @@ export const dynamic = 'force-dynamic';
 
 type SearchItem = {
   id: string;
-  type: 'product' | 'conversation' | 'customer' | 'campaign';
+  type: 'product' | 'conversation' | 'customer' | 'content';
   title: string;
   subtitle: string;
   href: string;
 };
 
 export async function GET(req: NextRequest) {
-  if (!databaseStatus().configured) {
-    return NextResponse.json({ error: 'integration_not_configured', missing: databaseStatus().missing }, { status: 503 });
-  }
-  const db = getDb();
-  if (!db) return NextResponse.json({ rows: [] });
+  const auth = await requireAdminApi(req);
+  if (!auth.ok) return auth.res;
+  const { db, admin } = auth.ctx;
 
   const q = (req.nextUrl.searchParams.get('q') ?? '').trim();
   if (q.length < 2) return NextResponse.json({ rows: [] });
   const like = `%${q}%`;
 
-  const [products, conversations, customers, campaigns] = await Promise.all([
-    uiProductQuery(db)
+  // Global search never leaks results a role cannot open: each category is
+  // gated by the section its links target.
+  const canProducts = canAccessSection(admin.role, 'catalog');
+  const canInbox = canAccessSection(admin.role, 'inbox');
+  const canContent = canAccessSection(admin.role, 'content-studio');
+
+  const [products, conversations, customers, content] = await Promise.all([
+    canProducts ? uiProductQuery(db)
       .where((eb) =>
         eb.or([
           eb('products.libyan_display_name', 'ilike', like), eb('products.arabic_name', 'ilike', like),
@@ -37,8 +41,8 @@ export async function GET(req: NextRequest) {
       )
       .orderBy('products.updated_at', 'desc')
       .limit(5)
-      .execute(),
-    db.selectFrom('conversations')
+      .execute() : Promise.resolve([]),
+    canInbox ? db.selectFrom('conversations')
       .select(['id', 'status', 'last_message_preview', 'detected_intent', 'last_message_at'])
       .select((eb) => [
         jsonObjectFrom(
@@ -54,8 +58,8 @@ export async function GET(req: NextRequest) {
       )
       .orderBy('last_message_at', (ob) => ob.desc().nullsLast())
       .limit(5)
-      .execute(),
-    db.selectFrom('customers')
+      .execute() : Promise.resolve([]),
+    canInbox ? db.selectFrom('customers')
       .select(['id', 'display_name', 'phone', 'external_id'])
       .where((eb) =>
         eb.or([
@@ -65,13 +69,13 @@ export async function GET(req: NextRequest) {
       )
       .orderBy('updated_at', 'desc')
       .limit(5)
-      .execute(),
-    db.selectFrom('campaigns')
-      .select(['id', 'name', 'status', 'type'])
-      .where((eb) => eb.or([eb('name', 'ilike', like), eb(eb.cast('status', 'text'), 'ilike', like), eb(eb.cast('type', 'text'), 'ilike', like)]))
+      .execute() : Promise.resolve([]),
+    canContent ? db.selectFrom('content_items')
+      .select(['id', 'title', 'status', 'content_type', 'purpose'])
+      .where((eb) => eb.or([eb('title', 'ilike', like), eb(eb.cast('status', 'text'), 'ilike', like), eb(eb.cast('purpose', 'text'), 'ilike', like)]))
       .orderBy('updated_at', 'desc')
       .limit(5)
-      .execute(),
+      .execute() : Promise.resolve([]),
   ]);
 
   const rows: SearchItem[] = [];
@@ -118,13 +122,13 @@ export async function GET(req: NextRequest) {
       href: latestByCustomer.has(c.id) ? `/inbox/${latestByCustomer.get(c.id)}` : '/inbox',
     });
   }
-  for (const c of campaigns as any[]) {
+  for (const c of content as any[]) {
     rows.push({
-      id: `campaign:${c.id}`,
-      type: 'campaign',
-      title: c.name,
-      subtitle: [c.status, c.type].filter(Boolean).join(' · '),
-      href: `/campaigns/${c.id}`,
+      id: `content:${c.id}`,
+      type: 'content',
+      title: c.title || (c.content_type === 'story' ? 'Story' : 'Post'),
+      subtitle: [c.status, c.purpose].filter(Boolean).join(' · '),
+      href: `/content-studio/${c.id}`,
     });
   }
 

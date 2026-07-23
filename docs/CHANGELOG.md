@@ -160,9 +160,10 @@ full authenticated page sweep against the standalone build.
 - CSV import applies unlocked fields automatically and honours admin locks.
 - Full-catalog indexed retrieval; the previous 1k/2k/5k/8k scan caps are gone.
 
-**Content Studio** replaces Campaigns: posts and Stories, price-drop and general
-purposes, deterministic Arabic typography for exact prices, Africa/Tripoli
-scheduling, and automatic comment replies limited to content this app published.
+**Content Studio** replaces Campaigns: guided posts and Stories, price-drop and
+general purposes, durable professional reference-image generation with visible
+fidelity/text checks, Africa/Tripoli scheduling, and automatic comment replies
+limited to content this app published.
 
 **Security**
 - Multi-admin accounts with revocable database-backed sessions, login rate

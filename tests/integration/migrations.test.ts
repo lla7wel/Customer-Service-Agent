@@ -22,21 +22,31 @@ describe('migration runner', () => {
   it('creates the durable-processing and catalog-truth tables', async () => {
     for (const table of ['jobs', 'outbox_messages', 'inbound_events', 'content_items', 'content_publications',
       'content_comments', 'promotions', 'product_price_history', 'product_families', 'business_facts',
-      'admin_accounts', 'admin_sessions', 'admin_audit_log', 'ai_behavior_versions']) {
+      'admin_accounts', 'admin_sessions', 'admin_audit_log', 'ai_behavior_versions',
+      'content_generation_runs', 'brand_kit', 'ai_task_prompts', 'ai_task_prompt_versions']) {
       const r = await t.db.selectFrom(table as any).selectAll().limit(1).execute();
       expect(Array.isArray(r)).toBe(true);
     }
+  });
+
+  it('preserves legacy prompt fragments while seeding consolidated task prompts', async () => {
+    const fragments = await t.db.selectFrom('ai_behaviors').select('id').execute();
+    const tasks = await t.db.selectFrom('ai_task_prompts').select(['task_key', 'prompt']).execute();
+    expect(fragments.length).toBeGreaterThan(0);
+    expect(tasks.length).toBeGreaterThanOrEqual(9);
+    expect(tasks.find((row) => row.task_key === 'customer_reply')?.prompt).toMatch(/Libyan Arabic|العربية/i);
   });
 
   it('seeds the verified business facts', async () => {
     const facts = await t.db.selectFrom('business_facts').select(['key', 'value']).execute();
     const keys = facts.map((f) => f.key);
     expect(keys).toEqual(expect.arrayContaining([
-      'branches', 'working_hours', 'phone', 'delivery_available', 'pickup_available',
-      'order_whatsapp_url', 'order_whatsapp_benghazi',
+      'branches', 'contacts', 'working_hours', 'delivery_available', 'pickup_available',
     ]));
+    expect(keys).not.toEqual(expect.arrayContaining(['phone', 'order_whatsapp_url', 'order_whatsapp_benghazi']));
     const branches = facts.find((f) => f.key === 'branches')!.value as string[];
     expect(branches).toHaveLength(3);
+    expect(facts.find((f) => f.key === 'contacts')!.value).toEqual(['+218 91-1315900']);
   });
 
   it('is idempotent — a second run applies nothing', async () => {
@@ -94,6 +104,7 @@ describe('upgrade from a legacy production-like database', () => {
     expect(result.applied).toEqual(expect.arrayContaining([
       '0015_admin_accounts', '0016_durable_processing', '0017_catalog_truth',
       '0018_content_studio', '0019_ai_control_versions', '0020_readiness_and_analytics',
+      '0025_generation_efficiency',
     ]));
     expect(result.applied.some((v) => v < '0015')).toBe(false);
   });

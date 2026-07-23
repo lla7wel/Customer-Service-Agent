@@ -49,7 +49,7 @@ export default async function InboxPage(props: { searchParams: Promise<{ filter?
 
   const supabase = getDb();
   if (!supabase) {
-    return (<div><PageHeader icon={Inbox} title={t('nav_inbox')} subtitle={ar ? 'محادثات ماسنجر وفيسبوك' : 'Messenger & Facebook conversations'} /><NotConnected status={status} /></div>);
+    return (<div><PageHeader icon={Inbox} title={t('nav_inbox')} subtitle={ar ? 'محادثات ماسنجر وإنستغرام' : 'Messenger & Instagram conversations'} /><NotConnected status={status} /></div>);
   }
 
   let query = supabase
@@ -87,7 +87,7 @@ export default async function InboxPage(props: { searchParams: Promise<{ filter?
   return (
     <div>
       <AutoRefresh intervalMs={10000} />
-      <PageHeader icon={Inbox} title={t('nav_inbox')} subtitle={ar ? 'محادثات ماسنجر وفيسبوك' : 'Messenger & Facebook conversations'} />
+      <PageHeader icon={Inbox} title={t('nav_inbox')} subtitle={ar ? 'محادثات ماسنجر وإنستغرام' : 'Messenger & Instagram conversations'} />
 
       <section className="command-surface mb-4 flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="relative">
@@ -108,13 +108,13 @@ export default async function InboxPage(props: { searchParams: Promise<{ filter?
         </div>
       </section>
 
-      <div className="mb-4 flex flex-wrap gap-1.5 rounded-xl border border-line/70 bg-surface/70 p-1.5 shadow-card backdrop-blur-md">
+      <div className="scroll-thin -mx-1 mb-4 flex gap-1.5 overflow-x-auto px-1 pb-1">
         {FILTERS.map((f) => (
           <Link
             key={f.id}
             href={`/inbox${f.id === 'all' ? '' : `?filter=${f.id}`}`}
-            className={`rounded-lg border px-3.5 py-1.5 text-sm font-medium transition ${
-              filter === f.id ? 'border-accent/40 bg-accent/12 text-accent shadow-glow' : 'border-transparent bg-transparent text-muted hover:bg-surface2 hover:text-fg'
+            className={`min-h-11 shrink-0 rounded-full border px-3.5 py-2 text-sm font-medium transition ${
+              filter === f.id ? 'border-navy bg-navy text-white' : 'border-transparent bg-transparent text-muted hover:bg-surface2 hover:text-fg'
             }`}
           >
             {ar ? f.ar : f.en}
@@ -128,7 +128,7 @@ export default async function InboxPage(props: { searchParams: Promise<{ filter?
         <EmptyState
           icon={Inbox}
           title={ar ? 'لا توجد محادثات' : 'No conversations'}
-          hint={ar ? 'ستظهر المحادثات هنا بعد ربط ويبهوك ماسنجر/فيسبوك.' : 'Conversations appear once the Messenger/Facebook webhook is connected.'}
+          hint={ar ? 'ستظهر المحادثات هنا بعد ربط ويبهوك ماسنجر وإنستغرام.' : 'Conversations appear once Messenger and Instagram webhooks are connected.'}
         />
       ) : (
         <Card pad={false} className="divide-y divide-line overflow-hidden">
@@ -146,7 +146,7 @@ export default async function InboxPage(props: { searchParams: Promise<{ filter?
                     <p className="truncate text-sm font-medium text-fg" dir="auto">{name}</p>
                     {c.unread_count > 0 && <span className="rounded-full bg-accent px-1.5 text-[10px] font-bold text-black">{c.unread_count}</span>}
                   </div>
-                  <p className="truncate text-xs text-muted" dir="auto">
+                  <p className="mt-0.5 whitespace-pre-wrap break-words text-xs leading-5 text-muted" dir="auto">
                     {c.last_message_preview || (ar ? 'بدون رسائل' : 'No messages')}
                   </p>
                   <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-faint">
@@ -166,7 +166,7 @@ export default async function InboxPage(props: { searchParams: Promise<{ filter?
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1.5">
                   <Badge tone={conversationTone(c.status)} dot>{humanize(c.status)}</Badge>
-                  <span className="flex items-center gap-1 text-[11px] text-faint">
+                  <span className="hidden items-center gap-1 text-[11px] text-faint sm:flex">
                     {humanize(c.channel)} · {timeAgo(c.last_message_at, locale)}
                     <ArrowUpRight size={13} className="opacity-0 transition group-hover:opacity-100" />
                   </span>

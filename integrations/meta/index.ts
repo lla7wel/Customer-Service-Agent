@@ -3,24 +3,15 @@
  * Portable across runtimes (fetch + Web Crypto only). Centralizes Messenger
  * send and page posting.
  */
-import { env, envAny } from '../env';
 import { metaStatus } from '../status';
+// Credentials resolve through the shared (DB-first, env-fallback) getters so the
+// legacy module and the hardened provider client use the SAME connection.
+import {
+  graphBase, pageAccessToken as pageToken, pageId, appSecret, verifyToken as resolvedVerifyToken,
+} from '../providers/graph';
 
 export function isMetaConfigured(): boolean {
   return metaStatus().configured;
-}
-
-function graphVersion(): string {
-  return envAny('META_GRAPH_VERSION') || 'v21.0';
-}
-function graphBase(): string {
-  return `https://graph.facebook.com/${graphVersion()}`;
-}
-function pageToken(): string | undefined {
-  return env('META_PAGE_ACCESS_TOKEN');
-}
-function pageId(): string | undefined {
-  return env('META_PAGE_ID');
 }
 
 export class MetaNotConfiguredError extends Error {
@@ -41,7 +32,7 @@ export function verifySubscription(params: URLSearchParams): { ok: boolean; chal
   const mode = params.get('hub.mode');
   const token = params.get('hub.verify_token');
   const challenge = params.get('hub.challenge') || undefined;
-  const expected = env('META_VERIFY_TOKEN');
+  const expected = resolvedVerifyToken();
   if (mode === 'subscribe' && expected && token === expected) {
     return { ok: true, challenge };
   }
@@ -50,7 +41,7 @@ export function verifySubscription(params: URLSearchParams): { ok: boolean; chal
 
 /** Verify X-Hub-Signature-256 (HMAC-SHA256 of the RAW body with the app secret). */
 export async function verifyWebhookSignature(rawBody: string, signatureHeader: string | null): Promise<boolean> {
-  const secret = env('META_APP_SECRET');
+  const secret = appSecret();
   if (!secret || !signatureHeader) return false;
   const provided = signatureHeader.startsWith('sha256=')
     ? signatureHeader.slice('sha256='.length)
@@ -83,9 +74,11 @@ async function graph(path: string, init: Omit<RequestInit, 'body'> & { body?: an
   const token = pageToken();
   if (!token) throw new MetaNotConfiguredError(['META_PAGE_ACCESS_TOKEN']);
   const url = `${graphBase()}/${path}`;
+  // The access token travels in the Authorization header — NEVER in the URL, so
+  // it can never leak into request logs (audit finding #10).
   const res = await fetch(url, {
     ...init,
-    headers: { 'content-type': 'application/json', ...(init.headers || {}) },
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, ...(init.headers || {}) },
     body: init.body ? JSON.stringify(init.body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
@@ -101,7 +94,7 @@ async function graph(path: string, init: Omit<RequestInit, 'body'> & { body?: an
 
 /** Send a Messenger text message to a PSID (requires standard messaging access). */
 export async function sendMessage(recipientPsid: string, text: string): Promise<{ message_id?: string }> {
-  return graph(`me/messages?access_token=${pageToken()}`, {
+  return graph('me/messages', {
     method: 'POST',
     body: {
       recipient: { id: recipientPsid },
@@ -118,7 +111,7 @@ export async function sendMessage(recipientPsid: string, text: string): Promise<
  * the URL (see isMetaSafeImageUrl in pipelines/product-image).
  */
 export async function sendImageMessage(recipientPsid: string, imageUrl: string): Promise<{ message_id?: string }> {
-  return graph(`me/messages?access_token=${pageToken()}`, {
+  return graph('me/messages', {
     method: 'POST',
     body: {
       recipient: { id: recipientPsid },
@@ -139,7 +132,6 @@ export async function publishPhoto(args: {
   const body: Record<string, unknown> = {
     url: args.imageUrl,
     caption: args.caption,
-    access_token: pageToken(),
   };
   if (args.scheduledUnix) {
     body.published = false;
@@ -163,14 +155,13 @@ export async function publishCarousel(args: {
   for (const url of args.imageUrls) {
     const uploaded = await graph(`${id}/photos`, {
       method: 'POST',
-      body: { url, published: false, access_token: pageToken() },
+      body: { url, published: false },
     });
     if (uploaded?.id) mediaFbids.push(uploaded.id);
   }
   const body: Record<string, unknown> = {
     message: args.caption,
     attached_media: mediaFbids.map((m) => ({ media_fbid: m })),
-    access_token: pageToken(),
   };
   if (args.scheduledUnix) {
     body.published = false;
@@ -181,7 +172,7 @@ export async function publishCarousel(args: {
 
 /** Fetch the Page profile of a Messenger user (name, pic) for the inbox. */
 export async function getUserProfile(psid: string): Promise<any> {
-  return graph(`${psid}?fields=first_name,last_name,profile_pic&access_token=${pageToken()}`, {
+  return graph(`${psid}?fields=first_name,last_name,profile_pic`, {
     method: 'GET',
   });
 }

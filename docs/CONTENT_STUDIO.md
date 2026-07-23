@@ -5,45 +5,50 @@ and Instagram content, and answers the comments that content receives.
 
 ## The workflow
 
-1. **Create** — post or Story, Facebook / Instagram / both.
-2. **Choose products and/or upload images.** A price drop requires products.
-3. **Output mode**
-   - `original` — publish the selected assets, fitted to the platform ratio.
-   - `carousel` — one generated visual per product.
-   - `combined` — one composed visual containing the selected products.
-4. **Purpose** — `price_drop` or `general`.
-5. **Image text** — generate one editable Libyan-Arabic phrase, write it
-   yourself, or publish with no text.
-6. **Caption** — one shared caption used for both platforms.
-7. **Preview** — exactly what will be published.
-8. **Approve** — publish now, or schedule at an Africa/Tripoli time.
+1. **Source** — choose post or Story, target platforms, then select catalog
+   products or upload one or more source-reference images. Upload and Catalog
+   are equal first choices. A price drop requires a catalog product.
+2. **Purpose** — choose only `general` or `price_drop`; choose carousel or one
+   composition when there are multiple products, then AI lifestyle scene or
+   Use Original. A price drop asks only for the new price.
+3. **Copy and generate** — generate one editable Libyan-Arabic phrase and one
+   editable caption. The phrase must be accepted or edited before generation.
+   Generation is a durable worker job with visible progress.
+4. **Preview and publish** — inspect the exact 4:5 or 9:16 output revision,
+   verification results and warnings; select the publishable revision, then
+   explicitly approve now or schedule in Africa/Tripoli time.
 
 There are no Reels. Stories render at 9:16; feed content uses platform-appropriate
 ratios. Multiple Story assets publish as distinct story frames.
 
-## Why prices are not drawn by an image model
+## Creative generation and verification
 
-Image models cannot reliably spell Arabic text or exact numerals. Every price
-and phrase is therefore rendered by a **deterministic composition layer**
-(`integrations/content/compose.ts`):
+Final creatives are real 2K reference-image generations from the pinned
+`gemini-3-pro-image` model. Catalog and upload images are identity references,
+not publishable outputs. The model is instructed to preserve product shape,
+colour, material, pattern and included pieces while creating a commercially
+photographed, product-family-aware scene. It also renders the approved Arabic
+phrase, verified prices and the Brand Kit logo or fallback wordmark.
 
-- the layout is built as SVG from verified data,
-- rasterised by **resvg**, which uses rustybuzz for correct Arabic shaping and
-  right-to-left ordering,
-- composited over the base image.
+Each output is checked for product fidelity, exact requested phrase, exact
+prices and the expected brand mark. One premium render is the normal path; a
+concrete visible mismatch allows one targeted correction. A detail that cannot
+be observed in the supplied source (for example hidden packaging) remains in the
+raw audit record but never triggers another paid render or a false operator
+alert. Verification is probabilistic, so a remaining visible mismatch is stored
+as a warning and is never labelled verified. An admin may publish that revision
+only after explicitly acknowledging the warning.
 
-The same input always produces the same pixels, so the admin preview is a
-guarantee, not an approximation. The bundled font is **Tajawal** (SIL OFL 1.1,
-`integrations/content/fonts/`).
-
-An AI model may still be used for visual direction and for suggesting the
-editable phrase and caption — never for the final text layer.
+Every Generate action creates a new preserved revision. A configuration change
+makes older outputs stale. Approval requires one selected current-revision
+output; source uploads and unrelated output revisions are impossible to publish.
+Storage failure cannot mark an item ready.
 
 ## Price drops
 
 - The admin enters **only the new price**.
 - The "before" price comes from verified price history
-  (`previousVerifiedPrice`), never from a stale campaign image or an old
+  (`previousVerifiedPrice`), never from a stale content image or an old
   conversation.
 - A **permanent** drop (no end date) becomes the new base price.
 - A **temporary** promotion carries an end date; when it expires the prior price

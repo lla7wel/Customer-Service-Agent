@@ -55,7 +55,7 @@ describe('authentication', () => {
       role: 'owner', full_access: true,
     }).returning(['id', 'username']).executeTakeFirst();
 
-    const token = await auth.createSession(t.db, { id: admin!.id, username: admin!.username });
+    const token = await auth.createSession(t.db, { id: admin!.id, username: admin!.username, role: 'owner' });
     expect(token).toBeTruthy();
     const ctx = await auth.requireAdmin(token!);
     expect(ctx).toMatchObject({ username: 'owner', role: 'owner', fullAccess: true });
@@ -63,7 +63,7 @@ describe('authentication', () => {
 
   it('REVOCATION: a revoked session is rejected immediately', async () => {
     const admin = await t.db.selectFrom('admin_accounts').select(['id', 'username']).where('username', '=', 'owner').executeTakeFirst();
-    const token = await auth.createSession(t.db, { id: admin!.id, username: admin!.username });
+    const token = await auth.createSession(t.db, { id: admin!.id, username: admin!.username, role: 'owner' });
     const parsed = await edge.verifySessionToken(token!);
     await auth.revokeSession(t.db, parsed!.sessionId);
     expect(await auth.requireAdmin(token!)).toBeNull();
@@ -71,9 +71,9 @@ describe('authentication', () => {
 
   it('a DISABLED admin loses access even with a valid token', async () => {
     const admin = await t.db.insertInto('admin_accounts').values({
-      username: 'temp_admin', password_hash: await bcrypt.hash('another-strong-pass', 4), role: 'admin',
+      username: 'temp_admin', password_hash: await bcrypt.hash('another-strong-pass', 4), role: 'messager',
     }).returning(['id', 'username']).executeTakeFirst();
-    const token = await auth.createSession(t.db, { id: admin!.id, username: admin!.username });
+    const token = await auth.createSession(t.db, { id: admin!.id, username: admin!.username, role: 'messager' });
     expect(await auth.requireAdmin(token!)).not.toBeNull();
     await t.db.updateTable('admin_accounts').set({ is_active: false }).where('id', '=', admin!.id).execute();
     expect(await auth.requireAdmin(token!)).toBeNull();

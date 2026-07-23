@@ -71,7 +71,7 @@ export async function getReadiness(): Promise<Readiness> {
     { key: 'base_url', label: 'App base URL configured', ok: !!baseUrl, critical: true, detail: baseUrl ? baseUrl : 'Set APP_BASE_URL' },
     { key: 'images', label: 'Product images uploaded', ok: stats.uploadedImages > 0, critical: false, detail: `${stats.uploadedImages.toLocaleString()} uploaded` },
     { key: 'matches', label: 'Match suggestions available', ok: matchTotal > 0, critical: false, detail: `${matchTotal.toLocaleString()} suggestions` },
-    { key: 'meta', label: 'Meta / Facebook configured', ok: mt.configured, critical: false, detail: mt.configured ? 'Page + webhook secrets set' : `Missing: ${mt.missing.join(', ')}` },
+    { key: 'meta', label: 'Meta channels configured', ok: mt.configured, critical: false, detail: mt.configured ? 'Page, Instagram, and webhook credentials set' : `Missing: ${mt.missing.join(', ')}` },
     { key: 'webhook_url', label: 'Webhook URL available', ok: !!baseUrl, critical: false, detail: baseUrl ? `${baseUrl.replace(/\/+$/, '')}/api/webhooks/*` : 'Needs APP_BASE_URL' },
   ];
 

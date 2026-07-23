@@ -30,23 +30,57 @@ export class MetaApiError extends Error {
 }
 
 export function graphVersion(): string {
-  return envAny('META_GRAPH_VERSION') || 'v21.0';
+  return envAny('META_GRAPH_VERSION') || 'v25.0';
 }
 
 export function graphBase(): string {
   return `https://graph.facebook.com/${graphVersion()}`;
 }
 
+/**
+ * Resolved Meta credentials for the current process. Primed from the encrypted
+ * database connection (see providers/connection.ts) so the app and the worker
+ * share ONE authoritative source; environment values remain the fallback during
+ * migration. There is a single Meta connection for the business, so a
+ * process-level cache is correct.
+ */
+export interface ResolvedMetaCredentials {
+  pageAccessToken?: string;
+  pageId?: string;
+  igUserId?: string;
+  appSecret?: string;
+  verifyToken?: string;
+  appId?: string;
+}
+let primed: ResolvedMetaCredentials | null = null;
+
+/** Populate the process credential cache from the resolved DB connection. */
+export function primeMetaCredentials(creds: ResolvedMetaCredentials | null): void {
+  primed = creds;
+}
+
 export function pageAccessToken(): string | undefined {
-  return env('META_PAGE_ACCESS_TOKEN');
+  return primed?.pageAccessToken || env('META_PAGE_ACCESS_TOKEN');
 }
 
 export function pageId(): string | undefined {
-  return env('META_PAGE_ID');
+  return primed?.pageId || env('META_PAGE_ID');
 }
 
 export function igUserId(): string | undefined {
-  return env('META_IG_USER_ID');
+  return primed?.igUserId || env('META_IG_USER_ID');
+}
+
+export function appSecret(): string | undefined {
+  return primed?.appSecret || env('META_APP_SECRET');
+}
+
+export function verifyToken(): string | undefined {
+  return primed?.verifyToken || env('META_VERIFY_TOKEN');
+}
+
+export function metaAppId(): string | undefined {
+  return primed?.appId || envAny('META_APP_ID', 'FACEBOOK_APP_ID');
 }
 
 export interface GraphCallOptions {

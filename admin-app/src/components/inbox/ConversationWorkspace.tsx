@@ -237,7 +237,7 @@ export default function ConversationWorkspace({
   }
 
   return (
-    <div className="card flex h-[calc(100vh-170px)] min-h-[540px] flex-col overflow-hidden p-0 shadow-glass md:h-[calc(100vh-150px)]">
+    <div className="card flex h-[calc(100dvh-245px)] min-h-[460px] flex-col overflow-hidden p-0 shadow-card md:h-[calc(100dvh-150px)] md:min-h-[540px]">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-surface/85 px-3 py-2.5 backdrop-blur-md sm:px-4">
         <div className="flex items-center gap-2">
           <span className={`status-dot ${aiEnabled ? 'bg-success' : 'bg-warning'}`} />
@@ -279,7 +279,7 @@ export default function ConversationWorkspace({
                   : (ar ? 'فشل الإرسال' : 'Delivery failed')}
                 {o.kind === 'image' ? (ar ? ' · صورة' : ' · image') : ''}
               </span>
-              <span className="min-w-0 flex-1 truncate text-faint">{o.last_error ?? ''}</span>
+              <span className="min-w-0 flex-1 whitespace-pre-wrap break-all text-faint">{o.last_error ?? ''}</span>
               <button
                 onClick={async () => { await action('retry_outbox', { outboxId: o.id }); poll(); }}
                 className="btn-ghost h-7 px-2 text-[11px]"
@@ -319,7 +319,7 @@ export default function ConversationWorkspace({
           </div>
           <div className={`scroll-thin grid gap-2 overflow-y-auto 2xl:grid-cols-2 ${panelOpen ? 'max-h-72' : 'max-h-0'}`}>
             {candidates.map((c) => (
-              <div key={c.id} className="tilt-card flex min-w-0 items-start gap-3 rounded-lg border border-line bg-surface p-2.5 transition hover:border-accent/40">
+              <div key={c.id} className="flex min-w-0 items-start gap-3 rounded-lg border border-line bg-surface p-2.5 transition hover:border-navy/30">
                 <Thumb url={c.image} />
                 <div className="min-w-0 flex-1">
                   <a href={`/catalog/${c.id}`} className="block wrap-break-word text-sm font-semibold leading-snug text-fg hover:text-accent" dir="auto">{c.name}</a>
@@ -366,7 +366,7 @@ export default function ConversationWorkspace({
           ) : (
             <div className="scroll-thin grid max-h-72 gap-2 overflow-y-auto 2xl:grid-cols-2">
               {imgCandidates.map((c) => (
-                <div key={c.id} className="tilt-card flex min-w-0 items-start gap-3 rounded-lg border border-line bg-surface p-2.5 transition hover:border-accent/40">
+                <div key={c.id} className="flex min-w-0 items-start gap-3 rounded-lg border border-line bg-surface p-2.5 transition hover:border-navy/30">
                   <Thumb url={c.image} />
                   <div className="min-w-0 flex-1">
                     <a href={`/catalog/${c.id}`} className="block wrap-break-word text-sm font-semibold leading-snug text-fg hover:text-accent" dir="auto">{c.name}</a>
@@ -487,7 +487,7 @@ function Bubble({ m, ar }: { m: Msg; ar: boolean }) {
               : m.sender_type === 'ai'
                 ? 'rounded-se-sm border border-accent/30 bg-accent/10 text-fg'
                 : m.sender_type === 'human'
-                  ? 'rounded-se-sm bg-accent-grad text-black'
+                  ? 'rounded-se-sm bg-navy text-white'
                   : 'mx-auto border border-line bg-surface2 text-faint text-xs' /* system */
         }`} dir="auto">
           {m.body || '—'}

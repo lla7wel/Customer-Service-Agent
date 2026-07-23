@@ -1,43 +1,57 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi, badRequest, notFound } from '@/lib/api';
 import { audit } from '@/lib/auth';
-import { generateContentAssets } from '@integrations/pipelines/content-create';
+import { generationFingerprint } from '@integrations/pipelines/content-create';
+import { enqueue } from '@integrations/jobs/queue';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 120;
-
-/**
- * Generate the item's assets (deterministic composition + one editable
- * Gemini phrase/caption suggestion). Draft → generating → ready | failed.
- */
+/** Enqueue durable premium creative generation and return immediately. */
 export async function POST(req: NextRequest, props: { params: Promise<{ contentId: string }> }) {
   const auth = await requireAdminApi(req);
   if (!auth.ok) return auth.res;
   const { db, admin } = auth.ctx;
   const { contentId } = await props.params;
 
-  const item = await db.selectFrom('content_items').select(['id', 'status']).where('id', '=', contentId).executeTakeFirst();
+  const item = await db.selectFrom('content_items').select(['id', 'status', 'config_revision', 'image_text_mode', 'image_text', 'multi_product_layout']).where('id', '=', contentId).executeTakeFirst();
   if (!item) return notFound();
   if (!['draft', 'ready', 'failed'].includes(item.status)) {
     return badRequest('not_generatable', `Items in status "${item.status}" cannot be regenerated.`);
   }
 
-  await db.updateTable('content_items').set({ status: 'generating', last_error: null }).where('id', '=', contentId).execute();
-  try {
-    const result = await generateContentAssets(db, contentId);
-    if (!result.ok) {
-      await db.updateTable('content_items')
-        .set({ status: 'draft', last_error: result.problems.join('; ').slice(0, 500) })
-        .where('id', '=', contentId).execute();
-      return NextResponse.json({ ok: false, problems: result.problems }, { status: 422 });
-    }
-    await audit(db, admin, 'content.generate', { type: 'content_item', id: contentId, detail: { assets: result.assets } });
-    return NextResponse.json({ ok: true, assets: result.assets, phrase: result.phrase, caption: result.caption, problems: result.problems });
-  } catch (e: any) {
-    await db.updateTable('content_items')
-      .set({ status: 'failed', last_error: String(e?.message ?? 'generation failed').slice(0, 500) })
-      .where('id', '=', contentId).execute();
-    return NextResponse.json({ ok: false, error: String(e?.message ?? 'generation failed') }, { status: 500 });
+  // A manually-written phrase must actually contain text. Generate mode may
+  // start empty (the copy step produces the phrase); None mode needs no phrase.
+  // Clicking "Generate design" IS the acceptance of the saved phrase/mode —
+  // there is no separate approval gate (audit finding #14).
+  if (item.image_text_mode === 'manual' && !item.image_text?.trim()) {
+    return badRequest('missing_image_text', 'Write the image phrase before creating the visual.');
   }
+  if (item.multi_product_layout === 'composition') {
+    const [products, sources] = await Promise.all([
+      db.selectFrom('content_products').select(db.fn.countAll<number>().as('n')).where('content_item_id', '=', contentId).executeTakeFirst(),
+      db.selectFrom('content_assets').select(db.fn.countAll<number>().as('n')).where('content_item_id', '=', contentId).where('asset_role', '=', 'source').executeTakeFirst(),
+    ]);
+    if (Number(products?.n ?? 0) + Number(sources?.n ?? 0) > 4) {
+      return badRequest('composition_source_limit', 'One Composition supports up to four selected products or source images.');
+    }
+  }
+  const active = await db.selectFrom('content_generation_runs').select(['id', 'status', 'stage'])
+    .where('content_item_id', '=', contentId).where('status', 'in', ['queued', 'running'])
+    .orderBy('created_at', 'desc').executeTakeFirst();
+  if (active) return NextResponse.json({ ok: true, run: active, deduped: true }, { status: 202 });
+
+  const fingerprint = await generationFingerprint(db, contentId);
+  const run = await db.insertInto('content_generation_runs').values({
+    content_item_id: contentId,
+    config_revision: item.config_revision,
+    config_fingerprint: fingerprint,
+    created_by: admin.id === '00000000-0000-0000-0000-000000000000' ? null : admin.id,
+  }).returningAll().executeTakeFirstOrThrow();
+  await db.updateTable('content_items').set({ status: 'generating', last_error: null }).where('id', '=', contentId).execute();
+  await enqueue(db, {
+    jobType: 'content_generate', payload: { generationRunId: run.id },
+    dedupeKey: `content_generate:${contentId}`, maxAttempts: 2, priority: 40,
+  });
+  await audit(db, admin, 'content.generate_queued', { type: 'content_item', id: contentId, detail: { generation_run_id: run.id } });
+  return NextResponse.json({ ok: true, run }, { status: 202 });
 }

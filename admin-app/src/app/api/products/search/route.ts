@@ -9,7 +9,7 @@ const SEARCH_COLUMNS = [
   'libyan_display_name', 'arabic_name', 'english_name', 'source_name', 'product_code', 'barcode',
 ] as const;
 
-/** Lightweight product search used by the inbox product panel + campaign picker. */
+/** Lightweight product search used by the inbox product panel + Content Studio picker. */
 export async function GET(req: NextRequest) {
   if (!databaseStatus().configured) {
     return NextResponse.json({ error: 'integration_not_configured', missing: databaseStatus().missing }, { status: 503 });

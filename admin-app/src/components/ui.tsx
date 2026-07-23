@@ -14,10 +14,10 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line/70 bg-surface/70 px-4 py-3 shadow-card backdrop-blur-md">
+    <div className="mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-line pb-4">
       <div className="flex min-w-0 items-center gap-3">
         {Icon && (
-          <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-accent/25 bg-accent/10 text-accent shadow-glow">
+          <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent/8 text-accent">
             <Icon size={20} />
           </span>
         )}
@@ -96,8 +96,7 @@ export function StatCard({
   href?: string;
 }) {
   const inner = (
-    <div className="card group relative overflow-hidden p-4 transition hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-glow">
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-linear-to-r from-transparent via-accent/40 to-transparent opacity-0 transition group-hover:opacity-100" />
+    <div className="card group relative overflow-hidden p-4 transition hover:border-accent/25">
       <div className="flex items-start justify-between">
         <p className="text-xs font-medium uppercase tracking-wide text-muted">{label}</p>
         {Icon && (

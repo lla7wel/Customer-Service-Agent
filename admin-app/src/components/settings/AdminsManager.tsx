@@ -5,15 +5,27 @@ import { Loader2, UserPlus, KeyRound, ShieldCheck, ShieldOff } from 'lucide-reac
 
 interface AdminRow {
   id: string; username: string; display_name: string | null; role: string;
-  full_access: boolean; is_active: boolean; last_login_at: string | null;
+  is_active: boolean; last_login_at: string | null;
 }
 
-/** Owner-driven admin management: create, disable, reset password, full access. */
+type Role = 'owner' | 'analyzer' | 'poster' | 'messager';
+
+const ROLE_OPTIONS: { value: Role; label: string }[] = [
+  { value: 'owner', label: 'المالك — كل الصلاحيات' },
+  { value: 'analyzer', label: 'محلّل — التحليلات + الرسائل + المحتوى' },
+  { value: 'messager', label: 'مراسل — الرسائل + المحتوى' },
+  { value: 'poster', label: 'ناشر — المحتوى فقط' },
+];
+const ROLE_BADGE: Record<string, string> = { owner: 'المالك', analyzer: 'محلّل', messager: 'مراسل', poster: 'ناشر' };
+
+/** Owner-driven admin management: create, disable, reset password, assign role. */
 export default function AdminsManager() {
   const [admins, setAdmins] = useState<AdminRow[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  const [form, setForm] = useState({ username: '', display_name: '', password: '', full_access: true });
+  const [form, setForm] = useState<{ username: string; display_name: string; password: string; role: Role }>(
+    { username: '', display_name: '', password: '', role: 'messager' },
+  );
 
   const load = () =>
     fetch('/api/admins').then((r) => r.json()).then((d) => setAdmins(d.admins ?? [])).catch(() => setAdmins([]));
@@ -28,7 +40,7 @@ export default function AdminsManager() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.detail || data?.error || 'failed');
-      setForm({ username: '', display_name: '', password: '', full_access: true });
+      setForm({ username: '', display_name: '', password: '', role: 'messager' });
       setMsg('تم إنشاء الحساب ✓');
       await load();
     } catch (e: any) {
@@ -75,31 +87,31 @@ export default function AdminsManager() {
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-fg" dir="auto">
                 {a.display_name || a.username}
-                {a.role === 'owner' && <span className="ms-2 rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-bold text-accent">المالك</span>}
+                <span className={`ms-2 rounded-full px-2 py-0.5 text-[10px] font-bold ${a.role === 'owner' ? 'bg-accent/15 text-accent' : 'bg-surface text-muted'}`}>{ROLE_BADGE[a.role] ?? a.role}</span>
                 {!a.is_active && <span className="ms-2 rounded-full bg-danger/15 px-2 py-0.5 text-[10px] font-bold text-danger">معطّل</span>}
               </p>
               <p className="text-xs text-muted" dir="ltr">@{a.username}</p>
             </div>
+            <label className="flex min-h-11 items-center gap-1.5 text-xs text-muted">
+              <span className="sr-only">الدور</span>
+              <select
+                value={a.role}
+                onChange={(e) => update(a.id, { role: e.target.value }, `role:${a.id}`)}
+                disabled={busy !== null}
+                className="min-h-11 rounded-lg border border-line bg-surface px-2 text-xs text-fg outline-none focus:border-accent/50"
+              >
+                {ROLE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </label>
             {a.role !== 'owner' && (
-              <>
-                <label className="flex min-h-11 items-center gap-1.5 text-xs text-muted">
-                  <input
-                    type="checkbox"
-                    checked={a.full_access}
-                    onChange={(e) => update(a.id, { full_access: e.target.checked }, `fa:${a.id}`)}
-                    className="h-4 w-4 accent-accent"
-                  />
-                  صلاحية كاملة
-                </label>
-                <button
-                  onClick={() => update(a.id, { is_active: !a.is_active }, `act:${a.id}`)}
-                  disabled={busy !== null}
-                  className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-line px-3 text-xs font-medium text-fg transition hover:bg-surface2"
-                >
-                  {a.is_active ? <ShieldOff size={13} /> : <ShieldCheck size={13} />}
-                  {a.is_active ? 'تعطيل' : 'تفعيل'}
-                </button>
-              </>
+              <button
+                onClick={() => update(a.id, { is_active: !a.is_active }, `act:${a.id}`)}
+                disabled={busy !== null}
+                className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-line px-3 text-xs font-medium text-fg transition hover:bg-surface2"
+              >
+                {a.is_active ? <ShieldOff size={13} /> : <ShieldCheck size={13} />}
+                {a.is_active ? 'تعطيل' : 'تفعيل'}
+              </button>
             )}
             <button
               onClick={() => resetPassword(a)}
@@ -140,18 +152,19 @@ export default function AdminsManager() {
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-4">
           <label className="flex min-h-11 items-center gap-2 text-sm text-fg">
-            <input
-              type="checkbox"
-              checked={form.full_access}
-              onChange={(e) => setForm({ ...form, full_access: e.target.checked })}
-              className="h-4 w-4 accent-accent"
-            />
-            صلاحية كاملة (مساوٍ للمالك عملياً)
+            الدور
+            <select
+              value={form.role}
+              onChange={(e) => setForm({ ...form, role: e.target.value as Role })}
+              className="min-h-11 rounded-lg border border-line bg-surface px-3 text-sm text-fg outline-none focus:border-accent/50"
+            >
+              {ROLE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
           </label>
           <button
             onClick={create}
             disabled={busy !== null || !form.username || form.password.length < 10}
-            className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-accent px-4 text-sm font-semibold text-black shadow-glow transition hover:brightness-110 disabled:opacity-50"
+            className="btn-primary min-h-11 px-4"
           >
             {busy === 'create' ? <Loader2 size={15} className="animate-spin" /> : <UserPlus size={15} />} إنشاء الحساب
           </button>

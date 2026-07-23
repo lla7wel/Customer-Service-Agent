@@ -19,7 +19,6 @@ export default function ProductEditor({ product, locale }: { product: Product; l
     subcategory: product.subcategory ?? '',
     base_price: product.base_price?.toString() ?? '',
     status: product.status as string,
-    availability: product.availability as string,
     search_keywords: (product.search_keywords ?? []).join(', '),
     arabic_keywords: (product.arabic_keywords ?? []).join(', '),
   });
@@ -73,12 +72,17 @@ export default function ProductEditor({ product, locale }: { product: Product; l
         <Field label={ar ? 'الفئة الفرعية' : 'Subcategory'} value={form.subcategory} onChange={(v) => set('subcategory', v)} locked={isLocked('subcategory')} ar={ar} />
         <Field label={ar ? 'السعر الأساسي (LYD)' : 'Base price (LYD)'} value={form.base_price} onChange={(v) => set('base_price', v)} type="number" locked={isLocked('base_price')} ar={ar} />
         <Select label={ar ? 'الحالة' : 'Status'} value={form.status} onChange={(v) => set('status', v)} options={[['active', ar ? 'فعّال' : 'active'], ['draft', ar ? 'مسودة' : 'draft'], ['out_of_stock', ar ? 'نفد' : 'out of stock'], ['archived', ar ? 'مؤرشف' : 'archived']]} locked={isLocked('status')} ar={ar} />
-        <Select label={ar ? 'التوفر' : 'Availability'} value={form.availability} onChange={(v) => set('availability', v)} options={[['assume_available', ar ? 'افتراض متوفر' : 'assume available'], ['confirmed_available', ar ? 'مؤكد' : 'confirmed'], ['unavailable', ar ? 'غير متوفر' : 'unavailable']]} locked={isLocked('availability')} ar={ar} />
       </div>
       <Field className="mt-3" label={ar ? 'كلمات البحث (مفصولة بفواصل)' : 'Search keywords (comma-separated)'} value={form.search_keywords} onChange={(v) => set('search_keywords', v)} locked={isLocked('search_keywords')} ar={ar} />
       <Field className="mt-3" label={ar ? 'كلمات عربية (مفصولة بفواصل)' : 'Arabic keywords (comma-separated)'} value={form.arabic_keywords} onChange={(v) => set('arabic_keywords', v)} locked={isLocked('arabic_keywords')} ar={ar} />
 
       {msg && <p className="mt-3 text-sm text-danger">{msg}</p>}
+      <div className="fixed inset-x-0 bottom-[68px] z-30 border-t border-line bg-surface/95 p-3 backdrop-blur md:hidden">
+        <button onClick={save} disabled={saving} className="btn-primary w-full">
+          {saved ? <Check size={15} /> : <Save size={15} />}
+          {saving ? '…' : saved ? (ar ? 'تم الحفظ' : 'Saved') : ar ? 'حفظ تغييرات المنتج' : 'Save product changes'}
+        </button>
+      </div>
     </div>
   );
 }

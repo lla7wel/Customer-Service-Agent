@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { LogIn, ShieldAlert, Sparkles } from 'lucide-react';
+import { LogIn, ShieldAlert } from 'lucide-react';
+import BrandMark from '@/components/BrandMark';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -24,7 +25,7 @@ export default function LoginPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        router.push('/dashboard');
+        router.push(typeof data?.redirect === 'string' ? data.redirect : '/dashboard');
         router.refresh();
         return;
       }
@@ -39,15 +40,11 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="premium-shell login-scene relative flex min-h-screen items-center justify-center overflow-hidden p-4">
-      <div className="pointer-events-none absolute inset-0 cc-grid opacity-50" />
-      <div className="login-orb login-orb--a" />
-      <div className="login-orb login-orb--b" />
-      <div className="login-card3d relative w-full max-w-sm">
+    <div className="premium-shell relative flex min-h-screen items-center justify-center p-4">
+      <div className="relative w-full max-w-sm">
         <div className="mb-6 flex flex-col items-center text-center">
-          <span className="login-logo3d inline-flex h-12 w-12 items-center justify-center rounded-xl bg-accent-grad text-base font-bold text-black shadow-glow">EH</span>
-          <h1 className="mt-3 text-lg font-semibold tracking-tight text-fg">English Home Libya</h1>
-          <p className="flex items-center gap-1 text-xs uppercase tracking-wider text-accent"><Sparkles size={12} /> Operations Command Center</p>
+          <BrandMark size="lg" animate />
+          <p className="mt-3 text-xs uppercase tracking-[.18em] text-muted">Operations Center</p>
         </div>
 
         <div className="command-surface p-6">

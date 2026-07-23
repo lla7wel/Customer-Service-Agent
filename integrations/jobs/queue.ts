@@ -21,11 +21,13 @@ export type JobType =
   | 'customer_turn'
   | 'outbox_deliver'
   | 'content_publish'
+  | 'content_generate'
   | 'comments_poll'
   | 'promotion_tick'
   | 'analytics_refresh'
   | 'readiness_check'
   | 'csv_import'
+  | 'social_sync'
   | 'family_bootstrap';
 
 export interface EnqueueOptions {

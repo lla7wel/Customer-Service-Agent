@@ -39,7 +39,7 @@ export default function CreateContentButton() {
     <div className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-black shadow-glow transition hover:brightness-110"
+        className="btn-primary min-h-11 px-4"
       >
         <Plus size={16} />
         محتوى جديد
@@ -78,7 +78,7 @@ export default function CreateContentButton() {
           <button
             onClick={create}
             disabled={busy}
-            className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-black transition hover:brightness-110 disabled:opacity-60"
+            className="btn-primary min-h-11 w-full"
           >
             {busy ? <Loader2 size={15} className="animate-spin" /> : null}
             إنشاء

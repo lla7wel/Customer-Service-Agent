@@ -38,23 +38,27 @@ for (const candidate of [
 import { assertConfig } from '../integrations/config';
 import { requireDb } from '../integrations/db/client';
 import {
-  claimNextJob, completeJob, failJob, reapExpiredLeases, enqueue, type JobType, type JobRow,
+  claimNextJob, completeJob, failJob, reapExpiredLeases, enqueue, heartbeatJob, type JobType, type JobRow,
 } from '../integrations/jobs/queue';
 import { processInboundEvent } from '../integrations/pipelines/ingest';
 import { runCustomerTurn } from '../integrations/pipelines/turn';
 import { deliverOutboxMessage } from '../integrations/pipelines/outbox';
 import { processPublication, startDueScheduledContent } from '../integrations/pipelines/content-publish';
+import { processContentGeneration } from '../integrations/pipelines/content-create';
 import { pollAndProcessComments } from '../integrations/pipelines/comments';
 import { endDuePromotions } from '../integrations/catalog/pricing';
 import { refreshAnalytics } from '../integrations/pipelines/analytics';
 import { runAllReadinessChecks } from '../integrations/providers/readiness';
+import { primeMetaFromDb } from '../integrations/providers/connection';
+import { runSocialSync } from '../integrations/pipelines/social-sync';
 import { runCsvImportJob } from '../integrations/catalog/csv-import';
 import { sql } from 'kysely';
 
 const WORKER_ID = `worker-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
 const HANDLED_TYPES: JobType[] = [
   'ingest_event', 'customer_turn', 'outbox_deliver', 'content_publish',
-  'comments_poll', 'promotion_tick', 'analytics_refresh', 'readiness_check', 'csv_import',
+  'content_generate', 'comments_poll', 'promotion_tick', 'analytics_refresh', 'readiness_check', 'csv_import',
+  'social_sync',
 ];
 
 const RECURRING: { jobType: JobType; everySeconds: number }[] = [
@@ -62,6 +66,9 @@ const RECURRING: { jobType: JobType; everySeconds: number }[] = [
   { jobType: 'promotion_tick', everySeconds: 60 },
   { jobType: 'analytics_refresh', everySeconds: 3600 },
   { jobType: 'readiness_check', everySeconds: 6 * 3600 },
+  // Durable social-feed backfill + incremental top-up (advances one provider
+  // page per tick until backfilled, then keeps recent posts/comments fresh).
+  { jobType: 'social_sync', everySeconds: 300 },
 ];
 
 let running = true;
@@ -86,6 +93,9 @@ async function handleJob(db: ReturnType<typeof requireDb>, job: JobRow): Promise
       if (outcome === 'retry') throw new Error('publish failed transiently — retrying');
       break;
     }
+    case 'content_generate':
+      await processContentGeneration(db, String(payload.generationRunId));
+      break;
     case 'comments_poll':
       await pollAndProcessComments(db);
       break;
@@ -101,6 +111,10 @@ async function handleJob(db: ReturnType<typeof requireDb>, job: JobRow): Promise
       break;
     case 'csv_import':
       await runCsvImportJob(db, String(payload.importRunId));
+      break;
+    case 'social_sync':
+      await primeMetaFromDb(db).catch(() => {});
+      await runSocialSync(db);
       break;
     default:
       throw new Error(`unknown job type: ${job.job_type}`);
@@ -135,6 +149,9 @@ async function main(): Promise<void> {
   assertConfig('worker');
   const db = requireDb();
   console.log(`[worker] ${WORKER_ID} starting`);
+  // Resolve Meta credentials from the encrypted DB connection (env fallback) so
+  // the worker sends via the SAME connection the app manages.
+  await primeMetaFromDb(db).catch(() => {});
 
   let lastMaintenance = 0;
   let lastRetention = 0;
@@ -146,18 +163,23 @@ async function main(): Promise<void> {
         const reaped = await reapExpiredLeases(db);
         if (reaped) console.log(`[worker] reaped ${reaped} expired lease(s)`);
         await scheduleRecurring(db);
+        // Pick up any connection change (reconnect / repair) made in the app.
+        await primeMetaFromDb(db).catch(() => {});
       }
       if (now - lastRetention > 6 * 3600_000) {
         lastRetention = now;
         await retentionSweep(db);
       }
 
-      const job = await claimNextJob(db, WORKER_ID, HANDLED_TYPES, 180);
+      const job = await claimNextJob(db, WORKER_ID, HANDLED_TYPES, 900);
       if (!job) {
         await sleep(750);
         continue;
       }
       const started = Date.now();
+      const heartbeat = setInterval(() => {
+        void heartbeatJob(db, job.id, WORKER_ID, 900).catch(() => {});
+      }, 60_000);
       try {
         await handleJob(db, job);
         await completeJob(db, job.id);
@@ -165,6 +187,8 @@ async function main(): Promise<void> {
       } catch (e: any) {
         const verdict = await failJob(db, job, String(e?.message ?? e));
         console.error(`[worker] ${job.job_type} ${job.id} ${verdict}: ${e?.message ?? e}`);
+      } finally {
+        clearInterval(heartbeat);
       }
     } catch (e: any) {
       // Database blip — back off and keep the loop alive.
