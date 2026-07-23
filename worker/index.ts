@@ -50,6 +50,7 @@ import { endDuePromotions } from '../integrations/catalog/pricing';
 import { refreshAnalytics } from '../integrations/pipelines/analytics';
 import { runAllReadinessChecks } from '../integrations/providers/readiness';
 import { primeMetaFromDb } from '../integrations/providers/connection';
+import { runSocialSync } from '../integrations/pipelines/social-sync';
 import { runCsvImportJob } from '../integrations/catalog/csv-import';
 import { sql } from 'kysely';
 
@@ -57,6 +58,7 @@ const WORKER_ID = `worker-${process.pid}-${Math.random().toString(36).slice(2, 8
 const HANDLED_TYPES: JobType[] = [
   'ingest_event', 'customer_turn', 'outbox_deliver', 'content_publish',
   'content_generate', 'comments_poll', 'promotion_tick', 'analytics_refresh', 'readiness_check', 'csv_import',
+  'social_sync',
 ];
 
 const RECURRING: { jobType: JobType; everySeconds: number }[] = [
@@ -64,6 +66,9 @@ const RECURRING: { jobType: JobType; everySeconds: number }[] = [
   { jobType: 'promotion_tick', everySeconds: 60 },
   { jobType: 'analytics_refresh', everySeconds: 3600 },
   { jobType: 'readiness_check', everySeconds: 6 * 3600 },
+  // Durable social-feed backfill + incremental top-up (advances one provider
+  // page per tick until backfilled, then keeps recent posts/comments fresh).
+  { jobType: 'social_sync', everySeconds: 300 },
 ];
 
 let running = true;
@@ -106,6 +111,10 @@ async function handleJob(db: ReturnType<typeof requireDb>, job: JobRow): Promise
       break;
     case 'csv_import':
       await runCsvImportJob(db, String(payload.importRunId));
+      break;
+    case 'social_sync':
+      await primeMetaFromDb(db).catch(() => {});
+      await runSocialSync(db);
       break;
     default:
       throw new Error(`unknown job type: ${job.job_type}`);

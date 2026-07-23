@@ -27,6 +27,7 @@ export type JobType =
   | 'analytics_refresh'
   | 'readiness_check'
   | 'csv_import'
+  | 'social_sync'
   | 'family_bootstrap';
 
 export interface EnqueueOptions {

@@ -5,6 +5,7 @@ import { PageHeader, EmptyState } from '@/components/ui';
 import NotConnected from '@/components/NotConnected';
 import AutoRefresh from '@/components/AutoRefresh';
 import CreateContentButton from '@/components/content/CreateContentButton';
+import PublishedFeed from '@/components/content/PublishedFeed';
 import { getT } from '@/lib/i18n/server';
 import { databaseStatus } from '@integrations/status';
 import { getDb } from '@/lib/db';
@@ -14,7 +15,7 @@ import { utcToTripoliDisplay, tripoliLocalToUtc } from '@/lib/tripoli-time';
 export const dynamic = 'force-dynamic';
 
 const FILTERS = [
-  ['all','الكل','All'], ['drafts','المسودات','Drafts'], ['ready','جاهز','Ready'],
+  ['all','الكل','All'], ['feed','الموجز','Feed'], ['drafts','المسودات','Drafts'], ['ready','جاهز','Ready'],
   ['scheduled','مجدول','Scheduled'], ['publishing','قيد النشر','Publishing'],
   ['published','منشور','Published'], ['problems','مشاكل','Problems'],
 ] as const;
@@ -105,6 +106,7 @@ export default async function ContentStudioPage(props: { searchParams: Promise<{
       <CreateContentButton/>
     </div>
 
+    {filter === 'feed' ? <PublishedFeed /> : (<>
     <section className="overflow-hidden rounded-2xl border border-line bg-surface shadow-card">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line p-4">
         <div className="flex items-center gap-2"><CalendarDays className="text-navy" size={20}/><div><h2 className="font-bold text-fg">{monthLabel}</h2><p className="text-xs text-muted">{ar ? 'تقويم النشر والمحتوى' : 'Publishing and content calendar'}</p></div></div>
@@ -121,6 +123,7 @@ export default async function ContentStudioPage(props: { searchParams: Promise<{
     </section>
 
     {items.length === 0 && <div className="mt-4"><EmptyState icon={Clapperboard} title={ar?'لا يوجد محتوى هنا':'Nothing here yet'} hint={ar?'ابدأ بإنشاء منشور أو ستوري جديد.':'Start with a post or story.'}/></div>}
+    </>)}
   </div>;
 }
 

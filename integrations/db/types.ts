@@ -321,11 +321,16 @@ export interface ContentComments {
   id: Generated<string>;
   parent_comment_id: string | null;
   provider_comment_id: string;
-  publication_id: string;
+  publication_id: string | null;
+  reply_by_admin_id: string | null;
+  reply_claimed_at: Timestamp | null;
   reply_error: string | null;
+  reply_idempotency_key: string | null;
   reply_provider_id: string | null;
+  reply_source: string | null;
   reply_status: string | null;
   reply_text: string | null;
+  social_post_id: string | null;
   updated_at: Generated<Timestamp>;
 }
 
@@ -844,6 +849,38 @@ export interface SchemaMigrations {
   version: string;
 }
 
+export interface SocialPosts {
+  account_id: string | null;
+  caption: string | null;
+  comment_count: Generated<number>;
+  content_item_id: string | null;
+  created_at: Generated<Timestamp>;
+  engagement: Generated<Json>;
+  id: Generated<string>;
+  last_synced_at: Timestamp | null;
+  media: Generated<Json>;
+  media_type: string | null;
+  media_url: string | null;
+  permalink: string | null;
+  platform: string;
+  post_type: string | null;
+  provider_created_at: Timestamp | null;
+  provider_deleted: Generated<boolean>;
+  provider_post_id: string;
+  publication_id: string | null;
+  source: Generated<string>;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface SocialSyncState {
+  backfill_done: Generated<boolean>;
+  cursor: string | null;
+  key: string;
+  last_error: string | null;
+  last_run_at: Timestamp | null;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface DB {
   activity_logs: ActivityLogs;
   admin_accounts: AdminAccounts;
@@ -897,4 +934,6 @@ export interface DB {
   provider_oauth_states: ProviderOauthStates;
   provider_readiness: ProviderReadiness;
   schema_migrations: SchemaMigrations;
+  social_posts: SocialPosts;
+  social_sync_state: SocialSyncState;
 }
