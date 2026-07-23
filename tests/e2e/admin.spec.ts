@@ -21,10 +21,9 @@ async function expectNoHorizontalOverflow(page: Page) {
 }
 
 test.describe('authentication', () => {
-  test('bare domain serves the login shell and provider verification metadata directly', async ({ page }) => {
-    const response = await page.goto('/');
-    expect(response?.status()).toBe(200);
-    await expect(page).toHaveURL(/\/$/);
+  test('bare domain sends signed-out admins to the login page', async ({ page }) => {
+    await page.goto('/');
+    await expect(page).toHaveURL(/\/login/);
     await expect(page.getByPlaceholder('username')).toBeVisible();
     await expect(page.locator('meta[name="facebook-domain-verification"]')).toHaveAttribute(
       'content',
@@ -60,6 +59,13 @@ test.describe('authentication', () => {
   test('valid credentials reach the dashboard', async ({ page }) => {
     await signIn(page);
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+  });
+
+  test('login remains reachable with an existing signed session', async ({ page }) => {
+    await signIn(page);
+    await page.goto('/login');
+    await expect(page).toHaveURL(/\/login/);
+    await expect(page.getByPlaceholder('username')).toBeVisible();
   });
 });
 

@@ -55,16 +55,6 @@ export async function middleware(req: NextRequest) {
     if (pathname.startsWith('/api/')) {
       return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
     }
-    // Serve the login page at the bare domain without a redirect. Besides
-    // avoiding a needless round trip for people opening the app domain, this
-    // keeps provider domain-verification metadata in the first HTTP 200 HTML
-    // response (some crawlers do not follow an authentication redirect).
-    if (pathname === '/') {
-      const loginUrl = req.nextUrl.clone();
-      loginUrl.pathname = '/login';
-      loginUrl.search = '';
-      return NextResponse.rewrite(loginUrl);
-    }
     if (pathname === '/login') return NextResponse.next();
     const redirectUrl = req.nextUrl.clone();
     redirectUrl.pathname = '/login';
@@ -72,12 +62,13 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  // Signed in → never show the login page; land on the role's home.
+  // Always let /login render, even when the JWT signature is valid. The
+  // database-backed session may have been revoked or expired; redirecting here
+  // based only on the edge JWT would loop forever with the dashboard layout,
+  // which correctly rejects that stale database session and sends the browser
+  // back to /login.
   if (pathname === '/login') {
-    const redirectUrl = req.nextUrl.clone();
-    redirectUrl.pathname = landingPath(session.role);
-    redirectUrl.search = '';
-    return NextResponse.redirect(redirectUrl);
+    return NextResponse.next();
   }
 
   // Edge section gate for pages (fast path; the DB-role guard in the dashboard
