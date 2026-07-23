@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { encryptSecret, decryptSecret, maskTail, generateEncryptionKey, isEncryptionConfigured } from '../../integrations/providers/secret-crypto';
-import { mergeSubscriptionFields, REQUIRED_PAGE_FIELDS, REQUIRED_IG_FIELDS } from '../../integrations/providers/meta-connect';
+import {
+  mergeSubscriptionFields,
+  REQUIRED_IG_FIELDS,
+  REQUIRED_PAGE_FIELDS,
+  REQUIRED_SCOPES,
+} from '../../integrations/providers/meta-connect';
 
 describe('provider secret encryption (AES-256-GCM)', () => {
   beforeAll(() => { process.env.INTEGRATION_ENCRYPTION_KEY = generateEncryptionKey(); });
@@ -67,5 +72,11 @@ describe('webhook subscription field merge', () => {
   it('reports nothing missing when all required fields are present', () => {
     const { missing } = mergeSubscriptionFields([...REQUIRED_IG_FIELDS, 'story_insights'], REQUIRED_IG_FIELDS);
     expect(missing).toEqual([]);
+  });
+});
+
+describe('Meta OAuth scopes', () => {
+  it('requests the Page user-content permission required for Facebook comments', () => {
+    expect(REQUIRED_SCOPES).toContain('pages_read_user_content');
   });
 });

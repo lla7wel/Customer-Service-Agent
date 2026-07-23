@@ -14,6 +14,11 @@ import { getTheme } from '@/lib/theme-server';
 export const metadata: Metadata = {
   title: 'English Home Libya — Operations Center',
   description: 'The online operations center for English Home Libya.',
+  verification: {
+    other: {
+      'facebook-domain-verification': '70t4mpxdj37vynq0mpgjezniwyxtgf',
+    },
+  },
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {

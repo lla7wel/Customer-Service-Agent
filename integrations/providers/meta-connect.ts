@@ -16,6 +16,7 @@ export const REQUIRED_SCOPES = [
   'pages_manage_metadata',
   'pages_manage_posts',
   'pages_read_engagement',
+  'pages_read_user_content',
   'read_insights',
   'instagram_basic',
   'instagram_manage_messages',
