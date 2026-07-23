@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifySubscription, verifyWebhookSignature } from '@integrations/meta';
-import { metaStatus } from '@integrations/status';
 import { getDb } from '@integrations/db/client';
 import { enqueue } from '@integrations/jobs/queue';
+import { primeMetaFromDb, markWebhookReceived } from '@integrations/providers/connection';
+import { verifyToken as resolvedVerifyToken, appSecret } from '@integrations/providers/graph';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,8 +20,12 @@ export const dynamic = 'force-dynamic';
  * GET is the subscription handshake (echoes hub.challenge).
  */
 export async function GET(req: NextRequest) {
-  if (!metaStatus().configured) {
-    return NextResponse.json({ error: 'integration_not_configured', missing: metaStatus().missing }, { status: 503 });
+  // Resolve the verify token from the encrypted DB connection (env fallback) so
+  // the handshake never depends on the environment or browser state.
+  const db0 = getDb();
+  if (db0) await primeMetaFromDb(db0).catch(() => {});
+  if (!resolvedVerifyToken()) {
+    return NextResponse.json({ error: 'integration_not_configured', missing: ['META_VERIFY_TOKEN'] }, { status: 503 });
   }
   const { ok, challenge } = verifySubscription(req.nextUrl.searchParams);
   if (ok && challenge !== undefined) {
@@ -62,19 +67,22 @@ function extractEvents(body: any): RawEvent[] {
 }
 
 export async function POST(req: NextRequest) {
-  if (!metaStatus().configured) {
-    return NextResponse.json({ error: 'integration_not_configured', missing: metaStatus().missing }, { status: 503 });
-  }
-  const raw = await req.text();
-  const valid = await verifyWebhookSignature(raw, req.headers.get('x-hub-signature-256'));
-  if (!valid) return new NextResponse('Invalid signature', { status: 401 });
-
   const db = getDb();
   if (!db) {
     // No durable storage → tell Meta to retry. Never acknowledge what we
     // cannot keep.
     return NextResponse.json({ error: 'storage_unavailable' }, { status: 503 });
   }
+  // DB-first app secret for signature verification (never env/browser-dependent).
+  await primeMetaFromDb(db).catch(() => {});
+  if (!appSecret()) {
+    return NextResponse.json({ error: 'integration_not_configured', missing: ['META_APP_SECRET'] }, { status: 503 });
+  }
+  const raw = await req.text();
+  const valid = await verifyWebhookSignature(raw, req.headers.get('x-hub-signature-256'));
+  if (!valid) return new NextResponse('Invalid signature', { status: 401 });
+  // A verified inbound delivery — record freshness for honest readiness.
+  await markWebhookReceived(db).catch(() => {});
 
   let body: any;
   try {

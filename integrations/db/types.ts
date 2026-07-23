@@ -148,6 +148,26 @@ export interface AiBehaviorVersions {
   title: string | null;
 }
 
+export interface AiEvents {
+  confidence: Numeric | null;
+  conversation_id: string | null;
+  created_at: Generated<Timestamp>;
+  detected_intent: string | null;
+  error: string | null;
+  id: Generated<string>;
+  kind: string;
+  latency_ms: number | null;
+  model: string | null;
+  output_summary: string | null;
+  prompt_summary: string | null;
+  related_id: string | null;
+  success: Generated<boolean>;
+  task: string | null;
+  token_input: number | null;
+  token_output: number | null;
+  trace_id: string | null;
+}
+
 export interface AiTaskPrompts {
   created_at: Generated<Timestamp>;
   enabled: Generated<boolean>;
@@ -169,32 +189,24 @@ export interface AiTaskPromptVersions {
   title: string;
 }
 
-export interface AiEvents {
-  confidence: Numeric | null;
-  conversation_id: string | null;
-  created_at: Generated<Timestamp>;
-  detected_intent: string | null;
-  error: string | null;
-  id: Generated<string>;
-  kind: string;
-  latency_ms: number | null;
-  model: string | null;
-  output_summary: string | null;
-  prompt_summary: string | null;
-  related_id: string | null;
-  success: Generated<boolean>;
-  task: string | null;
-  token_input: number | null;
-  token_output: number | null;
-  trace_id: string | null;
-}
-
 export interface AnalyticsDaily {
   computed_at: Generated<Timestamp>;
   day: Timestamp;
   detail: Generated<Json>;
   metric: string;
   value: Generated<Numeric>;
+}
+
+export interface BrandKit {
+  accent_color: Generated<string>;
+  created_at: Generated<Timestamp>;
+  id: Generated<number>;
+  logo_public_url: string | null;
+  logo_storage_path: string | null;
+  primary_color: Generated<string>;
+  updated_at: Generated<Timestamp>;
+  updated_by: string | null;
+  wordmark: Generated<string>;
 }
 
 export interface BusinessFacts {
@@ -294,8 +306,27 @@ export interface ContentAssets {
   selected_for_publish: Generated<boolean>;
   source_model: string | null;
   storage_path: string | null;
-  width: number | null;
   verification: Generated<Json>;
+  width: number | null;
+}
+
+export interface ContentComments {
+  author_external_id: string | null;
+  author_name: string | null;
+  body: string | null;
+  commented_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  decision: string | null;
+  decision_reason: string | null;
+  id: Generated<string>;
+  parent_comment_id: string | null;
+  provider_comment_id: string;
+  publication_id: string;
+  reply_error: string | null;
+  reply_provider_id: string | null;
+  reply_status: string | null;
+  reply_text: string | null;
+  updated_at: Generated<Timestamp>;
 }
 
 export interface ContentGenerationRuns {
@@ -318,25 +349,6 @@ export interface ContentGenerationRuns {
   updated_at: Generated<Timestamp>;
   verification: Generated<Json>;
   warnings: Generated<Json>;
-}
-
-export interface ContentComments {
-  author_external_id: string | null;
-  author_name: string | null;
-  body: string | null;
-  commented_at: Timestamp | null;
-  created_at: Generated<Timestamp>;
-  decision: string | null;
-  decision_reason: string | null;
-  id: Generated<string>;
-  parent_comment_id: string | null;
-  provider_comment_id: string;
-  publication_id: string;
-  reply_error: string | null;
-  reply_provider_id: string | null;
-  reply_status: string | null;
-  reply_text: string | null;
-  updated_at: Generated<Timestamp>;
 }
 
 export interface ContentItems {
@@ -366,18 +378,6 @@ export interface ContentItems {
   status: Generated<string>;
   title: string | null;
   updated_at: Generated<Timestamp>;
-}
-
-export interface BrandKit {
-  accent_color: Generated<string>;
-  created_at: Generated<Timestamp>;
-  id: Generated<number>;
-  logo_public_url: string | null;
-  logo_storage_path: string | null;
-  primary_color: Generated<string>;
-  updated_at: Generated<Timestamp>;
-  updated_by: string | null;
-  wordmark: Generated<string>;
 }
 
 export interface ContentProducts {
@@ -794,6 +794,41 @@ export interface Promotions {
   updated_at: Generated<Timestamp>;
 }
 
+export interface ProviderConnections {
+  app_id: string | null;
+  app_secret_enc: string | null;
+  connected_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  granted_scopes: Generated<string[]>;
+  id: Generated<number>;
+  ig_subscribed_fields: Generated<string[]>;
+  ig_user_id: string | null;
+  ig_username: string | null;
+  last_verified_at: Timestamp | null;
+  last_webhook_at: Timestamp | null;
+  page_access_token_enc: string | null;
+  page_id: string | null;
+  page_name: string | null;
+  page_subscribed_fields: Generated<string[]>;
+  page_token_tail: string | null;
+  provider: Generated<string>;
+  source: Generated<string>;
+  status: Generated<string>;
+  token_expires_at: Timestamp | null;
+  updated_at: Generated<Timestamp>;
+  user_access_token_enc: string | null;
+  verify_token_enc: string | null;
+}
+
+export interface ProviderOauthStates {
+  admin_id: string | null;
+  consumed_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  redirect_uri: string;
+  state: string;
+}
+
 export interface ProviderReadiness {
   check_key: string;
   checked_at: Generated<Timestamp>;
@@ -816,10 +851,10 @@ export interface DB {
   admin_sessions: AdminSessions;
   admin_users: AdminUsers;
   ai_behavior_versions: AiBehaviorVersions;
-  ai_task_prompts: AiTaskPrompts;
-  ai_task_prompt_versions: AiTaskPromptVersions;
   ai_behaviors: AiBehaviors;
   ai_events: AiEvents;
+  ai_task_prompt_versions: AiTaskPromptVersions;
+  ai_task_prompts: AiTaskPrompts;
   analytics_daily: AnalyticsDaily;
   brand_kit: BrandKit;
   business_facts: BusinessFacts;
@@ -828,8 +863,8 @@ export interface DB {
   campaigns: Campaigns;
   catalog_match_suggestions: CatalogMatchSuggestions;
   content_assets: ContentAssets;
-  content_generation_runs: ContentGenerationRuns;
   content_comments: ContentComments;
+  content_generation_runs: ContentGenerationRuns;
   content_items: ContentItems;
   content_products: ContentProducts;
   content_publications: ContentPublications;
@@ -858,6 +893,8 @@ export interface DB {
   product_relations: ProductRelations;
   products: Products;
   promotions: Promotions;
+  provider_connections: ProviderConnections;
+  provider_oauth_states: ProviderOauthStates;
   provider_readiness: ProviderReadiness;
   schema_migrations: SchemaMigrations;
 }

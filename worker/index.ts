@@ -49,6 +49,7 @@ import { pollAndProcessComments } from '../integrations/pipelines/comments';
 import { endDuePromotions } from '../integrations/catalog/pricing';
 import { refreshAnalytics } from '../integrations/pipelines/analytics';
 import { runAllReadinessChecks } from '../integrations/providers/readiness';
+import { primeMetaFromDb } from '../integrations/providers/connection';
 import { runCsvImportJob } from '../integrations/catalog/csv-import';
 import { sql } from 'kysely';
 
@@ -139,6 +140,9 @@ async function main(): Promise<void> {
   assertConfig('worker');
   const db = requireDb();
   console.log(`[worker] ${WORKER_ID} starting`);
+  // Resolve Meta credentials from the encrypted DB connection (env fallback) so
+  // the worker sends via the SAME connection the app manages.
+  await primeMetaFromDb(db).catch(() => {});
 
   let lastMaintenance = 0;
   let lastRetention = 0;
@@ -150,6 +154,8 @@ async function main(): Promise<void> {
         const reaped = await reapExpiredLeases(db);
         if (reaped) console.log(`[worker] reaped ${reaped} expired lease(s)`);
         await scheduleRecurring(db);
+        // Pick up any connection change (reconnect / repair) made in the app.
+        await primeMetaFromDb(db).catch(() => {});
       }
       if (now - lastRetention > 6 * 3600_000) {
         lastRetention = now;

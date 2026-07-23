@@ -184,6 +184,9 @@ export async function checkGemini(): Promise<ReadinessResult> {
 
 /** Run every readiness check and persist the truthful results. */
 export async function runAllReadinessChecks(db: Kysely<DB>): Promise<ReadinessResult[]> {
+  // Probe against the authoritative (encrypted DB, env fallback) connection.
+  const { primeMetaFromDb } = await import('./connection');
+  await primeMetaFromDb(db).catch(() => {});
   const results = await Promise.all([
     checkFacebookPage(),
     checkWebhookSubscription(),

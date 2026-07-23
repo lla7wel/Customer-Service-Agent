@@ -8,7 +8,7 @@ import LanguageSwitcher from '@/components/LanguageSwitcher';
 import ThemeToggle from '@/components/ThemeToggle';
 import BusinessFactsEditor from '@/components/settings/BusinessFactsEditor';
 import AdminsManager from '@/components/settings/AdminsManager';
-import ChannelReadiness from '@/components/settings/ChannelReadiness';
+import MetaConnectionCenter from '@/components/settings/MetaConnectionCenter';
 import BrandKitEditor from '@/components/settings/BrandKitEditor';
 import { getT } from '@/lib/i18n/server';
 import { getTheme } from '@/lib/theme-server';
@@ -60,7 +60,7 @@ export default async function SettingsPage(props: { searchParams: Promise<{ tab?
       </div>
 
       {tab === 'general' && <GeneralTab ar={ar} theme={theme} locale={locale} statuses={statuses} hooks={hooks} metaConfigured={metaConfigured} />}
-      {tab === 'channels' && <Card><SectionTitle icon={Radio} title={ar ? 'جاهزية القنوات' : 'Channel readiness'} /><ChannelReadiness /></Card>}
+      {tab === 'channels' && <Card><SectionTitle icon={Radio} title={ar ? 'مركز اتصال القنوات' : 'Channel connection center'} /><MetaConnectionCenter /></Card>}
       {tab === 'facts' && <Card><SectionTitle icon={Store} title={ar ? 'حقائق المتجر' : 'Business facts'} /><BusinessFactsEditor /></Card>}
       {tab === 'brand' && <Card><SectionTitle icon={BadgeCheck} title={ar ? 'هوية العلامة' : 'Brand Kit'} /><BrandKitEditor /></Card>}
       {tab === 'admins' && <Card><SectionTitle icon={Users} title={ar ? 'حسابات المشرفين' : 'Admin accounts'} /><AdminsManager /></Card>}
