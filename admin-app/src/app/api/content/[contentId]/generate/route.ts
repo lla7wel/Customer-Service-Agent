@@ -13,17 +13,18 @@ export async function POST(req: NextRequest, props: { params: Promise<{ contentI
   const { db, admin } = auth.ctx;
   const { contentId } = await props.params;
 
-  const item = await db.selectFrom('content_items').select(['id', 'status', 'config_revision', 'image_text_mode', 'image_text', 'image_text_approved', 'multi_product_layout']).where('id', '=', contentId).executeTakeFirst();
+  const item = await db.selectFrom('content_items').select(['id', 'status', 'config_revision', 'image_text_mode', 'image_text', 'multi_product_layout']).where('id', '=', contentId).executeTakeFirst();
   if (!item) return notFound();
   if (!['draft', 'ready', 'failed'].includes(item.status)) {
     return badRequest('not_generatable', `Items in status "${item.status}" cannot be regenerated.`);
   }
 
-  if (item.image_text_mode !== 'none' && !item.image_text?.trim()) {
-    return badRequest('missing_image_text', 'Enter the image phrase before creating the visual.');
-  }
-  if (item.image_text_mode !== 'none' && !item.image_text_approved) {
-    return badRequest('image_text_not_approved', 'Review and approve the image phrase before creating the visual.');
+  // A manually-written phrase must actually contain text. Generate mode may
+  // start empty (the copy step produces the phrase); None mode needs no phrase.
+  // Clicking "Generate design" IS the acceptance of the saved phrase/mode —
+  // there is no separate approval gate (audit finding #14).
+  if (item.image_text_mode === 'manual' && !item.image_text?.trim()) {
+    return badRequest('missing_image_text', 'Write the image phrase before creating the visual.');
   }
   if (item.multi_product_layout === 'composition') {
     const [products, sources] = await Promise.all([

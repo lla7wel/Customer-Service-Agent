@@ -140,6 +140,27 @@ describe('content generation configuration', () => {
     expect(generationVerificationWarnings(result, true, true)).toEqual([]);
   });
 
+  it('No-phrase (None) mode skips on-image text verification but still enforces product/brand fidelity', () => {
+    // General "No phrase" content: same engine, no promotional text on the image.
+    const noTextResult = {
+      product_fidelity: 0.96,
+      product_status: 'acceptable' as const,
+      overlay_text_status: 'mismatch' as const, // irrelevant with no phrase
+      price_text_status: 'missing' as const,     // irrelevant with no price
+      brand_mark_status: 'likely_exact' as const,
+      observed_text: null,
+      concerns: [],
+      identity_checks: exactIdentityChecks,
+    };
+    // hasText=false, hasPrice=false → text/price checks ignored; no retry, no text warning.
+    expect(generationNeedsRetry(noTextResult, false, false, true)).toBe(false);
+    expect(generationVerificationWarnings(noTextResult, false, false))
+      .not.toContain('Arabic image text does not match the approved phrase.');
+    // Product identity is still enforced even without any on-image phrase.
+    expect(generationNeedsRetry({ ...noTextResult, product_fidelity: 0.4 }, false, false, true)).toBe(true);
+    expect(generationNeedsRetry({ ...noTextResult, brand_mark_status: 'mismatch' }, false, false, true)).toBe(true);
+  });
+
   it('alerts on concrete text errors without turning unknown checks into errors', () => {
     const warnings = generationVerificationWarnings({
       product_fidelity: 0.91,

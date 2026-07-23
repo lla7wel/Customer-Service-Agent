@@ -8,7 +8,8 @@ import CreateContentButton from '@/components/content/CreateContentButton';
 import { getT } from '@/lib/i18n/server';
 import { databaseStatus } from '@integrations/status';
 import { getDb } from '@/lib/db';
-import { utcToTripoliDisplay } from '@/lib/tripoli-time';
+import { sql } from 'kysely';
+import { utcToTripoliDisplay, tripoliLocalToUtc } from '@/lib/tripoli-time';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,16 +43,43 @@ export default async function ContentStudioPage(props: { searchParams: Promise<{
   const prev = new Date(month.getFullYear(), month.getMonth()-1, 1);
   const next = new Date(month.getFullYear(), month.getMonth()+1, 1);
 
+  // The AUTHORITATIVE publication time for a published item is the latest
+  // content_publications.published_at (audit finding #16), not updated_at.
+  const publishedAtSub = sql<string>`(select max(pub.published_at) from content_publications pub where pub.content_item_id = ci.id and pub.status = 'published')`;
+  // Placement date used by the calendar/agenda.
+  const effectiveAt = sql<string>`coalesce(ci.scheduled_for, ${publishedAtSub}, ci.updated_at)`;
+
   let query = db.selectFrom('content_items as ci')
     .leftJoin('content_products as cp', 'cp.content_item_id', 'ci.id')
-    .select((eb) => ['ci.id','ci.title','ci.content_type','ci.platforms','ci.purpose','ci.status','ci.scheduled_for','ci.updated_at','ci.last_error','ci.selected_generation_run_id', eb.fn.count<number>('cp.id').distinct().as('product_count')])
-    .groupBy('ci.id').orderBy('ci.updated_at','desc').limit(160);
+    .select((eb) => ['ci.id','ci.title','ci.content_type','ci.platforms','ci.purpose','ci.status','ci.scheduled_for','ci.updated_at','ci.last_error','ci.selected_generation_run_id',
+      eb.fn.count<number>('cp.id').distinct().as('product_count'),
+      publishedAtSub.as('published_at')])
+    .groupBy('ci.id');
   const statusFilter: Record<string,string[]> = {
     drafts:['draft'], ready:['ready'], scheduled:['scheduled'], publishing:['approved','publishing'],
     published:['published'], problems:['failed','partially_published'],
   };
   if (statusFilter[filter]) query = query.where('ci.status','in',statusFilter[filter]);
   else query = query.where('ci.status','!=','archived');
+
+  // Draft/ready/problem tabs are list views (all matching items, newest first);
+  // date-oriented views are MONTH-SCOPED so a busy or older month never silently
+  // drops items behind a global cap (audit finding #17).
+  const listMode = ['drafts','ready','problems'].includes(filter);
+  if (listMode) {
+    query = query.orderBy('ci.updated_at','desc').limit(300);
+  } else {
+    const y = monthStart.getFullYear(); const mo = monthStart.getMonth();
+    const first = `${y}-${pad(mo+1)}-01T00:00`;
+    const nextFirst = mo === 11 ? `${y+1}-01-01T00:00` : `${y}-${pad(mo+2)}-01T00:00`;
+    const rangeStartUtc = tripoliLocalToUtc(first)!;
+    const rangeEndUtc = tripoliLocalToUtc(nextFirst)!;
+    query = query
+      .where(sql<boolean>`${effectiveAt} >= ${rangeStartUtc}::timestamptz`)
+      .where(sql<boolean>`${effectiveAt} < ${rangeEndUtc}::timestamptz`)
+      .orderBy(sql`${effectiveAt}`, 'asc')
+      .limit(500);
+  }
   const items = await query.execute();
   const ids = items.map((x) => x.id);
   const thumbnails = ids.length ? await db.selectFrom('content_assets').select(['content_item_id','public_url','selected_for_publish','position'])

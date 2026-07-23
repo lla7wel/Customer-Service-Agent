@@ -271,14 +271,32 @@ function PurposeStep({ detail, editable, patch, saveProducts }: any) {
 
 function CopyStep({ detail, editable, busy, phraseDirty, setPhraseDirty, patch, generate, generateCopy }: any) {
   const { item } = detail;
-  return <StepCard eyebrow="الخطوة 3 من 4" title="راجع العبارة والكابشن" intro="العبارة والكابشن باللهجة الليبية وقابلان للتعديل. راجع العبارة قبل إنشاء التصميم النهائي.">
-    <button onClick={generateCopy} disabled={!editable||busy} className="btn-secondary mb-4">{busy==='copy'?<Loader2 className="animate-spin" size={16}/>:<Sparkles size={16}/>} توليد عبارة وكابشن</button>
-    <label className="block text-sm font-bold text-fg">العبارة على الصورة <span className="font-normal text-danger">مطلوب مراجعتها</span><textarea key={item.image_text||'empty-phrase'} defaultValue={item.image_text ?? ''} onChange={() => setPhraseDirty(true)} onBlur={(e) => { setPhraseDirty(false); if (e.target.value !== (item.image_text ?? '')) patch({ image_text: e.target.value }); }} rows={3} maxLength={200} placeholder="ولّد عبارة ثم عدّلها قبل إنشاء التصميم" className="input mt-2 min-h-28 resize-y py-3 text-lg font-bold leading-8" /></label>
-    {phraseDirty && <p className="mt-1 text-xs text-warning">سيتم حفظ واعتماد العبارة عند الخروج من الحقل.</p>}
-    {!phraseDirty && item.image_text?.trim() && !item.image_text_approved && <button onClick={()=>patch({image_text_approved:true},'phrase-approve')} className="btn-secondary mt-2"><Check size={15}/> راجعت العبارة — اعتمادها</button>}
-    {item.image_text_approved && <p className="mt-2 flex items-center gap-1 text-xs text-success"><CheckCircle2 size={14}/> تمت مراجعة العبارة ويمكن إنشاء التصميم.</p>}
+  const isPriceDrop = item.purpose === 'price_drop';
+  const mode: string = item.image_text_mode ?? 'generated';
+  const noPhrase = mode === 'none';
+  // Price Drop keeps its promotional phrase (generate or write), never None.
+  const MODES: { value: string; label: string; hint: string }[] = isPriceDrop
+    ? [{ value: 'generated', label: 'توليد تلقائي', hint: 'الذكاء يكتب العبارة' }, { value: 'manual', label: 'كتابة يدوية', hint: 'اكتب العبارة بنفسك' }]
+    : [{ value: 'generated', label: 'توليد تلقائي', hint: 'الذكاء يكتب العبارة' }, { value: 'manual', label: 'كتابة يدوية', hint: 'اكتب العبارة بنفسك' }, { value: 'none', label: 'بدون عبارة', hint: 'تصميم فاخر بدون نص ترويجي' }];
+  const canGenerate = noPhrase || mode === 'generated' || Boolean(item.image_text?.trim());
+  return <StepCard eyebrow="الخطوة 3 من 4" title="العبارة والكابشن" intro="اختر كيف تريد العبارة على الصورة. الكابشن مستقل ومتاح في كل الأوضاع. الضغط على «إنشاء التصميم» هو اعتماد العبارة/الوضع الحالي.">
+    {/* mode selector — makes the No-phrase mode reachable for General content */}
+    <div className="mb-4">
+      <p className="mb-2 text-sm font-bold text-fg">العبارة على الصورة</p>
+      <div className="grid gap-2 sm:grid-cols-3">
+        {MODES.map((mo) => <button key={mo.value} disabled={!editable || busy} onClick={() => mode !== mo.value && patch({ image_text_mode: mo.value })} className={`rounded-xl border p-3 text-start transition ${mode === mo.value ? 'border-navy bg-navy/[0.05] ring-1 ring-navy/15' : 'border-line hover:border-navy/30'}`}><b className="block text-sm text-fg">{mo.label}</b><small className="text-muted">{mo.hint}</small></button>)}
+      </div>
+    </div>
+
+    {!noPhrase && <>
+      <button onClick={generateCopy} disabled={!editable||busy} className="btn-secondary mb-3">{busy==='copy'?<Loader2 className="animate-spin" size={16}/>:<Sparkles size={16}/>} {mode === 'manual' ? 'اقتراح عبارة وكابشن' : 'توليد عبارة وكابشن'}</button>
+      <label className="block text-sm font-bold text-fg">العبارة على الصورة<textarea key={item.image_text||'empty-phrase'} defaultValue={item.image_text ?? ''} onChange={() => setPhraseDirty(true)} onBlur={(e) => { setPhraseDirty(false); if (e.target.value !== (item.image_text ?? '')) patch({ image_text: e.target.value }); }} rows={3} maxLength={200} placeholder={mode === 'manual' ? 'اكتب العبارة التي تظهر على الصورة' : 'ولّد عبارة ثم عدّلها قبل إنشاء التصميم'} className="input mt-2 min-h-28 resize-y py-3 text-lg font-bold leading-8" /></label>
+      {phraseDirty && <p className="mt-1 text-xs text-muted">سيتم حفظ العبارة عند الخروج من الحقل.</p>}
+    </>}
+    {noPhrase && <div className="mb-1"><button onClick={generateCopy} disabled={!editable||busy} className="btn-secondary mb-1">{busy==='copy'?<Loader2 className="animate-spin" size={16}/>:<Sparkles size={16}/>} توليد كابشن</button><p className="rounded-xl border border-line bg-surface2/50 p-3 text-xs text-muted">وضع «بدون عبارة»: تصميم فاخر بنفس الجودة بدون نص ترويجي على الصورة. الكابشن يبقى متاحاً بالأسفل.</p></div>}
+
     <label className="mt-5 block text-sm font-bold text-fg">الكابشن<textarea key={item.caption||'empty-caption'} defaultValue={item.caption ?? ''} onBlur={(e) => e.target.value !== (item.caption ?? '') && patch({ caption: e.target.value })} rows={7} maxLength={2200} placeholder="كابشن عربي كامل لفيسبوك وإنستغرام" className="input mt-2 min-h-44 resize-y py-3 leading-7" /></label>
-    <div className="mt-6 rounded-2xl border border-navy/15 bg-navy/[0.035] p-4"><div className="flex items-start gap-3"><WandSparkles className="mt-1 shrink-0 text-navy" size={22} /><div><h3 className="font-bold text-fg">نتيجة واحدة بأعلى جودة</h3><p className="mt-1 text-sm leading-6 text-muted">Gemini 3 Pro Image بدقة 2K، مع فحص تلقائي للعناصر الظاهرة والنص والسعر والعلامة، وتصحيح واحد فقط عند اكتشاف خطأ واضح.</p></div></div><button disabled={!editable || busy || phraseDirty || !item.image_text?.trim() || !item.image_text_approved} onClick={generate} className="btn-primary mt-4 w-full sm:w-auto">{busy === 'generate' ? <Loader2 className="animate-spin" size={17} /> : <Sparkles size={17} />} إنشاء التصميم</button></div>
+    <div className="mt-6 rounded-2xl border border-navy/15 bg-navy/[0.035] p-4"><div className="flex items-start gap-3"><WandSparkles className="mt-1 shrink-0 text-navy" size={22} /><div><h3 className="font-bold text-fg">نتيجة واحدة بأعلى جودة</h3><p className="mt-1 text-sm leading-6 text-muted">Gemini 3 Pro Image بدقة 2K، مع فحص تلقائي للعناصر الظاهرة والنص والسعر والعلامة، وتصحيح واحد فقط عند اكتشاف خطأ واضح.</p></div></div><button disabled={!editable || busy || phraseDirty || !canGenerate} onClick={generate} className="btn-primary mt-4 w-full sm:w-auto">{busy === 'generate' ? <Loader2 className="animate-spin" size={17} /> : <Sparkles size={17} />} إنشاء التصميم</button></div>
   </StepCard>;
 }
 
