@@ -21,6 +21,17 @@ async function expectNoHorizontalOverflow(page: Page) {
 }
 
 test.describe('authentication', () => {
+  test('bare domain serves the login shell and provider verification metadata directly', async ({ page }) => {
+    const response = await page.goto('/');
+    expect(response?.status()).toBe(200);
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByPlaceholder('username')).toBeVisible();
+    await expect(page.locator('meta[name="facebook-domain-verification"]')).toHaveAttribute(
+      'content',
+      '70t4mpxdj37vynq0mpgjezniwyxtgf',
+    );
+  });
+
   test('protected routes redirect to sign-in when signed out', async ({ page }) => {
     await page.goto('/dashboard');
     await expect(page).toHaveURL(/\/login/);

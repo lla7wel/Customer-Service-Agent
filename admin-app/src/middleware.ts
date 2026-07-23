@@ -51,6 +51,16 @@ export async function middleware(req: NextRequest) {
     if (pathname.startsWith('/api/')) {
       return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
     }
+    // Serve the login page at the bare domain without a redirect. Besides
+    // avoiding a needless round trip for people opening the app domain, this
+    // keeps provider domain-verification metadata in the first HTTP 200 HTML
+    // response (some crawlers do not follow an authentication redirect).
+    if (pathname === '/') {
+      const loginUrl = req.nextUrl.clone();
+      loginUrl.pathname = '/login';
+      loginUrl.search = '';
+      return NextResponse.rewrite(loginUrl);
+    }
     if (pathname === '/login') return NextResponse.next();
     const redirectUrl = req.nextUrl.clone();
     redirectUrl.pathname = '/login';
